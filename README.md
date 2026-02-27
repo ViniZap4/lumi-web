@@ -1,37 +1,25 @@
-# Web Client
+# lumi-web
 
-Svelte-based web interface for lumi.
+Web client for [lumi](https://github.com/ViniZap4/lumi) — a local-first, markdown-based note-taking system.
 
-## Development
-
-```bash
-npm install
-npm run dev
-```
-
-Configure server URL in `.env`:
-```
-VITE_LUMI_SERVER_URL=http://localhost:8080
-VITE_LUMI_TOKEN=dev
-```
-
-## Build
-
-```bash
-npm run build
-```
-
-## Docker
-
-```bash
-docker build -t lumi-web .
-docker run -p 3000:80 lumi-web
-```
+Built with [Svelte 5](https://svelte.dev) and [Vite](https://vite.dev).
 
 ## Features
 
-- Notes list with selection
-- Markdown editor
-- Auto-save with Ctrl+S
-- WebSocket realtime updates
-- Dark theme
+- Modern dark theme
+- Folder and note browsing
+- Live markdown preview with syntax highlighting
+- Vim keybindings (j/k navigation, / search)
+- Real-time sync via WebSocket
+
+## Dev
+
+```bash
+npm install
+npm run dev       # http://localhost:5173
+npm run build     # Production build
+```
+
+## Part of lumi
+
+This is a component of the [lumi monorepo](https://github.com/ViniZap4/lumi).

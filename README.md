@@ -1,5 +1,7 @@
 # lumi-web
 
+> **🚧 Work in progress** — lumi is under active development. Features may change, break, or be incomplete.
+
 Web client for [lumi](https://github.com/ViniZap4/lumi) — a local-first, markdown-based note-taking system.
 
 Built with [Svelte 5](https://svelte.dev) and [Vite](https://vite.dev).

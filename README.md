@@ -8,11 +8,12 @@ Built with [Svelte 5](https://svelte.dev) and [Vite](https://vite.dev).
 
 ## Features
 
+- Password login screen with session persistence (localStorage)
 - Modern dark theme
 - Folder and note browsing
 - Live markdown preview with syntax highlighting
 - Vim keybindings (j/k navigation, / search)
-- Real-time sync via WebSocket
+- Real-time sync via authenticated WebSocket
 
 ## Dev
 

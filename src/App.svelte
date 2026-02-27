@@ -4,6 +4,7 @@
   import { connectWebSocket, disconnect as disconnectWs } from './lib/ws.js';
   import { totalColumns } from './lib/animation.js';
 
+  import LoginView from './views/LoginView.svelte';
   import HomeView from './views/HomeView.svelte';
   import TreeView from './views/TreeView.svelte';
   import NoteView from './views/NoteView.svelte';
@@ -12,14 +13,20 @@
   import SearchModal from './components/SearchModal.svelte';
   import CommandModal from './components/CommandModal.svelte';
 
+  let initialized = $state(false);
+
   onMount(async () => {
     store.loadThemeFromStorage();
     store.applyResolvedTheme();
     store.setupSystemWatch();
     store.loadEditorSettings();
     store.loadPreviewSetting();
-    await store.loadAll();
-    connectWebSocket(store.handleWsMessage);
+
+    const wasAuthenticated = await store.checkAuth();
+    if (wasAuthenticated) {
+      await initApp();
+    }
+
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   });
@@ -29,7 +36,21 @@
     store.cleanupEditor();
   });
 
+  async function initApp() {
+    await store.loadAll();
+    connectWebSocket(store.handleWsMessage);
+    initialized = true;
+  }
+
+  $effect(() => {
+    if (store.authenticated && !initialized) {
+      initApp();
+    }
+  });
+
   async function handleKey(e) {
+    if (!store.authenticated) return;
+
     // Command modal
     if (store.cmdModal) {
       if (e.key === 'Escape') {
@@ -206,21 +227,25 @@
 
 <Toast />
 
-{#if store.viewMode === 'home'}
-  <HomeView />
-{/if}
+{#if !store.authenticated}
+  <LoginView />
+{:else}
+  {#if store.viewMode === 'home'}
+    <HomeView />
+  {/if}
 
-{#if store.viewMode === 'tree'}
-  <TreeView />
-{/if}
+  {#if store.viewMode === 'tree'}
+    <TreeView />
+  {/if}
 
-{#if store.viewMode === 'note'}
-  <NoteView />
-{/if}
+  {#if store.viewMode === 'note'}
+    <NoteView />
+  {/if}
 
-{#if store.viewMode === 'config'}
-  <ConfigView />
-{/if}
+  {#if store.viewMode === 'config'}
+    <ConfigView />
+  {/if}
 
-<SearchModal />
-<CommandModal />
+  <SearchModal />
+  <CommandModal />
+{/if}

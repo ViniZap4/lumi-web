@@ -68,6 +68,232 @@ function processInline(line) {
   return line;
 }
 
+// ── Syntax highlighting ────────────────────────────────────────────
+
+const KEYWORDS = new Set([
+  // JS/TS
+  'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'do',
+  'switch', 'case', 'break', 'continue', 'new', 'this', 'class', 'extends', 'super',
+  'import', 'export', 'from', 'default', 'async', 'await', 'yield', 'try', 'catch',
+  'finally', 'throw', 'typeof', 'instanceof', 'in', 'of', 'delete', 'void',
+  // Go
+  'package', 'func', 'type', 'struct', 'interface', 'map', 'chan', 'go', 'defer',
+  'select', 'range', 'fallthrough', 'goto',
+  // Python
+  'def', 'lambda', 'with', 'as', 'pass', 'raise', 'except', 'global', 'nonlocal',
+  'elif', 'is', 'not', 'and', 'or', 'from', 'yield', 'assert',
+  // Rust
+  'fn', 'mod', 'use', 'pub', 'crate', 'impl', 'trait', 'enum', 'match', 'mut',
+  'ref', 'self', 'move', 'unsafe', 'where', 'loop',
+  // Shared
+  'true', 'false', 'null', 'nil', 'undefined', 'None', 'True', 'False',
+  'static', 'abstract', 'final', 'private', 'public', 'protected', 'override',
+]);
+
+const BUILTINS = new Set([
+  'console', 'Math', 'JSON', 'Object', 'Array', 'String', 'Number', 'Boolean',
+  'Promise', 'Map', 'Set', 'Error', 'RegExp', 'Date', 'Symbol', 'parseInt',
+  'parseFloat', 'isNaN', 'require', 'module', 'exports', 'process',
+  'fmt', 'os', 'io', 'log', 'strings', 'strconv', 'filepath', 'errors',
+  'print', 'println', 'len', 'cap', 'make', 'append', 'copy', 'close',
+  'int', 'string', 'bool', 'float64', 'float32', 'byte', 'rune', 'error',
+]);
+
+/**
+ * Lightweight syntax highlighter — tokenizes code into spans with classes.
+ * Covers keywords, strings, comments, numbers, and function calls.
+ */
+function highlightCode(code, lang) {
+  const escaped = escapeHtml(code);
+  const lines = escaped.split('\n');
+  let inBlockComment = false;
+
+  const isHashComment = ['python', 'py', 'ruby', 'rb', 'bash', 'sh', 'zsh',
+    'yaml', 'yml', 'toml', 'dockerfile', 'makefile', 'r', 'perl', 'pl'].includes(lang);
+  const isDoubleSlash = ['javascript', 'js', 'typescript', 'ts', 'go', 'rust', 'rs',
+    'c', 'cpp', 'java', 'kotlin', 'swift', 'dart', 'scala', 'php', 'css', 'scss',
+    'json', 'jsonc', 'zig', 'odin'].includes(lang);
+  const isDashComment = ['lua', 'sql', 'haskell', 'hs', 'elm'].includes(lang);
+  const hasBlockComment = isDoubleSlash || ['css', 'scss'].includes(lang);
+
+  return lines.map(line => {
+    let result = '';
+    let i = 0;
+
+    while (i < line.length) {
+      // Block comment continuation
+      if (inBlockComment) {
+        const end = line.indexOf('*/', i);
+        if (end === -1) {
+          result += `<span class="hl-comment">${line.slice(i)}</span>`;
+          i = line.length;
+        } else {
+          result += `<span class="hl-comment">${line.slice(i, end + 2)}</span>`;
+          i = end + 2;
+          inBlockComment = false;
+        }
+        continue;
+      }
+
+      // Block comment start
+      if (hasBlockComment && line[i] === '/' && line[i + 1] === '*') {
+        const end = line.indexOf('*/', i + 2);
+        if (end === -1) {
+          result += `<span class="hl-comment">${line.slice(i)}</span>`;
+          i = line.length;
+          inBlockComment = true;
+        } else {
+          result += `<span class="hl-comment">${line.slice(i, end + 2)}</span>`;
+          i = end + 2;
+        }
+        continue;
+      }
+
+      // Single-line comments
+      if (isDoubleSlash && line[i] === '/' && line[i + 1] === '/') {
+        result += `<span class="hl-comment">${line.slice(i)}</span>`;
+        break;
+      }
+      if (isHashComment && line[i] === '#') {
+        result += `<span class="hl-comment">${line.slice(i)}</span>`;
+        break;
+      }
+      if (isDashComment && line[i] === '-' && line[i + 1] === '-') {
+        result += `<span class="hl-comment">${line.slice(i)}</span>`;
+        break;
+      }
+
+      // Strings (double-quoted)
+      if (line[i] === '"' || line[i] === "'") {
+        const quote = line[i];
+        let j = i + 1;
+        while (j < line.length && line[j] !== quote) {
+          if (line[j] === '\\') j++; // skip escaped
+          j++;
+        }
+        j = Math.min(j + 1, line.length);
+        result += `<span class="hl-string">${line.slice(i, j)}</span>`;
+        i = j;
+        continue;
+      }
+
+      // Backtick strings (template literals)
+      if (line[i] === '`') {
+        let j = i + 1;
+        while (j < line.length && line[j] !== '`') {
+          if (line[j] === '\\') j++;
+          j++;
+        }
+        j = Math.min(j + 1, line.length);
+        result += `<span class="hl-string">${line.slice(i, j)}</span>`;
+        i = j;
+        continue;
+      }
+
+      // Numbers
+      if (/[0-9]/.test(line[i]) && (i === 0 || /[\s(,=+\-*/<>!&|^~%[]/.test(line[i - 1]))) {
+        let j = i;
+        if (line[j] === '0' && (line[j + 1] === 'x' || line[j + 1] === 'X')) {
+          j += 2;
+          while (j < line.length && /[0-9a-fA-F_]/.test(line[j])) j++;
+        } else {
+          while (j < line.length && /[0-9._eE]/.test(line[j])) j++;
+        }
+        result += `<span class="hl-number">${line.slice(i, j)}</span>`;
+        i = j;
+        continue;
+      }
+
+      // Words (keywords, builtins, identifiers)
+      if (/[a-zA-Z_$]/.test(line[i])) {
+        let j = i;
+        while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
+        const word = line.slice(i, j);
+        if (KEYWORDS.has(word)) {
+          result += `<span class="hl-keyword">${word}</span>`;
+        } else if (BUILTINS.has(word)) {
+          result += `<span class="hl-builtin">${word}</span>`;
+        } else if (j < line.length && line[j] === '(') {
+          result += `<span class="hl-function">${word}</span>`;
+        } else {
+          result += word;
+        }
+        i = j;
+        continue;
+      }
+
+      // Operators/punctuation
+      if (/[+\-*/%=<>!&|^~?:;.,{}()\[\]]/.test(line[i])) {
+        result += `<span class="hl-punct">${line[i]}</span>`;
+        i++;
+        continue;
+      }
+
+      result += line[i];
+      i++;
+    }
+
+    return result;
+  }).join('\n');
+}
+
+// ── Table parsing ──────────────────────────────────────────────────
+
+function isTableRow(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith('|') && trimmed.endsWith('|');
+}
+
+function isSeparatorRow(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
+  const inner = trimmed.slice(1, -1);
+  return /^[\s|:\-]+$/.test(inner) && inner.includes('-');
+}
+
+function parseTableCells(line) {
+  const trimmed = line.trim();
+  const inner = trimmed.slice(1, -1); // remove outer pipes
+  return inner.split('|').map(c => c.trim());
+}
+
+function parseAlignment(line) {
+  const cells = parseTableCells(line);
+  return cells.map(c => {
+    const left = c.startsWith(':');
+    const right = c.endsWith(':');
+    if (left && right) return 'center';
+    if (right) return 'right';
+    return 'left';
+  });
+}
+
+function renderTable(headerLine, separatorLine, bodyLines) {
+  const headers = parseTableCells(headerLine);
+  const aligns = parseAlignment(separatorLine);
+  const rows = bodyLines.map(l => parseTableCells(l));
+
+  let html = '<div class="md-table-wrap"><table class="md-table"><thead><tr>';
+  headers.forEach((h, i) => {
+    const align = aligns[i] || 'left';
+    html += `<th style="text-align:${align}">${processInline(escapeHtml(h))}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  rows.forEach(row => {
+    html += '<tr>';
+    headers.forEach((_, i) => {
+      const align = aligns[i] || 'left';
+      const cell = row[i] !== undefined ? row[i] : '';
+      html += `<td style="text-align:${align}">${processInline(escapeHtml(cell))}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+// ── Main renderer ──────────────────────────────────────────────────
+
 /**
  * Render a markdown string to themed HTML.
  * @param {string} md - raw markdown text
@@ -98,8 +324,10 @@ export function renderMarkdown(md) {
         const langLabel = codeLang
           ? `<span class="md-code-lang">${escapeHtml(codeLang)}</span>`
           : '';
+        const raw = codeLines.join('\n');
+        const highlighted = codeLang ? highlightCode(raw, codeLang.toLowerCase()) : escapeHtml(raw);
         html.push(
-          `<div class="md-code-block"${langAttr}>${langLabel}<pre>${escapeHtml(codeLines.join('\n'))}</pre></div>`
+          `<div class="md-code-block"${langAttr}>${langLabel}<pre>${highlighted}</pre></div>`
         );
         inCodeBlock = false;
         codeLang = '';
@@ -110,6 +338,21 @@ export function renderMarkdown(md) {
 
     if (inCodeBlock) {
       codeLines.push(line);
+      continue;
+    }
+
+    // Table detection: header | separator | body rows
+    if (isTableRow(line) && i + 1 < lines.length && isSeparatorRow(lines[i + 1])) {
+      const headerLine = line;
+      const separatorLine = lines[i + 1];
+      const bodyLines = [];
+      let j = i + 2;
+      while (j < lines.length && isTableRow(lines[j])) {
+        bodyLines.push(lines[j]);
+        j++;
+      }
+      html.push(renderTable(headerLine, separatorLine, bodyLines));
+      i = j - 1; // skip processed lines
       continue;
     }
 
@@ -164,8 +407,10 @@ export function renderMarkdown(md) {
   // Handle unclosed code block
   if (inCodeBlock && codeLines.length > 0) {
     const langAttr = codeLang ? ` data-lang="${escapeHtml(codeLang)}"` : '';
+    const raw = codeLines.join('\n');
+    const highlighted = codeLang ? highlightCode(raw, codeLang.toLowerCase()) : escapeHtml(raw);
     html.push(
-      `<div class="md-code-block"${langAttr}><pre>${escapeHtml(codeLines.join('\n'))}</pre></div>`
+      `<div class="md-code-block"${langAttr}><pre>${highlighted}</pre></div>`
     );
   }
 

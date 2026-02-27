@@ -1,11 +1,14 @@
 // web-client/src/lib/ws.js
+import { getToken } from './api.js';
+
 const WS_URL = (import.meta.env.VITE_LUMI_SERVER_URL || 'http://localhost:8080').replace('http', 'ws');
 
 let ws = null;
 let reconnectTimer = null;
 
 export function connectWebSocket(onMessage) {
-  ws = new WebSocket(`${WS_URL}/ws`);
+  const t = getToken();
+  ws = new WebSocket(`${WS_URL}/ws?token=${encodeURIComponent(t)}`);
 
   ws.onopen = () => {
     console.log('WebSocket connected');

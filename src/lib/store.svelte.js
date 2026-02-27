@@ -1,4 +1,4 @@
-import { getNotes, getFolders, getNote, updateNote, createNote, deleteNote, moveNote, copyNote, renameNote, createFolder, renameFolder, moveFolder, deleteFolder } from './api.js';
+import { getNotes, getFolders, getNote, updateNote, createNote, deleteNote, moveNote, copyNote, renameNote, createFolder, renameFolder, moveFolder, deleteFolder, login as apiLogin, setToken, getToken } from './api.js';
 import { themes, themeOrder, darkThemeOrder, lightThemeOrder, applyTheme, resolveTheme, loadThemeSettings, saveThemeSettings, watchSystemTheme } from './themes.js';
 import { renderMarkdown } from './markdown.js';
 import { createEditor, destroyEditor, updateTheme as updateEditorTheme, updateLineNumbers as updateEditorLineNumbers, getVimMode, getCursorPosition } from './editor.js';
@@ -63,6 +63,9 @@ let saving = $state(false);
 // ── Animation ───────────────────────────────────────────────────
 let animProgress = $state(0);
 let animDone = $state(false);
+
+// ── Auth ────────────────────────────────────────────────────────
+let authenticated = $state(false);
 
 // ── Live preview toggle ─────────────────────────────────────────
 let showPreview = $state(true);
@@ -691,6 +694,33 @@ function cmdDeleteCurrentNote() {
   };
 }
 
+async function login(password) {
+  await apiLogin(password);
+  authenticated = true;
+  localStorage.setItem('lumi-token', password);
+}
+
+function logout() {
+  authenticated = false;
+  setToken('');
+  localStorage.removeItem('lumi-token');
+}
+
+async function checkAuth() {
+  const saved = localStorage.getItem('lumi-token');
+  if (!saved) return false;
+  setToken(saved);
+  try {
+    await apiLogin(saved);
+    authenticated = true;
+    return true;
+  } catch {
+    localStorage.removeItem('lumi-token');
+    setToken('');
+    return false;
+  }
+}
+
 async function handleWsMessage(msg) {
   if (!msg || !msg.type || !msg.note) return;
 
@@ -820,6 +850,10 @@ export const store = {
   get animDone() { return animDone; },
   set animDone(v) { animDone = v; },
 
+  // Auth
+  get authenticated() { return authenticated; },
+  set authenticated(v) { authenticated = v; },
+
   // Preview toggle
   get showPreview() { return showPreview; },
   set showPreview(v) { showPreview = v; },
@@ -866,5 +900,8 @@ export const store = {
   cmdDeleteFolder,
   cmdDeleteCurrentNote,
   handleWsMessage,
+  login,
+  logout,
+  checkAuth,
   renderMarkdown,
 };

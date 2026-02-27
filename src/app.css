@@ -76,7 +76,7 @@ body {
 }
 .md-code-block pre {
   margin: 0;
-  color: var(--color-text-dim);
+  color: var(--color-text);
   font-family: inherit;
   font-size: 0.9em;
   line-height: 1.6;
@@ -89,6 +89,15 @@ body {
   font-size: 0.7em;
   color: var(--color-muted);
 }
+
+/* Syntax highlighting */
+.hl-keyword { color: var(--color-secondary); font-weight: 600; }
+.hl-string { color: var(--color-warning); }
+.hl-comment { color: var(--color-muted); font-style: italic; }
+.hl-number { color: var(--color-warning); }
+.hl-function { color: var(--color-primary); }
+.hl-builtin { color: var(--color-accent); }
+.hl-punct { color: var(--color-text-dim); }
 
 /* Inline code — accent like TUI's clsCode */
 .md-code {
@@ -133,6 +142,39 @@ body {
 /* Normal lines */
 .md-line { color: var(--color-text); }
 .md-blank { height: 0.5em; }
+
+/* Tables */
+.md-table-wrap {
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--color-border);
+  padding: 0.45em 0.75em;
+}
+.md-table th {
+  background: var(--color-selected-bg);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+.md-table td {
+  color: var(--color-text);
+}
+.md-table tbody tr:hover {
+  background: var(--color-overlay-bg);
+}
+.md-table tbody tr:nth-child(even) {
+  background: rgba(41, 46, 66, 0.3);
+}
+.md-table tbody tr:nth-child(even):hover {
+  background: var(--color-overlay-bg);
+}
 
 /* ── Scrollbar ───────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

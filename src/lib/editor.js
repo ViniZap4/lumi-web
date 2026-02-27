@@ -1,4 +1,4 @@
-import { EditorView, ViewPlugin, lineNumbers, highlightActiveLine, keymap } from '@codemirror/view';
+import { EditorView, lineNumbers, gutter, GutterMarker, highlightActiveLine, keymap } from '@codemirror/view';
 import { EditorState, Compartment } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
@@ -8,6 +8,7 @@ import { tags } from '@lezer/highlight';
 import { vim, Vim, getCM } from '@replit/codemirror-vim';
 
 const themeCompartment = new Compartment();
+const lineNumbersCompartment = new Compartment();
 
 function getCSSVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -116,6 +117,36 @@ function buildTheme() {
   return [editorTheme, syntaxHighlighting(highlightStyles)];
 }
 
+class RelativeLineNumber extends GutterMarker {
+  constructor(displayNum) {
+    super();
+    this.displayNum = displayNum;
+  }
+  toDOM() { return document.createTextNode(this.displayNum); }
+  eq(other) { return this.displayNum === other.displayNum; }
+}
+
+function buildLineNumbers(relative) {
+  if (relative) {
+    return gutter({
+      class: 'cm-lineNumbers',
+      lineMarker(view, line) {
+        const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number;
+        const lineNo = view.state.doc.lineAt(line.from).number;
+        const display = lineNo === cursorLine ? String(lineNo) : String(Math.abs(lineNo - cursorLine));
+        return new RelativeLineNumber(display);
+      },
+      lineMarkerChange(update) {
+        return update.selectionSet;
+      },
+      initialSpacer() {
+        return new RelativeLineNumber('888');
+      },
+    });
+  }
+  return lineNumbers();
+}
+
 /**
  * Create a CodeMirror 6 editor.
  * @param {HTMLElement} container
@@ -142,31 +173,7 @@ export function createEditor(container, content, { onChange, onSave, onQuit, vim
     extensions.push(vim());
   }
 
-  if (relativeLineNumbers) {
-    // Track cursor line to force gutter re-render on cursor movement
-    let prevCursorLine = 0;
-    extensions.push(
-      lineNumbers({
-        formatNumber: (lineNo, state) => {
-          const curLine = state.doc.lineAt(state.selection.main.head).number;
-          if (lineNo === curLine) return String(lineNo);
-          return String(Math.abs(lineNo - curLine));
-        },
-      }),
-      ViewPlugin.define(() => ({
-        update(update) {
-          const curLine = update.state.doc.lineAt(update.state.selection.main.head).number;
-          if (curLine !== prevCursorLine) {
-            prevCursorLine = curLine;
-            // Force gutter re-render by requesting a measure pass
-            update.view.requestMeasure();
-          }
-        },
-      })),
-    );
-  } else {
-    extensions.push(lineNumbers());
-  }
+  extensions.push(lineNumbersCompartment.of(buildLineNumbers(relativeLineNumbers)));
 
   extensions.push(
     highlightActiveLine(),
@@ -233,6 +240,16 @@ export function updateTheme(view) {
   if (!view) return;
   view.dispatch({
     effects: themeCompartment.reconfigure(buildTheme()),
+  });
+}
+
+/**
+ * Hot-swap line numbers between absolute and relative.
+ */
+export function updateLineNumbers(view, relative) {
+  if (!view) return;
+  view.dispatch({
+    effects: lineNumbersCompartment.reconfigure(buildLineNumbers(relative)),
   });
 }
 

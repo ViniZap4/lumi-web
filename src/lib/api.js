@@ -106,3 +106,34 @@ export async function createFolder(name) {
   if (!res.ok) throw new Error('Failed to create folder');
   return res.json();
 }
+
+export async function renameFolder(name, newName) {
+  const encodedName = encodeURIComponent(name);
+  const res = await fetch(`${API_URL}/api/folders/${encodedName}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ new_name: newName }),
+  });
+  if (!res.ok) throw new Error('Failed to rename folder');
+  return res.json();
+}
+
+export async function moveFolder(name, destination) {
+  const encodedName = encodeURIComponent(name);
+  const res = await fetch(`${API_URL}/api/folders/${encodedName}/move`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ destination }),
+  });
+  if (!res.ok) throw new Error('Failed to move folder');
+  return res.json();
+}
+
+export async function deleteFolder(name) {
+  const encodedName = encodeURIComponent(name);
+  const res = await fetch(`${API_URL}/api/folders/${encodedName}`, {
+    method: 'DELETE',
+    headers,
+  });
+  if (!res.ok) throw new Error('Failed to delete folder');
+}

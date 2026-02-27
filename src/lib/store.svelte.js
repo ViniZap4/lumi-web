@@ -1,4 +1,5 @@
 import { getNotes, getFolders, getNote, updateNote, createNote, deleteNote, moveNote, copyNote, renameNote, createFolder, renameFolder, moveFolder, deleteFolder, login as apiLogin, setToken, getToken } from './api.js';
+import { encryptToken, decryptToken } from './crypto.js';
 import { themes, themeOrder, darkThemeOrder, lightThemeOrder, applyTheme, resolveTheme, loadThemeSettings, saveThemeSettings, watchSystemTheme } from './themes.js';
 import { renderMarkdown } from './markdown.js';
 import { createEditor, destroyEditor, updateTheme as updateEditorTheme, updateLineNumbers as updateEditorLineNumbers, getVimMode, getCursorPosition } from './editor.js';
@@ -697,7 +698,12 @@ function cmdDeleteCurrentNote() {
 async function login(password) {
   await apiLogin(password);
   authenticated = true;
-  localStorage.setItem('lumi-token', password);
+  try {
+    const encrypted = await encryptToken(password);
+    localStorage.setItem('lumi-token', encrypted);
+  } catch {
+    // Fallback: if crypto fails, still authenticated for this session
+  }
 }
 
 function logout() {
@@ -709,9 +715,10 @@ function logout() {
 async function checkAuth() {
   const saved = localStorage.getItem('lumi-token');
   if (!saved) return false;
-  setToken(saved);
   try {
-    await apiLogin(saved);
+    const token = await decryptToken(saved);
+    setToken(token);
+    await apiLogin(token);
     authenticated = true;
     return true;
   } catch {

@@ -29,7 +29,7 @@ npm run build     # Production build
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VITE_LUMI_SERVER_URL` | `http://localhost:8080` | Server URL as seen by the browser |
+| `VITE_LUMI_SERVER_URL` | `http://localhost:8080` | URL the browser uses to reach the API server. Baked into the JS bundle — changing it requires a rebuild. |
 
 ### Docker
 

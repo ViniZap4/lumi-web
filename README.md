@@ -41,6 +41,10 @@ docker run -d -p 3000:80 lumi-web
 
 The server URL is baked at image build time via `ARG`. Changing it requires a rebuild.
 
+## Documentation
+
+Full docs at [vinizap4.github.io/lumi-site/#/docs](https://vinizap4.github.io/lumi-site/#/docs).
+
 ## Part of lumi
 
 This is a component of the [lumi monorepo](https://github.com/ViniZap4/lumi).

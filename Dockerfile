@@ -6,7 +6,6 @@ COPY package*.json ./
 RUN npm ci
 
 ARG VITE_LUMI_SERVER_URL=http://localhost:8080
-ENV VITE_LUMI_SERVER_URL=$VITE_LUMI_SERVER_URL
 
 COPY . .
 RUN npm run build

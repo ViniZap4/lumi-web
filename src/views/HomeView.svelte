@@ -45,6 +45,7 @@
       <div><span class="key-hint">/</span> Search notes</div>
       <div><span class="key-hint">t</span> Browse tree</div>
       <div><span class="key-hint">c</span> Settings</div>
+      <div><span class="key-hint">q</span> Logout</div>
     </div>
   {/if}
 </div>

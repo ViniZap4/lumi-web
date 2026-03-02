@@ -176,6 +176,16 @@ body {
   background: var(--color-overlay-bg);
 }
 
+/* ── Images ──────────────────────────────────────────────────────── */
+.md-image-block {
+  margin: 0.5em 0;
+}
+.md-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
 /* ── Scrollbar ───────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

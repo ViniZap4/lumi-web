@@ -14,6 +14,8 @@
   import CommandModal from './components/CommandModal.svelte';
 
   let initialized = $state(false);
+  let lastKey = '';
+  let lastKeyTime = 0;
 
   onMount(async () => {
     store.loadThemeFromStorage();
@@ -120,6 +122,8 @@
 
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.closest?.('.cm-editor')) return;
 
+    if (e.key !== 'g') lastKey = '';
+
     // Home view
     if (store.viewMode === 'home' && !store.showSearch) {
       // Any key skips animation
@@ -130,6 +134,7 @@
       if (e.key === '/') { e.preventDefault(); store.showSearch = true; store.performSearch(); }
       else if (e.key === 't' || e.key === 'Enter') { e.preventDefault(); store.viewMode = 'tree'; }
       else if (e.key === 'c') { e.preventDefault(); store.enterConfig(); }
+      else if (e.key === 'q') { e.preventDefault(); store.logout(); }
       return;
     }
 
@@ -175,6 +180,18 @@
       } else if (e.key === 'd') {
         e.preventDefault();
         store.cmdDeleteItem();
+      } else if (e.key === 'G') {
+        e.preventDefault();
+        store.cursor = store.displayItems.length - 1;
+      } else if (e.key === 'g') {
+        if (lastKey === 'g' && (Date.now() - lastKeyTime) < 500) {
+          e.preventDefault();
+          store.cursor = 0;
+          lastKey = '';
+        } else {
+          lastKey = 'g';
+          lastKeyTime = Date.now();
+        }
       }
       return;
     }

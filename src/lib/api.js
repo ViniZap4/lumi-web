@@ -1,5 +1,5 @@
 // web-client/src/lib/api.js
-const API_URL = import.meta.env.VITE_LUMI_SERVER_URL || 'http://localhost:8080';
+export const API_URL = import.meta.env.VITE_LUMI_SERVER_URL || 'http://localhost:8080';
 let token = '';
 
 function getHeaders() {
@@ -25,14 +25,14 @@ export async function login(password) {
 export async function getFolders() {
   const res = await fetch(`${API_URL}/api/folders`, { headers: getHeaders() });
   if (!res.ok) throw new Error('Failed to fetch folders');
-  return res.json();
+  return await res.json() || [];
 }
 
 export async function getNotes(path = '') {
   const url = path ? `${API_URL}/api/notes?path=${path}` : `${API_URL}/api/notes`;
   const res = await fetch(url, { headers: getHeaders() });
   if (!res.ok) throw new Error('Failed to fetch notes');
-  return res.json();
+  return await res.json() || [];
 }
 
 export async function getNote(id) {

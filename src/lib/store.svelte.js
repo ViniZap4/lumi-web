@@ -273,8 +273,8 @@ function formatDate(dateStr) {
 async function loadAll() {
   try {
     error = null;
-    allNotes = await getNotes('');
-    allFolders = await getFolders();
+    allNotes = await getNotes('') || [];
+    allFolders = await getFolders() || [];
     buildItems();
   } catch (err) {
     error = 'Failed to load: ' + err.message;

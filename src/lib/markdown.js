@@ -4,6 +4,8 @@
  * that map to theme-aware styles defined in app.css.
  */
 
+import { API_URL } from './api.js';
+
 /**
  * Escape HTML entities in a string.
  */
@@ -41,6 +43,14 @@ function processInline(line) {
   // Wikilinks: [[target|display]] and [[target]]
   line = line.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '<a class="md-link md-wikilink" data-note="$1">$2</a>');
   line = line.replace(/\[\[([^\]]+)\]\]/g, '<a class="md-link md-wikilink" data-note="$1">$1</a>');
+
+  // Inline images: ![alt](url) — before standard links to avoid conflict
+  line = line.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+    const imgSrc = (src.startsWith('http://') || src.startsWith('https://'))
+      ? src
+      : `${API_URL}/api/files/${src}`;
+    return `<img class="md-image" src="${imgSrc}" alt="${alt}" />`;
+  });
 
   // Standard links: [text](url) — external opens in new tab, relative treated as note link
   line = line.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
@@ -391,6 +401,18 @@ export function renderMarkdown(md) {
     if (olMatch) {
       const text = processInline(escapeHtml(olMatch[2]));
       html.push(`<div class="md-list-item"><span class="md-list-marker">${olMatch[1]}</span> ${text}</div>`);
+      continue;
+    }
+
+    // Standalone image line
+    const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      const alt = escapeHtml(imgMatch[1]);
+      const src = imgMatch[2];
+      const imgSrc = (src.startsWith('http://') || src.startsWith('https://'))
+        ? escapeHtml(src)
+        : `${API_URL}/api/files/${encodeURI(src)}`;
+      html.push(`<div class="md-image-block"><img class="md-image" src="${imgSrc}" alt="${alt}" /></div>`);
       continue;
     }
 

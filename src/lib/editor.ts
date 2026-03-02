@@ -1,5 +1,6 @@
 import { EditorView, lineNumbers, gutter, GutterMarker, highlightActiveLine, keymap } from '@codemirror/view';
-import { EditorState, Compartment } from '@codemirror/state';
+import type { BlockInfo, ViewUpdate } from '@codemirror/view';
+import { EditorState, Compartment, type Extension } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -10,18 +11,18 @@ import { vim, Vim, getCM } from '@replit/codemirror-vim';
 const themeCompartment = new Compartment();
 const lineNumbersCompartment = new Compartment();
 
-function getCSSVar(name) {
+function getCSSVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function hexToRgba(hex, alpha) {
+function hexToRgba(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function buildTheme() {
+function buildTheme(): Extension[] {
   const bg = getCSSVar('--color-background');
   const text = getCSSVar('--color-text');
   const selectedBg = getCSSVar('--color-selected-bg');
@@ -118,15 +119,16 @@ function buildTheme() {
 }
 
 class RelativeLineNumber extends GutterMarker {
-  constructor(displayNum) {
+  displayNum: string;
+  constructor(displayNum: string) {
     super();
     this.displayNum = displayNum;
   }
-  toDOM() { return document.createTextNode(this.displayNum); }
-  eq(other) { return this.displayNum === other.displayNum; }
+  toDOM(): Text { return document.createTextNode(this.displayNum); }
+  eq(other: RelativeLineNumber): boolean { return this.displayNum === other.displayNum; }
 }
 
-function buildLineNumbers(relative) {
+function buildLineNumbers(relative: boolean): Extension {
   if (relative) {
     return gutter({
       class: 'cm-lineNumbers',
@@ -147,13 +149,16 @@ function buildLineNumbers(relative) {
   return lineNumbers();
 }
 
-/**
- * Create a CodeMirror 6 editor.
- * @param {HTMLElement} container
- * @param {string} content
- * @param {object} opts - { onChange, onSave, onQuit, vimEnabled, jjEscape, relativeLineNumbers }
- */
-export function createEditor(container, content, { onChange, onSave, onQuit, vimEnabled = true, jjEscape = false, relativeLineNumbers = false }) {
+export interface EditorOptions {
+  onChange?: (content: string) => void;
+  onSave?: () => void;
+  onQuit?: () => void;
+  vimEnabled?: boolean;
+  jjEscape?: boolean;
+  relativeLineNumbers?: boolean;
+}
+
+export function createEditor(container: HTMLElement, content: string, { onChange, onSave, onQuit, vimEnabled = true, jjEscape = false, relativeLineNumbers = false }: EditorOptions): EditorView {
   const extensions = [];
 
   if (vimEnabled) {
@@ -196,7 +201,7 @@ export function createEditor(container, content, { onChange, onSave, onQuit, vim
       keydown(event, view) {
         if (event.key === 'Escape') {
           // Don't intercept when vim command panel is active
-          if (event.target.closest('.cm-vim-panel')) return false;
+          if ((event.target as HTMLElement).closest('.cm-vim-panel')) return false;
 
           if (!vimEnabled) {
             if (onQuit) onQuit();
@@ -226,47 +231,32 @@ export function createEditor(container, content, { onChange, onSave, onQuit, vim
   return view;
 }
 
-/**
- * Destroy the editor and clean up.
- */
-export function destroyEditor(view) {
+export function destroyEditor(view: EditorView | null): void {
   if (view) view.destroy();
 }
 
-/**
- * Hot-swap the theme compartment with fresh CSS var colors.
- */
-export function updateTheme(view) {
+export function updateTheme(view: EditorView | null): void {
   if (!view) return;
   view.dispatch({
     effects: themeCompartment.reconfigure(buildTheme()),
   });
 }
 
-/**
- * Hot-swap line numbers between absolute and relative.
- */
-export function updateLineNumbers(view, relative) {
+export function updateLineNumbers(view: EditorView | null, relative: boolean): void {
   if (!view) return;
   view.dispatch({
     effects: lineNumbersCompartment.reconfigure(buildLineNumbers(relative)),
   });
 }
 
-/**
- * Replace the entire document content.
- */
-export function setContent(view, content) {
+export function setContent(view: EditorView | null, content: string): void {
   if (!view) return;
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: content },
   });
 }
 
-/**
- * Get the current vim mode string. Returns null if vim is not active.
- */
-export function getVimMode(view) {
+export function getVimMode(view: EditorView | null): string | null {
   if (!view) return null;
   const cm = getCM(view);
   if (!cm) return null;
@@ -282,10 +272,7 @@ export function getVimMode(view) {
   return 'NORMAL';
 }
 
-/**
- * Get the cursor position as { line, col } (1-indexed).
- */
-export function getCursorPosition(view) {
+export function getCursorPosition(view: EditorView | null): { line: number; col: number } {
   if (!view) return { line: 1, col: 1 };
   const pos = view.state.selection.main.head;
   const line = view.state.doc.lineAt(pos);

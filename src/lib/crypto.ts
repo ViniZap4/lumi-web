@@ -4,7 +4,7 @@
 const SALT = new TextEncoder().encode('lumi-token-key-v1');
 const ITERATIONS = 100_000;
 
-async function deriveKey() {
+async function deriveKey(): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode('lumi-local-storage-encryption'),
@@ -21,7 +21,7 @@ async function deriveKey() {
   );
 }
 
-export async function encryptToken(token) {
+export async function encryptToken(token: string): Promise<string> {
   const key = await deriveKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt(
@@ -33,11 +33,11 @@ export async function encryptToken(token) {
   return JSON.stringify(payload);
 }
 
-export async function decryptToken(stored) {
+export async function decryptToken(stored: string): Promise<string> {
   const { iv, ct } = JSON.parse(stored);
   const key = await deriveKey();
-  const ivBuf = Uint8Array.from(atob(iv), c => c.charCodeAt(0));
-  const ctBuf = Uint8Array.from(atob(ct), c => c.charCodeAt(0));
+  const ivBuf = Uint8Array.from(atob(iv), (c: string) => c.charCodeAt(0));
+  const ctBuf = Uint8Array.from(atob(ct), (c: string) => c.charCodeAt(0));
   const plain = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: ivBuf },
     key,

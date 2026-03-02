@@ -1,5 +1,5 @@
-<script>
-  let { items = [] } = $props();
+<script lang="ts">
+  let { items = [] }: { items: { key: string; desc: string }[] } = $props();
 </script>
 
 <div class="command-bar">

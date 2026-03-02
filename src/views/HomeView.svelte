@@ -1,7 +1,7 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
-  import { store } from '../lib/store.svelte.js';
-  import { startAnimation, visibleRunes, totalColumns } from '../lib/animation.js';
+  import { store } from '../lib/store.svelte.ts';
+  import { startAnimation, visibleRunes, totalColumns } from '../lib/animation.ts';
 
   let cleanup = null;
 

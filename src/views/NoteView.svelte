@@ -1,6 +1,6 @@
-<script>
+<script lang="ts">
   import { tick } from 'svelte';
-  import { store } from '../lib/store.svelte.js';
+  import { store } from '../lib/store.svelte.ts';
   import CommandBar from '../components/CommandBar.svelte';
 
   const readCommands = [

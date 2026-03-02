@@ -1,5 +1,5 @@
-<script>
-  import { store } from '../lib/store.svelte.js';
+<script lang="ts">
+  import { store } from '../lib/store.svelte.ts';
 </script>
 
 {#if store.cmdModal}

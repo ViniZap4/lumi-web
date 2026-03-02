@@ -1,6 +1,34 @@
 // Theme definitions matching tui-client/theme/builtin.go exactly.
 
-export const themeOrder = [
+import type { ThemeMode } from './types.ts';
+
+export interface Theme {
+  name: string;
+  isDark: boolean;
+  primary: string;
+  secondary: string;
+  accent: string;
+  muted: string;
+  background: string;
+  selectedBg: string;
+  overlayBg: string;
+  text: string;
+  textDim: string;
+  border: string;
+  separator: string;
+  error: string;
+  warning: string;
+  info: string;
+  logoColors: string[];
+}
+
+export interface ThemeSettings {
+  mode: ThemeMode;
+  darkName: string;
+  lightName: string;
+}
+
+export const themeOrder: string[] = [
   'tokyo-night',
   'tokyo-day',
   'catppuccin-mocha',
@@ -15,7 +43,7 @@ export const themeOrder = [
   'obsidian',
 ];
 
-export const themes = {
+export const themes: Record<string, Theme> = {
   'tokyo-night': {
     name: 'tokyo-night',
     isDark: true,
@@ -256,7 +284,7 @@ const SETTINGS_KEY = 'lumi-theme-settings';
 /**
  * Apply a theme by name — sets CSS custom properties on :root.
  */
-export function applyTheme(name) {
+export function applyTheme(name: string): void {
   const t = themes[name];
   if (!t) return;
 
@@ -284,7 +312,7 @@ export function applyTheme(name) {
 /**
  * Resolve which theme name to use based on mode.
  */
-export function resolveTheme(mode, darkName, lightName) {
+export function resolveTheme(mode: ThemeMode, darkName: string, lightName: string): string {
   if (mode === 'dark') return darkName;
   if (mode === 'light') return lightName;
   // auto — use OS preference
@@ -295,7 +323,7 @@ export function resolveTheme(mode, darkName, lightName) {
 /**
  * Load theme settings from localStorage, migrating from old single-key format.
  */
-export function loadThemeSettings() {
+export function loadThemeSettings(): ThemeSettings {
   const saved = localStorage.getItem(SETTINGS_KEY);
   if (saved) {
     try {
@@ -319,14 +347,14 @@ export function loadThemeSettings() {
 /**
  * Persist theme settings to localStorage.
  */
-export function saveThemeSettings(mode, darkName, lightName) {
+export function saveThemeSettings(mode: ThemeMode, darkName: string, lightName: string): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ mode, darkName, lightName }));
 }
 
 /**
  * Watch for OS color-scheme changes. Returns a cleanup function.
  */
-export function watchSystemTheme(callback) {
+export function watchSystemTheme(callback: (isDark: boolean) => void): () => void {
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
   const handler = (e) => callback(e.matches);
   mq.addEventListener('change', handler);

@@ -1,18 +1,19 @@
-// web-client/src/lib/api.js
-export const API_URL = import.meta.env.VITE_LUMI_SERVER_URL || 'http://localhost:8080';
+import type { Note, Folder } from './types.ts';
+
+export const API_URL: string = import.meta.env.VITE_LUMI_SERVER_URL || 'http://localhost:8080';
 let token = '';
 
-function getHeaders() {
+function getHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
     'X-Lumi-Token': token,
   };
 }
 
-export function setToken(t) { token = t; }
-export function getToken() { return token; }
+export function setToken(t: string): void { token = t; }
+export function getToken(): string { return token; }
 
-export async function login(password) {
+export async function login(password: string): Promise<boolean> {
   const res = await fetch(`${API_URL}/api/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Lumi-Token': password },
@@ -22,21 +23,20 @@ export async function login(password) {
   return true;
 }
 
-export async function getFolders() {
+export async function getFolders(): Promise<Folder[]> {
   const res = await fetch(`${API_URL}/api/folders`, { headers: getHeaders() });
   if (!res.ok) throw new Error('Failed to fetch folders');
   return await res.json() || [];
 }
 
-export async function getNotes(path = '') {
+export async function getNotes(path = ''): Promise<Note[]> {
   const url = path ? `${API_URL}/api/notes?path=${path}` : `${API_URL}/api/notes`;
   const res = await fetch(url, { headers: getHeaders() });
   if (!res.ok) throw new Error('Failed to fetch notes');
   return await res.json() || [];
 }
 
-export async function getNote(id) {
-  // Remove .md extension if present and encode
+export async function getNote(id: string): Promise<Note> {
   const cleanId = id.replace(/\.md$/, '');
   const encodedId = encodeURIComponent(cleanId);
   const res = await fetch(`${API_URL}/api/notes/${encodedId}`, { headers: getHeaders() });
@@ -44,7 +44,7 @@ export async function getNote(id) {
   return res.json();
 }
 
-export async function createNote(note) {
+export async function createNote(note: Partial<Note> & { folder?: string }): Promise<Note> {
   const res = await fetch(`${API_URL}/api/notes`, {
     method: 'POST',
     headers: getHeaders(),
@@ -54,7 +54,7 @@ export async function createNote(note) {
   return res.json();
 }
 
-export async function updateNote(id, note) {
+export async function updateNote(id: string, note: Partial<Note>): Promise<Note> {
   const cleanId = id.replace(/\.md$/, '');
   const encodedId = encodeURIComponent(cleanId);
   const res = await fetch(`${API_URL}/api/notes/${encodedId}`, {
@@ -66,7 +66,7 @@ export async function updateNote(id, note) {
   return res.json();
 }
 
-export async function deleteNote(id) {
+export async function deleteNote(id: string): Promise<void> {
   const cleanId = id.replace(/\.md$/, '');
   const encodedId = encodeURIComponent(cleanId);
   const res = await fetch(`${API_URL}/api/notes/${encodedId}`, {
@@ -76,7 +76,7 @@ export async function deleteNote(id) {
   if (!res.ok) throw new Error('Failed to delete note');
 }
 
-export async function moveNote(id, folder) {
+export async function moveNote(id: string, folder: string): Promise<Note> {
   const cleanId = id.replace(/\.md$/, '');
   const encodedId = encodeURIComponent(cleanId);
   const res = await fetch(`${API_URL}/api/notes/${encodedId}/move`, {
@@ -88,7 +88,7 @@ export async function moveNote(id, folder) {
   return res.json();
 }
 
-export async function copyNote(id, newId, newTitle) {
+export async function copyNote(id: string, newId: string, newTitle: string): Promise<Note> {
   const cleanId = id.replace(/\.md$/, '');
   const encodedId = encodeURIComponent(cleanId);
   const res = await fetch(`${API_URL}/api/notes/${encodedId}/copy`, {
@@ -100,7 +100,7 @@ export async function copyNote(id, newId, newTitle) {
   return res.json();
 }
 
-export async function renameNote(id, newId, newTitle) {
+export async function renameNote(id: string, newId: string, newTitle: string): Promise<Note> {
   const cleanId = id.replace(/\.md$/, '');
   const encodedId = encodeURIComponent(cleanId);
   const res = await fetch(`${API_URL}/api/notes/${encodedId}/rename`, {
@@ -112,7 +112,7 @@ export async function renameNote(id, newId, newTitle) {
   return res.json();
 }
 
-export async function createFolder(name) {
+export async function createFolder(name: string): Promise<Folder> {
   const res = await fetch(`${API_URL}/api/folders`, {
     method: 'POST',
     headers: getHeaders(),
@@ -122,7 +122,7 @@ export async function createFolder(name) {
   return res.json();
 }
 
-export async function renameFolder(name, newName) {
+export async function renameFolder(name: string, newName: string): Promise<Folder> {
   const encodedName = encodeURIComponent(name);
   const res = await fetch(`${API_URL}/api/folders/${encodedName}`, {
     method: 'PUT',
@@ -133,7 +133,7 @@ export async function renameFolder(name, newName) {
   return res.json();
 }
 
-export async function moveFolder(name, destination) {
+export async function moveFolder(name: string, destination: string): Promise<Folder> {
   const encodedName = encodeURIComponent(name);
   const res = await fetch(`${API_URL}/api/folders/${encodedName}/move`, {
     method: 'POST',
@@ -144,7 +144,7 @@ export async function moveFolder(name, destination) {
   return res.json();
 }
 
-export async function deleteFolder(name) {
+export async function deleteFolder(name: string): Promise<void> {
   const encodedName = encodeURIComponent(name);
   const res = await fetch(`${API_URL}/api/folders/${encodedName}`, {
     method: 'DELETE',

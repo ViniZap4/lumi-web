@@ -10,10 +10,7 @@ const TICK_MS = 60;
 const RUNES_PER_TICK = 5;
 const LINE_STAGGER = 2;
 
-/**
- * Calculate the max rune width across all logo lines.
- */
-export function logoMaxRunes(logoLines) {
+export function logoMaxRunes(logoLines: string[]): number {
   let max = 0;
   for (const line of logoLines) {
     const len = [...line].length;
@@ -22,40 +19,29 @@ export function logoMaxRunes(logoLines) {
   return max;
 }
 
-/**
- * Calculate the total stagger offset (last line's offset).
- */
-export function logoStagger(logoLines) {
+export function logoStagger(logoLines: string[]): number {
   return (logoLines.length - 1) * LINE_STAGGER;
 }
 
-/**
- * Total columns needed to fully reveal the logo.
- */
-export function totalColumns(logoLines) {
+export function totalColumns(logoLines: string[]): number {
   return logoMaxRunes(logoLines) + logoStagger(logoLines);
 }
 
-/**
- * For a given line index and current animProgress,
- * return how many runes (chars) should be visible.
- */
-export function visibleRunes(lineIndex, animProgress) {
+export function visibleRunes(lineIndex: number, animProgress: number): number {
   return animProgress - lineIndex * LINE_STAGGER;
 }
 
-/**
- * Start the diagonal wipe animation.
- * Calls onTick(animProgress) each frame and onDone() when complete.
- * Returns a cleanup function that stops the animation.
- */
-export function startAnimation(logoLines, onTick, onDone) {
+export function startAnimation(
+  logoLines: string[],
+  onTick: (animProgress: number) => void,
+  onDone: () => void,
+): () => void {
   const total = totalColumns(logoLines);
   let progress = 0;
   let lastTime = 0;
-  let rafId = null;
+  let rafId: number | null = null;
 
-  function tick(timestamp) {
+  function tick(timestamp: number): void {
     if (!lastTime) lastTime = timestamp;
     const elapsed = timestamp - lastTime;
 

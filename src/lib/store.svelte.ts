@@ -1,65 +1,68 @@
-import { getNotes, getFolders, getNote, updateNote, createNote, deleteNote, moveNote, copyNote, renameNote, createFolder, renameFolder, moveFolder, deleteFolder, login as apiLogin, setToken, getToken } from './api.js';
-import { encryptToken, decryptToken } from './crypto.js';
-import { themes, themeOrder, darkThemeOrder, lightThemeOrder, applyTheme, resolveTheme, loadThemeSettings, saveThemeSettings, watchSystemTheme } from './themes.js';
-import { renderMarkdown } from './markdown.js';
-import { createEditor, destroyEditor, updateTheme as updateEditorTheme, updateLineNumbers as updateEditorLineNumbers, getVimMode, getCursorPosition } from './editor.js';
+import type { Note, Folder, DisplayItem, WsMessage, CmdModal, ViewMode, SearchType } from './types.ts';
+import { getNotes, getFolders, getNote, updateNote, createNote, deleteNote, moveNote, copyNote, renameNote, createFolder, renameFolder, moveFolder, deleteFolder, login as apiLogin, setToken, getToken } from './api.ts';
+import { encryptToken, decryptToken } from './crypto.ts';
+import { themes, themeOrder, darkThemeOrder, lightThemeOrder, applyTheme, resolveTheme, loadThemeSettings, saveThemeSettings, watchSystemTheme } from './themes.ts';
+import type { ThemeMode } from './types.ts';
+import { renderMarkdown } from './markdown.ts';
+import { createEditor, destroyEditor, updateTheme as updateEditorTheme, updateLineNumbers as updateEditorLineNumbers, getVimMode, getCursorPosition } from './editor.ts';
+import type { EditorView } from '@codemirror/view';
 
 // ── Core data ───────────────────────────────────────────────────
-let allNotes = $state([]);
-let allFolders = $state([]);
-let displayItems = $state([]);
-let currentDirNotes = $state([]);
+let allNotes: Note[] = $state([]);
+let allFolders: Folder[] = $state([]);
+let displayItems: DisplayItem[] = $state([]);
+let currentDirNotes: Note[] = $state([]);
 
 // ── Navigation ──────────────────────────────────────────────────
-let viewMode = $state('home');
-let cursor = $state(0);
-let currentDir = $state('/');
-let selectedNote = $state(null);
-let editMode = $state(false);
-let content = $state('');
-let title = $state('');
+let viewMode: ViewMode = $state('home');
+let cursor: number = $state(0);
+let currentDir: string = $state('/');
+let selectedNote: Note | null = $state(null);
+let editMode: boolean = $state(false);
+let content: string = $state('');
+let title: string = $state('');
 
 // ── Search ──────────────────────────────────────────────────────
-let showSearch = $state(false);
-let searchQuery = $state('');
-let searchType = $state('filename');
-let searchResults = $state([]);
-let searchCursor = $state(0);
+let showSearch: boolean = $state(false);
+let searchQuery: string = $state('');
+let searchType: SearchType = $state('filename');
+let searchResults: DisplayItem[] = $state([]);
+let searchCursor: number = $state(0);
 
 // ── Theme ───────────────────────────────────────────────────────
-let themeMode = $state('dark');
-let darkThemeName = $state('tokyo-night');
-let lightThemeName = $state('tokyo-day');
-let currentThemeName = $state('tokyo-night');
-let cleanupSystemWatch = $state(null);
+let themeMode: ThemeMode = $state('dark');
+let darkThemeName: string = $state('tokyo-night');
+let lightThemeName: string = $state('tokyo-day');
+let currentThemeName: string = $state('tokyo-night');
+let cleanupSystemWatch: (() => void) | null = $state(null);
 
 // ── Editor ──────────────────────────────────────────────────────
-let editorView = $state(null);
-let editorContainer = $state(null);
-let vimMode = $state(null);
-let cursorLine = $state(1);
-let cursorCol = $state(1);
-let vimPollInterval = $state(null);
-let vimEnabled = $state(true);
-let jjEscape = $state(false);
-let relativeNumbers = $state(false);
+let editorView: EditorView | null = $state(null);
+let editorContainer: HTMLElement | null = $state(null);
+let vimMode: string | null = $state(null);
+let cursorLine: number = $state(1);
+let cursorCol: number = $state(1);
+let vimPollInterval: ReturnType<typeof setInterval> | null = $state(null);
+let vimEnabled: boolean = $state(true);
+let jjEscape: boolean = $state(false);
+let relativeNumbers: boolean = $state(false);
 
 // ── Config ──────────────────────────────────────────────────────
 let configCursor = $state(1);
 let previousView = $state('home');
 
 // ── Folder preview ──────────────────────────────────────────────
-let folderPreviewCache = $state({});
-let folderPreviewNotes = $state([]);
+let folderPreviewCache: Record<string, Note[]> = $state({});
+let folderPreviewNotes: Note[] = $state([]);
 
 // ── Command modal ───────────────────────────────────────────────
-let cmdModal = $state(null);
-let cmdInputValue = $state('');
-let cmdSelectCursor = $state(0);
+let cmdModal: CmdModal | null = $state(null);
+let cmdInputValue: string = $state('');
+let cmdSelectCursor: number = $state(0);
 
 // ── Status ──────────────────────────────────────────────────────
-let error = $state(null);
-let saving = $state(false);
+let error: string | null = $state(null);
+let saving: boolean = $state(false);
 
 // ── Animation ───────────────────────────────────────────────────
 let animProgress = $state(0);
@@ -103,12 +106,12 @@ const sampleMarkdown = [
 
 // ── Shared logic functions ──────────────────────────────────────
 
-function titleToId(t) {
+function titleToId(t: string): string {
   return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function buildItems() {
-  const items = [];
+function buildItems(): void {
+  const items: DisplayItem[] = [];
   if (currentDir === '/') {
     // Show only top-level folders (no "/" in path)
     allFolders.filter(f => !f.path.includes('/')).forEach(f => {
@@ -135,7 +138,7 @@ function buildItems() {
   cursor = Math.min(cursor, Math.max(0, displayItems.length - 1));
 }
 
-function performSearch() {
+function performSearch(): void {
   if (searchQuery === '') {
     searchResults = allNotes.map(n => ({
       type: 'note', name: n.title || n.id, id: n.id, data: n
@@ -171,7 +174,7 @@ function buildConfigItems() {
   ];
 }
 
-function configCycleOption(direction) {
+function configCycleOption(direction: number): void {
   const items = buildConfigItems();
   const item = items[configCursor];
   if (!item || item.kind !== 'cycle') return;
@@ -260,7 +263,7 @@ function setupSystemWatch() {
   }
 }
 
-function formatDate(dateStr) {
+function formatDate(dateStr: string): string {
   if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
@@ -281,7 +284,7 @@ async function loadAll() {
   }
 }
 
-async function openNote(item) {
+async function openNote(item: { id: string }): Promise<void> {
   try {
     error = null;
     const note = await getNote(item.id);
@@ -295,7 +298,7 @@ async function openNote(item) {
   }
 }
 
-async function enterFolder(folder) {
+async function enterFolder(folder: Folder): Promise<void> {
   const path = folder.path || folder.name;
   try {
     currentDirNotes = await getNotes(path) || [];
@@ -327,7 +330,7 @@ async function goBackDir() {
   cursor = 0;
 }
 
-async function loadFolderPreview(folderPath) {
+async function loadFolderPreview(folderPath: string): Promise<void> {
   if (folderPreviewCache[folderPath]) {
     folderPreviewNotes = folderPreviewCache[folderPath];
     return;
@@ -344,8 +347,8 @@ async function loadFolderPreview(folderPath) {
   }
 }
 
-async function handleNoteClick(e) {
-  const link = e.target.closest('.md-wikilink');
+async function handleNoteClick(e: MouseEvent): Promise<void> {
+  const link = (e.target as HTMLElement).closest('.md-wikilink') as HTMLElement | null;
   if (!link) return;
   e.preventDefault();
   const ref = link.dataset.note;
@@ -414,7 +417,7 @@ function cleanupEditor() {
   vimMode = null;
 }
 
-function setupEditor(container) {
+function setupEditor(container: HTMLElement): void {
   if (!container || editorView) return;
   editorView = createEditor(container, content, {
     onChange: (newContent) => { content = newContent; },
@@ -699,7 +702,7 @@ function cmdDeleteCurrentNote() {
   };
 }
 
-async function login(password) {
+async function login(password: string): Promise<void> {
   await apiLogin(password);
   authenticated = true;
   try {
@@ -732,7 +735,7 @@ async function checkAuth() {
   }
 }
 
-async function handleWsMessage(msg) {
+async function handleWsMessage(msg: WsMessage): Promise<void> {
   if (!msg || !msg.type || !msg.note) return;
 
   folderPreviewCache = {};

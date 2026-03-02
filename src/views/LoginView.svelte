@@ -1,5 +1,5 @@
-<script>
-  import { store } from '../lib/store.svelte.js';
+<script lang="ts">
+  import { store } from '../lib/store.svelte.ts';
 
   let password = $state('');
   let errorMsg = $state('');

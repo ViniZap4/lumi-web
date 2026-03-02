@@ -1,6 +1,6 @@
-<script>
-  import { store } from '../lib/store.svelte.js';
-  import { debounce } from '../lib/debounce.js';
+<script lang="ts">
+  import { store } from '../lib/store.svelte.ts';
+  import { debounce } from '../lib/debounce.ts';
 
   const debouncedSearch = debounce(() => store.performSearch(), 150);
 

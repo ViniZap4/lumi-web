@@ -1,8 +1,8 @@
-<script>
+<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { store } from './lib/store.svelte.js';
-  import { connectWebSocket, disconnect as disconnectWs } from './lib/ws.js';
-  import { totalColumns } from './lib/animation.js';
+  import { store } from './lib/store.svelte.ts';
+  import { connectWebSocket, disconnect as disconnectWs } from './lib/ws.ts';
+  import { totalColumns } from './lib/animation.ts';
 
   import LoginView from './views/LoginView.svelte';
   import HomeView from './views/HomeView.svelte';

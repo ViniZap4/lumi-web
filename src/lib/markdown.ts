@@ -4,12 +4,12 @@
  * that map to theme-aware styles defined in app.css.
  */
 
-import { API_URL } from './api.js';
+import { API_URL } from './api.ts';
 
 /**
  * Escape HTML entities in a string.
  */
-function escapeHtml(str) {
+function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -21,7 +21,7 @@ function escapeHtml(str) {
  * Process inline markdown formatting within a line.
  * Handles: bold-italic, bold, italic, strikethrough, code spans, wikilinks, standard links.
  */
-function processInline(line) {
+function processInline(line: string): string {
   // Code spans first (so inner formatting is not processed)
   let result = '';
   let i = 0;
@@ -113,7 +113,7 @@ const BUILTINS = new Set([
  * Lightweight syntax highlighter — tokenizes code into spans with classes.
  * Covers keywords, strings, comments, numbers, and function calls.
  */
-function highlightCode(code, lang) {
+function highlightCode(code: string, lang: string): string {
   const escaped = escapeHtml(code);
   const lines = escaped.split('\n');
   let inBlockComment = false;
@@ -249,25 +249,25 @@ function highlightCode(code, lang) {
 
 // ── Table parsing ──────────────────────────────────────────────────
 
-function isTableRow(line) {
+function isTableRow(line: string): boolean {
   const trimmed = line.trim();
   return trimmed.startsWith('|') && trimmed.endsWith('|');
 }
 
-function isSeparatorRow(line) {
+function isSeparatorRow(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
   const inner = trimmed.slice(1, -1);
   return /^[\s|:\-]+$/.test(inner) && inner.includes('-');
 }
 
-function parseTableCells(line) {
+function parseTableCells(line: string): string[] {
   const trimmed = line.trim();
   const inner = trimmed.slice(1, -1); // remove outer pipes
   return inner.split('|').map(c => c.trim());
 }
 
-function parseAlignment(line) {
+function parseAlignment(line: string): string[] {
   const cells = parseTableCells(line);
   return cells.map(c => {
     const left = c.startsWith(':');
@@ -278,7 +278,7 @@ function parseAlignment(line) {
   });
 }
 
-function renderTable(headerLine, separatorLine, bodyLines) {
+function renderTable(headerLine: string, separatorLine: string, bodyLines: string[]): string {
   const headers = parseTableCells(headerLine);
   const aligns = parseAlignment(separatorLine);
   const rows = bodyLines.map(l => parseTableCells(l));
@@ -304,12 +304,7 @@ function renderTable(headerLine, separatorLine, bodyLines) {
 
 // ── Main renderer ──────────────────────────────────────────────────
 
-/**
- * Render a markdown string to themed HTML.
- * @param {string} md - raw markdown text
- * @returns {string} HTML string
- */
-export function renderMarkdown(md) {
+export function renderMarkdown(md: string): string {
   if (!md) return '';
 
   const lines = md.split('\n');

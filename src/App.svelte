@@ -14,6 +14,7 @@
   import CommandModal from './components/CommandModal.svelte';
 
   let initialized = $state(false);
+  let initializing = false;
   let lastKey = '';
   let lastKeyTime = 0;
 
@@ -39,9 +40,12 @@
   });
 
   async function initApp() {
+    if (initializing || initialized) return;
+    initializing = true;
     await store.loadAll();
     connectWebSocket(store.handleWsMessage);
     initialized = true;
+    initializing = false;
   }
 
   $effect(() => {

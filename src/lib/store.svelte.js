@@ -456,7 +456,9 @@ function cmdNewNote() {
       const folder = currentDir === '/' ? '' : currentDir.slice(1);
       try {
         const note = await createNote({ id, title: value, content: `# ${value}\n\n`, tags: [], folder });
-        allNotes = [...allNotes, note];
+        if (!allNotes.find(n => n.id === note.id)) {
+          allNotes = [...allNotes, note];
+        }
         buildItems();
         await openNote({ id: note.id });
         editMode = true;
@@ -614,7 +616,9 @@ function cmdCopyNote() {
       const newId = titleToId(value);
       try {
         const note = await copyNote(item.id, newId, value);
-        allNotes = [...allNotes, note];
+        if (!allNotes.find(n => n.id === note.id)) {
+          allNotes = [...allNotes, note];
+        }
         buildItems();
       } catch (err) {
         error = `Copy failed: ${err.message}`;

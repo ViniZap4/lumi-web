@@ -4,7 +4,7 @@
  * that map to theme-aware styles defined in app.css.
  */
 
-import { API_URL } from './api.ts';
+import { API_URL, getToken } from './api.ts';
 
 /**
  * Escape HTML entities in a string.
@@ -15,6 +15,19 @@ function escapeHtml(str: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Resolve an image src — external URLs pass through, local paths route
+ * through the API with proper encoding and auth token.
+ */
+function resolveImageSrc(src: string): string {
+  if (src.startsWith('http://') || src.startsWith('https://')) {
+    return escapeHtml(src);
+  }
+  const token = getToken();
+  const base = `${API_URL}/api/files/${encodeURI(src)}`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
 /**
@@ -46,10 +59,8 @@ function processInline(line: string): string {
 
   // Inline images: ![alt](url) — before standard links to avoid conflict
   line = line.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
-    const imgSrc = (src.startsWith('http://') || src.startsWith('https://'))
-      ? src
-      : `${API_URL}/api/files/${src}`;
-    return `<img class="md-image" src="${imgSrc}" alt="${alt}" />`;
+    const imgSrc = resolveImageSrc(src);
+    return `<img class="md-image" src="${imgSrc}" alt="${escapeHtml(alt)}" />`;
   });
 
   // Standard links: [text](url) — external opens in new tab, relative treated as note link
@@ -403,10 +414,7 @@ export function renderMarkdown(md: string): string {
     const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (imgMatch) {
       const alt = escapeHtml(imgMatch[1]);
-      const src = imgMatch[2];
-      const imgSrc = (src.startsWith('http://') || src.startsWith('https://'))
-        ? escapeHtml(src)
-        : `${API_URL}/api/files/${encodeURI(src)}`;
+      const imgSrc = resolveImageSrc(imgMatch[2]);
       html.push(`<div class="md-image-block"><img class="md-image" src="${imgSrc}" alt="${alt}" /></div>`);
       continue;
     }

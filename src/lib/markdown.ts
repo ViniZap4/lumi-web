@@ -30,6 +30,68 @@ function resolveImageSrc(src: string): string {
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
+/** File extension checks for media type detection. */
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|avi|mkv|ogg|ogv)(?:\?|$)/i;
+const PDF_EXTENSION = /\.pdf(?:\?|$)/i;
+
+function isVideoFile(src: string): boolean {
+  return VIDEO_EXTENSIONS.test(src);
+}
+
+function isPdfFile(src: string): boolean {
+  return PDF_EXTENSION.test(src);
+}
+
+function getYouTubeId(url: string): string | null {
+  const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
+function getVimeoId(url: string): string | null {
+  const match = url.match(/vimeo\.com\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Render a media element (image, video, PDF, or embed) from ![alt](src) syntax.
+ * When `block` is true, wraps in a container div for standalone lines.
+ */
+function renderMedia(alt: string, src: string, block: boolean): string {
+  const escapedAlt = escapeHtml(alt);
+
+  // YouTube embed
+  const ytId = getYouTubeId(src);
+  if (ytId) {
+    const iframe = `<iframe class="md-embed" src="https://www.youtube.com/embed/${ytId}" title="${escapedAlt}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+    return `<div class="md-embed-block">${iframe}</div>`;
+  }
+
+  // Vimeo embed
+  const vimeoId = getVimeoId(src);
+  if (vimeoId) {
+    const iframe = `<iframe class="md-embed" src="https://player.vimeo.com/video/${vimeoId}" title="${escapedAlt}" frameborder="0" allowfullscreen></iframe>`;
+    return `<div class="md-embed-block">${iframe}</div>`;
+  }
+
+  const mediaSrc = resolveImageSrc(src);
+
+  // Video
+  if (isVideoFile(src)) {
+    const tag = `<video class="md-video" controls preload="metadata" title="${escapedAlt}"><source src="${mediaSrc}" /></video>`;
+    return block ? `<div class="md-video-block">${tag}</div>` : tag;
+  }
+
+  // PDF
+  if (isPdfFile(src)) {
+    const tag = `<iframe class="md-pdf" src="${mediaSrc}" title="${escapedAlt}"></iframe>`;
+    return block ? `<div class="md-pdf-block">${tag}</div>` : tag;
+  }
+
+  // Image (default)
+  const tag = `<img class="md-image" src="${mediaSrc}" alt="${escapedAlt}" />`;
+  return block ? `<div class="md-image-block">${tag}</div>` : tag;
+}
+
 /**
  * Process inline markdown formatting within a line.
  * Handles: bold-italic, bold, italic, strikethrough, code spans, wikilinks, standard links.
@@ -57,10 +119,9 @@ function processInline(line: string): string {
   line = line.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '<a class="md-link md-wikilink" data-note="$1">$2</a>');
   line = line.replace(/\[\[([^\]]+)\]\]/g, '<a class="md-link md-wikilink" data-note="$1">$1</a>');
 
-  // Inline images: ![alt](url) — before standard links to avoid conflict
+  // Inline media: ![alt](url) — before standard links to avoid conflict
   line = line.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
-    const imgSrc = resolveImageSrc(src);
-    return `<img class="md-image" src="${imgSrc}" alt="${escapeHtml(alt)}" />`;
+    return renderMedia(alt, src, false);
   });
 
   // Standard links: [text](url) — external opens in new tab, relative treated as note link
@@ -410,12 +471,10 @@ export function renderMarkdown(md: string): string {
       continue;
     }
 
-    // Standalone image line
-    const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
-    if (imgMatch) {
-      const alt = escapeHtml(imgMatch[1]);
-      const imgSrc = resolveImageSrc(imgMatch[2]);
-      html.push(`<div class="md-image-block"><img class="md-image" src="${imgSrc}" alt="${alt}" /></div>`);
+    // Standalone media line (image, video, PDF, embed)
+    const mediaMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (mediaMatch) {
+      html.push(renderMedia(mediaMatch[1], mediaMatch[2], true));
       continue;
     }
 

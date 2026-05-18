@@ -2,22 +2,26 @@
   import { onMount, onDestroy } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
+  import { auth } from '../lib/auth.svelte.ts';
   import { renderMarkdown } from '../lib/markdown.ts';
   import { ApiError } from '../lib/types.ts';
+  import * as api from '../lib/api.ts';
+  import { EditorSession } from '../lib/editor-session.svelte.ts';
+  import NoteEditor from '../components/NoteEditor.svelte';
 
   // Vim-style list cursor. Tracks position even when selectedID is null.
   let cursor = $state(0);
 
-  // Slice 4.3 — modal + edit state. Plain-text editing for now; slice
-  // 4.4 swaps the textarea for CodeMirror+Yjs.
+  // Slice 4.3 — modals.
   type Modal = null | 'new-note' | 'delete-confirm';
   let modal = $state<Modal>(null);
   let modalErr = $state<string | null>(null);
   let newNoteTitle = $state('');
 
+  // Slice 4.4 — Yjs+CM6 editor session. EditorSession owns the Y.Doc
+  // and provider; reactive `status` + `peers` flow into the bar.
   let editMode = $state(false);
-  let editBuffer = $state('');
-  let editing = $state(false);
+  let editSession = $state<EditorSession | null>(null);
   let editError = $state<string | null>(null);
   let saving = $state(false);
 
@@ -26,8 +30,7 @@
   // Reset edit state whenever the focused note changes.
   $effect(() => {
     const id = notes.selectedID;
-    editMode = false;
-    editBuffer = '';
+    if (editMode) cancelEdit();
     editError = null;
     void id; // intentional dep
   });
@@ -188,26 +191,56 @@
   }
 
   function enterEdit(): void {
-    if (!notes.content) return;
-    editBuffer = notes.content.body ?? '';
-    editError = null;
+    if (!notes.content || !auth.user || !vaults.selectedID || !notes.selectedID) return;
+    const token = api.getToken();
+    if (!token) return;
+    const sess = new EditorSession();
+    // Seed the Y.Text with the current FS body BEFORE wiring the
+    // provider — if there's no peer yet, this becomes the initial
+    // doc state; if a peer is already editing, the WS provider's
+    // first SyncStep2 will reconcile on connect. Either way the user
+    // sees their saved content immediately, not a flash of blank.
+    if ((notes.content.body ?? '') !== '' && sess.ytext.length === 0) {
+      sess.ytext.insert(0, notes.content.body ?? '');
+    }
+    sess.open(vaults.selectedID, notes.selectedID, token, auth.user);
+    editSession = sess;
     editMode = true;
-    editing = false;
+    editError = null;
   }
 
   function cancelEdit(): void {
+    if (editSession) {
+      editSession.destroy();
+      editSession = null;
+    }
     editMode = false;
-    editBuffer = '';
     editError = null;
   }
 
+  /**
+   * Cmd/Ctrl+S commits the current Yjs text to the on-disk markdown
+   * file via the REST /diff endpoint. The Yjs WS path already keeps
+   * the CRDT log in sync across web peers in real time, but the
+   * server's WS handler does NOT yet mirror updates back to the FS
+   * markdown — so without this explicit POST, the apple-client / TUI
+   * (which read FS, not the CRDT log) wouldn't see web edits.
+   *
+   * Known follow-up: a server slice should debounce-write the CRDT
+   * text to FS on idle, which would let us drop this explicit save.
+   */
   async function saveEdit(): Promise<void> {
-    if (saving) return;
+    if (saving || !editSession || !vaults.selectedID || !notes.selectedID) return;
     saving = true;
     editError = null;
     try {
-      await notes.update({ body: editBuffer });
-      editMode = false;
+      const text = editSession.ytext.toString();
+      const snap = await api.applyNoteDiff(vaults.selectedID, notes.selectedID, text);
+      // Refresh the metadata row so updated_at moves; preview will
+      // re-render once we exit edit mode (or stay in if user wants).
+      void notes.refresh();
+      // We do NOT exit edit mode here — saving feels modeless.
+      void snap;
     } catch (e) {
       editError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
     } finally {
@@ -279,27 +312,33 @@
       {:else if notes.contentError}
         <div class="error">{notes.contentError}</div>
       {:else if notes.content}
-        {#if editMode}
+        {#if editMode && editSession}
           <div class="editor-frame">
             <div class="editor-bar">
-              <span class="editor-title">Editing {notes.selected?.title}</span>
+              <div class="editor-meta">
+                <span class="editor-title">Editing {notes.selected?.title}</span>
+                <span class="conn-pill conn-{editSession.status}">{editSession.status}</span>
+                {#if editSession.peers.length > 0}
+                  <span class="peers">
+                    {#each editSession.peers as p (p.clientID)}
+                      <span class="peer-chip" style="--peer-color: {p.color}" title={p.name}>{p.name}</span>
+                    {/each}
+                  </span>
+                {/if}
+              </div>
               <div class="editor-actions">
                 <button class="primary-button" onclick={saveEdit} disabled={saving} type="button">
-                  {saving ? 'Saving…' : 'Save'}
+                  {saving ? 'Saving…' : 'Save to disk'}
                 </button>
-                <button class="link-button" onclick={cancelEdit} type="button">Cancel</button>
+                <button class="link-button" onclick={cancelEdit} type="button">Done</button>
               </div>
             </div>
             {#if editError}<div class="error">{editError}</div>{/if}
-            <!-- svelte-ignore a11y_autofocus -->
-            <textarea
-              class="editor-area"
-              bind:value={editBuffer}
-              spellcheck="false"
-              autofocus
-            ></textarea>
+            <NoteEditor session={editSession} />
             <div class="hint">
-              <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> cancel
+              Edits sync live to other web peers via Yjs.
+              <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> commits the current text to the on-disk file
+              for TUI / apple clients. <kbd>Esc</kbd> closes the editor.
             </div>
           </div>
         {:else}
@@ -607,32 +646,48 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .editor-meta {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
   }
   .editor-title {
     color: var(--color-text-dim, var(--color-muted));
     font-size: 0.9rem;
   }
+  .conn-pill {
+    font-size: 0.72rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-border, var(--color-muted));
+    color: var(--color-text-dim, var(--color-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .conn-connected { color: var(--color-info, var(--color-secondary)); border-color: currentColor; }
+  .conn-connecting { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
+  .conn-disconnected { color: var(--color-error); border-color: currentColor; }
+  .peers {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+  .peer-chip {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--peer-color, var(--color-border));
+    color: var(--peer-color, var(--color-text));
+    background: transparent;
+  }
   .editor-actions {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-  }
-  .editor-area {
-    flex: 1;
-    min-height: 60vh;
-    padding: 0.9rem;
-    background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 4px;
-    color: var(--color-text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.95rem;
-    line-height: 1.55;
-    outline: none;
-    resize: vertical;
-  }
-  .editor-area:focus {
-    border-color: var(--color-secondary);
   }
   .hint {
     color: var(--color-text-dim, var(--color-muted));

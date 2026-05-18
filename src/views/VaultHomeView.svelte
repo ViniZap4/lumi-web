@@ -219,15 +219,12 @@
   }
 
   /**
-   * Cmd/Ctrl+S commits the current Yjs text to the on-disk markdown
-   * file via the REST /diff endpoint. The Yjs WS path already keeps
-   * the CRDT log in sync across web peers in real time, but the
-   * server's WS handler does NOT yet mirror updates back to the FS
-   * markdown — so without this explicit POST, the apple-client / TUI
-   * (which read FS, not the CRDT log) wouldn't see web edits.
-   *
-   * Known follow-up: a server slice should debounce-write the CRDT
-   * text to FS on idle, which would let us drop this explicit save.
+   * Cmd/Ctrl+S explicitly forces an FS sync now. As of server slice
+   * 4.5, every WS update is auto-mirrored to the on-disk markdown
+   * file after a 500 ms debounce — so this button is mainly for
+   * "I want to ensure FS is up-to-date right now before closing
+   * the tab / running git commit". /diff also refreshes the pg
+   * updated_at and the audit log row.
    */
   async function saveEdit(): Promise<void> {
     if (saving || !editSession || !vaults.selectedID || !notes.selectedID) return;
@@ -336,9 +333,10 @@
             {#if editError}<div class="error">{editError}</div>{/if}
             <NoteEditor session={editSession} />
             <div class="hint">
-              Edits sync live to other web peers via Yjs.
-              <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> commits the current text to the on-disk file
-              for TUI / apple clients. <kbd>Esc</kbd> closes the editor.
+              Edits sync live to other web peers via Yjs and to the on-disk file every
+              ~500 ms.
+              <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> forces an immediate FS sync.
+              <kbd>Esc</kbd> closes the editor.
             </div>
           </div>
         {:else}

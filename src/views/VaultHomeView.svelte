@@ -3,9 +3,34 @@
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
   import { renderMarkdown } from '../lib/markdown.ts';
+  import { ApiError } from '../lib/types.ts';
 
   // Vim-style list cursor. Tracks position even when selectedID is null.
   let cursor = $state(0);
+
+  // Slice 4.3 — modal + edit state. Plain-text editing for now; slice
+  // 4.4 swaps the textarea for CodeMirror+Yjs.
+  type Modal = null | 'new-note' | 'delete-confirm';
+  let modal = $state<Modal>(null);
+  let modalErr = $state<string | null>(null);
+  let newNoteTitle = $state('');
+
+  let editMode = $state(false);
+  let editBuffer = $state('');
+  let editing = $state(false);
+  let editError = $state<string | null>(null);
+  let saving = $state(false);
+
+  let lastDelete = $state(0); // 'dd' double-tap timestamp
+
+  // Reset edit state whenever the focused note changes.
+  $effect(() => {
+    const id = notes.selectedID;
+    editMode = false;
+    editBuffer = '';
+    editError = null;
+    void id; // intentional dep
+  });
 
   // Hydrate notes whenever the active vault changes. The notes store
   // is idempotent on a no-op vaultID transition so this is safe.
@@ -36,18 +61,68 @@
   let lastG = $state(0);
   function handleKey(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
+
+    // Cmd/Ctrl+S to save edits, regardless of focus inside the editor.
+    if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
+      e.preventDefault();
+      void saveEdit();
+      return;
+    }
+
+    if (modal != null) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeModal();
+      }
+      return; // let the input handle other keys
+    }
+
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
 
-    if (e.key === 'h' || e.key === 'Escape') {
+    if (e.key === 'Escape') {
       e.preventDefault();
-      if (notes.selectedID) {
-        // First Esc clears the focused note; second returns to vaults.
+      if (editMode) {
+        cancelEdit();
+      } else if (notes.selectedID) {
         void notes.select(null);
       } else {
         back();
       }
       return;
     }
+    if (e.key === 'h' && !editMode) {
+      e.preventDefault();
+      if (notes.selectedID) void notes.select(null);
+      else back();
+      return;
+    }
+    if (editMode) return; // remaining shortcuts are list-mode only
+
+    // New note: 'n' on list pane.
+    if (e.key === 'n') {
+      e.preventDefault();
+      openNewNote();
+      return;
+    }
+    // Enter edit on the focused note: 'e'.
+    if (e.key === 'e' && notes.selectedID) {
+      e.preventDefault();
+      enterEdit();
+      return;
+    }
+    // Delete focused: 'dd' double-tap.
+    if (e.key === 'd' && notes.selectedID) {
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastDelete < 500) {
+        modal = 'delete-confirm';
+        lastDelete = 0;
+      } else {
+        lastDelete = now;
+      }
+      return;
+    }
+
     if (notes.list.length === 0) return;
 
     if (e.key === 'j' || e.key === 'ArrowDown') {
@@ -78,6 +153,68 @@
     }
   }
 
+  // ---- modals + actions --------------------------------------------------
+
+  function closeModal(): void {
+    modal = null;
+    modalErr = null;
+    newNoteTitle = '';
+  }
+
+  function openNewNote(): void {
+    modal = 'new-note';
+    modalErr = null;
+    newNoteTitle = '';
+  }
+
+  async function submitNewNote(): Promise<void> {
+    const t = newNoteTitle.trim();
+    if (!t) return;
+    try {
+      await notes.create({ title: t, body: '' });
+      closeModal();
+    } catch (e) {
+      modalErr = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+    }
+  }
+
+  async function confirmDelete(): Promise<void> {
+    try {
+      await notes.deleteSelected();
+      closeModal();
+    } catch (e) {
+      modalErr = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+    }
+  }
+
+  function enterEdit(): void {
+    if (!notes.content) return;
+    editBuffer = notes.content.body ?? '';
+    editError = null;
+    editMode = true;
+    editing = false;
+  }
+
+  function cancelEdit(): void {
+    editMode = false;
+    editBuffer = '';
+    editError = null;
+  }
+
+  async function saveEdit(): Promise<void> {
+    if (saving) return;
+    saving = true;
+    editError = null;
+    try {
+      await notes.update({ body: editBuffer });
+      editMode = false;
+    } catch (e) {
+      editError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+    } finally {
+      saving = false;
+    }
+  }
+
   // Pre-compute the sanitised preview HTML on every content change.
   // marked is fast enough that we don't bother debouncing here; large
   // notes (10k+ lines) are the slice 4.4 / 4.6 perf concern.
@@ -96,6 +233,7 @@
       <span class="vault-slug">{vaults.selected?.slug}</span>
     </div>
     <div class="topbar-right">
+      <button class="link-button" onclick={openNewNote} type="button">+ New</button>
       <button class="link-button" onclick={() => void notes.refresh()} type="button">Refresh</button>
     </div>
   </header>
@@ -141,14 +279,109 @@
       {:else if notes.contentError}
         <div class="error">{notes.contentError}</div>
       {:else if notes.content}
-        <article class="rendered">
-          <h1 class="rendered-title">{notes.selected?.title}</h1>
-          <!-- DOMPurify-sanitised HTML, see lib/markdown.ts. -->
-          {@html previewHtml}
-        </article>
+        {#if editMode}
+          <div class="editor-frame">
+            <div class="editor-bar">
+              <span class="editor-title">Editing {notes.selected?.title}</span>
+              <div class="editor-actions">
+                <button class="primary-button" onclick={saveEdit} disabled={saving} type="button">
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button class="link-button" onclick={cancelEdit} type="button">Cancel</button>
+              </div>
+            </div>
+            {#if editError}<div class="error">{editError}</div>{/if}
+            <!-- svelte-ignore a11y_autofocus -->
+            <textarea
+              class="editor-area"
+              bind:value={editBuffer}
+              spellcheck="false"
+              autofocus
+            ></textarea>
+            <div class="hint">
+              <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> cancel
+            </div>
+          </div>
+        {:else}
+          <article class="rendered">
+            <h1 class="rendered-title">{notes.selected?.title}</h1>
+            <div class="rendered-actions">
+              <button class="link-button" onclick={enterEdit} type="button">Edit</button>
+              <button class="link-button danger" onclick={() => (modal = 'delete-confirm')} type="button">Delete</button>
+            </div>
+            <!-- DOMPurify-sanitised HTML, see lib/markdown.ts. -->
+            {@html previewHtml}
+          </article>
+        {/if}
       {/if}
     </main>
   </div>
+
+  {#if modal === 'new-note'}
+    <div
+      class="modal-overlay"
+      role="presentation"
+      onclick={closeModal}
+      onkeydown={(e) => { if (e.key === 'Escape') closeModal(); }}
+    >
+      <div
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        aria-label="New note"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+      >
+        <form onsubmit={(e) => { e.preventDefault(); void submitNewNote(); }} class="modal-form">
+          <h2>New note</h2>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            class="login-input"
+            type="text"
+            placeholder="Title"
+            bind:value={newNoteTitle}
+            autofocus
+          />
+          {#if modalErr}<div class="error">{modalErr}</div>{/if}
+          <div class="modal-actions">
+            <button class="primary-button" type="submit">Create</button>
+            <button class="link-button" type="button" onclick={closeModal}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  {#if modal === 'delete-confirm'}
+    <div
+      class="modal-overlay"
+      role="presentation"
+      onclick={closeModal}
+      onkeydown={(e) => { if (e.key === 'Escape') closeModal(); }}
+    >
+      <div
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+      >
+        <h2>Delete this note?</h2>
+        <p class="modal-body">
+          <strong>{notes.selected?.title}</strong> will be removed from the vault. The
+          markdown file is unlinked but its CRDT history stays in the
+          server's log until vault deletion.
+        </p>
+        {#if modalErr}<div class="error">{modalErr}</div>{/if}
+        <div class="modal-actions">
+          <button class="primary-button danger" type="button" onclick={confirmDelete}>Delete</button>
+          <button class="link-button" type="button" onclick={closeModal}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -345,8 +578,135 @@
     font-family: inherit;
     font-size: 0.85rem;
     cursor: pointer;
-    padding: 0;
-    justify-self: start;
+    padding: 0 0.4rem;
   }
   .link-button:hover { text-decoration: underline; }
+  .link-button.danger { color: var(--color-error); }
+
+  .topbar-right {
+    justify-self: end;
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .rendered-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.7rem;
+  }
+
+  .editor-frame {
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    height: 100%;
+  }
+  .editor-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .editor-title {
+    color: var(--color-text-dim, var(--color-muted));
+    font-size: 0.9rem;
+  }
+  .editor-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .editor-area {
+    flex: 1;
+    min-height: 60vh;
+    padding: 0.9rem;
+    background: var(--color-overlay-bg, var(--color-background));
+    border: 1px solid var(--color-border, var(--color-muted));
+    border-radius: 4px;
+    color: var(--color-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.95rem;
+    line-height: 1.55;
+    outline: none;
+    resize: vertical;
+  }
+  .editor-area:focus {
+    border-color: var(--color-secondary);
+  }
+  .hint {
+    color: var(--color-text-dim, var(--color-muted));
+    font-size: 0.78rem;
+  }
+
+  .primary-button {
+    padding: 0.4rem 0.8rem;
+    background: var(--color-primary);
+    border: none;
+    border-radius: 4px;
+    color: var(--color-background);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .primary-button.danger {
+    background: var(--color-error);
+  }
+  .primary-button:disabled { opacity: 0.5; cursor: progress; }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-panel {
+    background: var(--color-background);
+    border: 1px solid var(--color-border, var(--color-muted));
+    border-radius: 6px;
+    padding: 1.25rem;
+    min-width: 320px;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    outline: none;
+  }
+  .modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .modal-panel h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .modal-body {
+    color: var(--color-text-dim, var(--color-muted));
+    font-size: 0.88rem;
+    margin: 0;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.4rem;
+  }
+  .login-input {
+    padding: 0.5rem 0.7rem;
+    background: var(--color-overlay-bg, var(--color-background));
+    border: 1px solid var(--color-border, var(--color-muted));
+    border-radius: 4px;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    outline: none;
+  }
+  .login-input:focus { border-color: var(--color-secondary); }
 </style>

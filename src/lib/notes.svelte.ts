@@ -69,6 +69,48 @@ class NotesStore {
       this.loadingContent = false;
     }
   }
+
+  // ---- mutations (slice 4.3) ---------------------------------------------
+
+  /** Create a new note in the current vault, refresh the list, and
+   * select the new note. Returns the created summary on success.
+   * Server-side conflicts (duplicate-after-slugify) bubble up via
+   * the standard ApiError. */
+  async create(input: api.CreateNoteInput): Promise<NoteSummary | null> {
+    if (this.vaultID == null) return null;
+    const created = await api.createNote(this.vaultID, input);
+    // Optimistically prepend; refresh anyway to pick up server-side
+    // mutations (slug suffixing on title collision, etc).
+    this.list = [created, ...this.list.filter((n) => n.id !== created.id)];
+    void this.refresh();
+    await this.select(created.id);
+    return created;
+  }
+
+  /** PATCH the focused note. Pass any subset of {title, body, tags,
+   * path}. Updates the list entry in place + refreshes content. */
+  async update(input: api.UpdateNoteInput): Promise<NoteSummary | null> {
+    if (this.vaultID == null || this.selectedID == null) return null;
+    const id = this.selectedID;
+    const updated = await api.updateNote(this.vaultID, id, input);
+    this.list = this.list.map((n) => (n.id === updated.id ? updated : n));
+    // Re-fetch content so the preview reflects the new body / FS-
+    // round-tripped frontmatter.
+    if (input.body != null || input.title != null || input.tags != null) {
+      this.content = await api.getNoteContent(this.vaultID, updated.id);
+    }
+    return updated;
+  }
+
+  /** DELETE the focused note. Clears selection on success. */
+  async deleteSelected(): Promise<void> {
+    if (this.vaultID == null || this.selectedID == null) return;
+    const id = this.selectedID;
+    await api.deleteNote(this.vaultID, id);
+    this.list = this.list.filter((n) => n.id !== id);
+    this.selectedID = null;
+    this.content = null;
+  }
 }
 
 function describeError(err: unknown): string {

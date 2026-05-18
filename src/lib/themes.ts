@@ -356,7 +356,7 @@ export function saveThemeSettings(mode: ThemeMode, darkName: string, lightName: 
  */
 export function watchSystemTheme(callback: (isDark: boolean) => void): () => void {
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
-  const handler = (e) => callback(e.matches);
+  const handler = (e: MediaQueryListEvent) => callback(e.matches);
   mq.addEventListener('change', handler);
   return () => mq.removeEventListener('change', handler);
 }

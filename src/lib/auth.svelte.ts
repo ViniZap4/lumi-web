@@ -89,6 +89,50 @@ class AuthStore {
     }
   }
 
+  /**
+   * Anonymous-signup variant of signUp that consumes an invite token
+   * in the same request. The invite-accept response is leaner than the
+   * regular signup — no SessionUser payload — so we follow up with
+   * api.me() to populate it. Returns the joined vault summary so the
+   * caller can hop the user straight into it.
+   */
+  async signUpViaInvite(
+    inviteToken: string,
+    input: api.RegisterInput,
+  ): Promise<{ vaultID: string }> {
+    this.lastError = null;
+    try {
+      const resp = await api.acceptInviteWithSignup(inviteToken, input);
+      api.setToken(resp.token);
+      const user = await api.me();
+      await this.acceptSession({
+        token: resp.token,
+        expires_at: resp.expires_at,
+        user,
+      });
+      return { vaultID: resp.vault.id };
+    } catch (e) {
+      this.lastError = describeError(e);
+      throw e;
+    }
+  }
+
+  /**
+   * Accept an invite for an already-signed-in user. Session is
+   * unchanged; returns the joined vault id so callers can refresh the
+   * vault list and jump straight to it.
+   */
+  async acceptInvite(inviteToken: string): Promise<{ vaultID: string }> {
+    this.lastError = null;
+    try {
+      const resp = await api.acceptInviteAsCurrentUser(inviteToken);
+      return { vaultID: resp.vault.id };
+    } catch (e) {
+      this.lastError = describeError(e);
+      throw e;
+    }
+  }
+
   async signOut(): Promise<void> {
     // Best-effort server logout. Even if it fails (network, expired
     // token), drop local state.
@@ -151,6 +195,15 @@ function describeError(err: unknown): string {
       case 'token_expired':
       case 'unauthorized':
         return 'Your session expired. Sign in again.';
+      case 'invite_expired':
+        return 'This invite has expired. Ask for a new one.';
+      case 'invite_revoked':
+        return 'This invite was revoked.';
+      case 'invite_exhausted':
+        return 'This invite has already been used.';
+      case 'missing_token':
+      case 'token_invalid':
+        return 'This invite link is malformed or invalid.';
       default:
         return err.detail ?? err.code;
     }

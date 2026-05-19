@@ -46,6 +46,33 @@ class VaultStore {
     this.selectedID = null;
     this.lastError = null;
   }
+
+  /**
+   * Create a new vault and prepend it to the live list. Returns the
+   * created vault so the caller can route the user straight into it.
+   * Errors set `lastError` so the form can surface them inline.
+   */
+  async create(input: api.CreateVaultInput): Promise<Vault> {
+    this.lastError = null;
+    try {
+      const v = await api.createVault(input);
+      // Prepend rather than reload — keeps the existing list rendered
+      // and avoids a brief "empty / loading" flash. listVaults() would
+      // return them in created_at-desc order anyway, so prepend is
+      // consistent with the next refresh.
+      this.list = [v, ...this.list.filter((x) => x.id !== v.id)];
+      return v;
+    } catch (e) {
+      if (e instanceof ApiError) {
+        this.lastError = e.detail ?? e.code;
+      } else if (e instanceof Error) {
+        this.lastError = e.message;
+      } else {
+        this.lastError = 'Unknown error';
+      }
+      throw e;
+    }
+  }
 }
 
 export const vaults = new VaultStore();

@@ -4,6 +4,9 @@
   import { vaults } from '../lib/vaults.svelte.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import type { Vault } from '../lib/types.ts';
+  import VaultCreateModal from '../components/VaultCreateModal.svelte';
+
+  let showCreate = $state(false);
 
   // Keyboard navigation cursor (vim-style j/k + Enter).
   let cursor = $state(0);
@@ -67,7 +70,10 @@
   <main class="content">
     <div class="title-row">
       <h1>Your vaults</h1>
-      <button class="link-button" onclick={() => vaults.load()} type="button">Refresh</button>
+      <div class="title-actions">
+        <button class="link-button" onclick={() => (showCreate = true)} type="button">+ New vault</button>
+        <button class="link-button" onclick={() => vaults.load()} type="button">Refresh</button>
+      </div>
     </div>
 
     {#if vaults.loading}
@@ -105,6 +111,13 @@
     {/if}
   </main>
 </div>
+
+{#if showCreate}
+  <VaultCreateModal
+    onclose={() => (showCreate = false)}
+    onCreated={(id) => vaults.select(id)}
+  />
+{/if}
 
 <style>
   .vaults-view {
@@ -162,6 +175,11 @@
     font-size: 1.25rem;
     color: var(--color-text);
     font-weight: 600;
+  }
+  .title-actions {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
   }
 
   .placeholder,

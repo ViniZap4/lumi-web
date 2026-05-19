@@ -20,6 +20,8 @@ import {
   type RemoteRole,
   type RemoteMember,
   type ServerError,
+  type InviteAcceptSignupResponse,
+  type InviteAcceptExistingResponse,
 } from './types.ts';
 
 export const API_URL: string =
@@ -118,6 +120,33 @@ export async function logout(): Promise<void> {
   await request<void>('/api/auth/logout', { method: 'POST' });
 }
 
+// ---- invites ---------------------------------------------------------------
+
+// Accept an invite as a brand-new user. The server creates the account,
+// adds them to the vault, and returns a fresh session token. The
+// response does NOT include the SessionUser — callers fetch /me to
+// populate it (see auth.signUpViaInvite).
+export async function acceptInviteWithSignup(
+  token: string,
+  signup: RegisterInput,
+): Promise<InviteAcceptSignupResponse> {
+  return request<InviteAcceptSignupResponse>(
+    `/api/invites/${encodeURIComponent(token)}/accept`,
+    { method: 'POST', body: signup, anonymous: true },
+  );
+}
+
+// Accept an invite as the currently-authenticated user. Adds them to
+// the vault; session is unchanged.
+export async function acceptInviteAsCurrentUser(
+  token: string,
+): Promise<InviteAcceptExistingResponse> {
+  return request<InviteAcceptExistingResponse>(
+    `/api/invites/${encodeURIComponent(token)}/accept`,
+    { method: 'POST' },
+  );
+}
+
 export async function me(): Promise<SessionUser> {
   // /api/users/me returns the user payload directly.
   return request<SessionUser>('/api/users/me');
@@ -132,6 +161,16 @@ export async function listVaults(): Promise<Vault[]> {
 
 export async function getVault(id: string): Promise<Vault> {
   return request<Vault>(`/api/vaults/${id}`);
+}
+
+export interface CreateVaultInput {
+  name: string;
+  // Optional. Server auto-generates from name when omitted.
+  slug?: string;
+}
+
+export async function createVault(input: CreateVaultInput): Promise<Vault> {
+  return request<Vault>('/api/vaults', { method: 'POST', body: input });
 }
 
 export async function listVaultRoles(vaultID: string): Promise<RemoteRole[]> {

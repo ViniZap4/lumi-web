@@ -24,6 +24,30 @@ export interface Vault {
   created_at: string;
 }
 
+// The server's invite-accept endpoints return a slimmer vault payload
+// (just identity, no audit fields). Modelled separately so callers
+// don't pretend the full Vault is available straight from the invite.
+export interface InviteVaultSummary {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+// Anonymous-signup invite-accept response: a fresh session + the
+// vault joined. The endpoint does NOT include a SessionUser, so the
+// client must call /api/users/me to populate it.
+export interface InviteAcceptSignupResponse {
+  token: string;
+  expires_at: string;
+  vault: InviteVaultSummary;
+}
+
+// Authenticated invite-accept response: just the vault joined; the
+// caller's session is unchanged.
+export interface InviteAcceptExistingResponse {
+  vault: InviteVaultSummary;
+}
+
 export interface RemoteRole {
   id: string;
   vault_id: string;

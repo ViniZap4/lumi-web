@@ -13,23 +13,52 @@
   import { onMount, onDestroy } from 'svelte';
   import { auth } from '../lib/auth.svelte.ts';
   import { vaults } from '../lib/vaults.svelte.ts';
-  import { vaultMembers, type CreateInviteInput } from '../lib/vaultmembers.svelte.ts';
-  import { ApiError, type Invite, type RemoteMember } from '../lib/types.ts';
+  import {
+    vaultMembers,
+    type CreateInviteInput,
+    type CreateRoleInput,
+    type UpdateRoleInput,
+  } from '../lib/vaultmembers.svelte.ts';
+  import { ApiError, type Invite, type RemoteMember, type RemoteRole } from '../lib/types.ts';
+  import { CAPABILITY_CATALOGUE, hasCapability } from '../lib/capabilities.ts';
 
   interface Props { onclose: () => void; }
   const { onclose }: Props = $props();
 
-  type Tab = 'members' | 'invites';
+  type Tab = 'members' | 'invites' | 'roles';
   let tab = $state<Tab>('members');
 
-  // ---- capability gates (UX only) ----
+  // ---- capability gates (UX only — server still enforces) ----
+  //
+  // Use the wildcard-aware hasCapability so an Admin (role granted `*`)
+  // sees every affordance. Previous slice used raw .includes() with
+  // misspelled namespace strings — neither one worked for admins.
   let myCaps = $derived(vaultMembers.capabilitiesOf(auth.user?.id));
-  let canManageMembers = $derived(myCaps.includes('vault.member.manage'));
-  let canInvite = $derived(myCaps.includes('vault.member.invite'));
+  let canManageMembers = $derived(hasCapability(myCaps, 'members.manage'));
+  let canInvite = $derived(hasCapability(myCaps, 'members.invite'));
+  let canManageRoles = $derived(hasCapability(myCaps, 'roles.manage'));
 
   // ---- per-row error feedback ----
   let rowError = $state<string | null>(null);
   let pendingRemove = $state<RemoteMember | null>(null);
+  let pendingDeleteRole = $state<RemoteRole | null>(null);
+
+  // ---- role-editor state (used by Roles tab) ----
+  let roleEditorOpen = $state(false);
+  let editingRoleID = $state<string | null>(null); // null = creating
+  let roleEditorName = $state('');
+  let roleEditorCaps = $state<Set<string>>(new Set());
+  let roleEditorSubmitting = $state(false);
+  let roleEditorError = $state<string | null>(null);
+
+  // Group catalogue entries for the editor UI.
+  const capabilityGroups = (() => {
+    const groups: Record<string, typeof CAPABILITY_CATALOGUE> = {};
+    for (const c of CAPABILITY_CATALOGUE) {
+      (groups[c.group] ||= []).push(c);
+    }
+    return Object.entries(groups);
+  })();
 
   // ---- create-invite form state ----
   let createOpen = $state(false);
@@ -73,6 +102,14 @@
       e.preventDefault();
       if (pendingRemove) {
         pendingRemove = null;
+        return;
+      }
+      if (pendingDeleteRole) {
+        pendingDeleteRole = null;
+        return;
+      }
+      if (roleEditorOpen) {
+        closeRoleEditor();
         return;
       }
       if (createOpen) {
@@ -193,6 +230,87 @@
     if (new Date(i.expires_at).getTime() <= Date.now()) return 'expired';
     return 'active';
   }
+
+  // ---- role editor ----
+
+  function openCreateRole(): void {
+    editingRoleID = null;
+    roleEditorName = '';
+    roleEditorCaps = new Set();
+    roleEditorError = null;
+    roleEditorOpen = true;
+  }
+
+  function openEditRole(r: RemoteRole): void {
+    editingRoleID = r.id;
+    roleEditorName = r.name;
+    roleEditorCaps = new Set(r.capabilities);
+    roleEditorError = null;
+    roleEditorOpen = true;
+  }
+
+  function closeRoleEditor(): void {
+    roleEditorOpen = false;
+    roleEditorError = null;
+  }
+
+  function toggleCap(id: string): void {
+    // Re-assigning the Set is what makes Svelte 5's $state notice the
+    // change — mutating in-place doesn't re-trigger reactivity for
+    // built-in collection types.
+    const next = new Set(roleEditorCaps);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    roleEditorCaps = next;
+  }
+
+  async function submitRoleEditor(e: Event): Promise<void> {
+    e.preventDefault();
+    if (roleEditorSubmitting) return;
+    const name = roleEditorName.trim();
+    if (!name) {
+      roleEditorError = 'Role name is required.';
+      return;
+    }
+    const caps = Array.from(roleEditorCaps).sort();
+    roleEditorSubmitting = true;
+    roleEditorError = null;
+    try {
+      if (editingRoleID == null) {
+        const input: CreateRoleInput = { name, capabilities: caps };
+        await vaultMembers.createRole(input);
+      } else {
+        const input: UpdateRoleInput = { name, capabilities: caps };
+        await vaultMembers.updateRole(editingRoleID, input);
+      }
+      closeRoleEditor();
+    } catch (e) {
+      roleEditorError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+    } finally {
+      roleEditorSubmitting = false;
+    }
+  }
+
+  async function confirmDeleteRole(): Promise<void> {
+    if (!pendingDeleteRole) return;
+    rowError = null;
+    try {
+      await vaultMembers.deleteRole(pendingDeleteRole.id);
+      pendingDeleteRole = null;
+    } catch (e) {
+      rowError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+    }
+  }
+
+  function capsSummary(caps: string[]): string {
+    if (caps.length === 0) return 'no permissions';
+    if (caps.includes('*')) return 'every permission';
+    if (caps.length === 1) return caps[0];
+    return `${caps.length} permissions`;
+  }
 </script>
 
 <div
@@ -235,6 +353,14 @@
         aria-selected={tab === 'invites'}
         onclick={() => (tab = 'invites')}
       >Invites ({vaultMembers.invites.filter(isInviteActive).length})</button>
+      <button
+        type="button"
+        class="tab"
+        class:active={tab === 'roles'}
+        role="tab"
+        aria-selected={tab === 'roles'}
+        onclick={() => (tab = 'roles')}
+      >Roles ({vaultMembers.roles.length})</button>
     </div>
 
     {#if vaultMembers.loading}
@@ -390,6 +516,129 @@
           {/if}
         {/if}
       </section>
+    {/if}
+
+    {#if tab === 'roles'}
+      <section class="body">
+        {#if canManageRoles}
+          <div class="invite-bar">
+            <button class="primary" type="button" onclick={openCreateRole}>+ New role</button>
+          </div>
+        {/if}
+
+        {#if roleEditorOpen}
+          <form class="create-form" onsubmit={submitRoleEditor}>
+            <label>
+              Role name
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                class="input"
+                type="text"
+                bind:value={roleEditorName}
+                disabled={roleEditorSubmitting}
+                autofocus
+                required
+              />
+            </label>
+            <fieldset class="caps">
+              <legend>Capabilities</legend>
+              {#each capabilityGroups as [group, caps] (group)}
+                <div class="cap-group">
+                  <div class="cap-group-title">{group}</div>
+                  {#each caps as cap (cap.id)}
+                    <label class="cap-row">
+                      <input
+                        type="checkbox"
+                        checked={roleEditorCaps.has(cap.id)}
+                        onchange={() => toggleCap(cap.id)}
+                        disabled={roleEditorSubmitting}
+                      />
+                      <span class="cap-label">{cap.label}</span>
+                      <span class="cap-id">{cap.id}</span>
+                    </label>
+                  {/each}
+                </div>
+              {/each}
+            </fieldset>
+            {#if roleEditorError}<div class="error">{roleEditorError}</div>{/if}
+            <div class="form-actions">
+              <button class="primary" type="submit" disabled={roleEditorSubmitting || !roleEditorName.trim()}>
+                {#if roleEditorSubmitting}
+                  …
+                {:else if editingRoleID == null}
+                  Create role
+                {:else}
+                  Save changes
+                {/if}
+              </button>
+              <button class="link" type="button" onclick={closeRoleEditor} disabled={roleEditorSubmitting}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        {/if}
+
+        {#if rowError}<div class="error">{rowError}</div>{/if}
+
+        {#if vaultMembers.roles.length === 0}
+          <div class="placeholder">No roles defined yet.</div>
+        {:else}
+          <ul class="rows">
+            {#each vaultMembers.roles as r (r.id)}
+              <li class="row">
+                <div class="row-main">
+                  <div class="name">
+                    {r.name}
+                    {#if r.is_seed}<span class="badge">built-in</span>{/if}
+                  </div>
+                  <div class="meta">{capsSummary(r.capabilities)}</div>
+                </div>
+                <div class="row-actions">
+                  {#if canManageRoles && !r.is_seed}
+                    <button class="link" type="button" onclick={() => openEditRole(r)}>Edit</button>
+                    <button class="link danger" type="button" onclick={() => (pendingDeleteRole = r)}>Delete</button>
+                  {/if}
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        {#if !canManageRoles}
+          <p class="hint" style="margin-top: 0.7rem; text-align: center;">
+            You don’t have permission to create or edit roles.
+          </p>
+        {/if}
+      </section>
+    {/if}
+
+    {#if pendingDeleteRole}
+      <div
+        class="overlay nested"
+        role="presentation"
+        onclick={() => (pendingDeleteRole = null)}
+        onkeydown={(e) => { if (e.key === 'Escape') pendingDeleteRole = null; }}
+      >
+        <div
+          class="panel small"
+          role="alertdialog"
+          aria-modal="true"
+          tabindex="-1"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+        >
+          <h2>Delete role “{pendingDeleteRole.name}”?</h2>
+          <p class="hint">
+            Members assigned to this role will need to be reassigned
+            first; the server refuses the delete otherwise. Built-in
+            roles can’t be deleted at all.
+          </p>
+          <div class="form-actions">
+            <button class="primary danger" type="button" onclick={confirmDeleteRole}>Delete</button>
+            <button class="link" type="button" onclick={() => (pendingDeleteRole = null)}>Cancel</button>
+          </div>
+        </div>
+      </div>
     {/if}
 
     {#if pendingRemove}
@@ -677,4 +926,47 @@
     font-size: 0.85rem;
   }
   .error { color: var(--color-error); }
+
+  .caps {
+    border: 1px solid var(--color-border, var(--color-muted));
+    border-radius: 6px;
+    padding: 0.55rem 0.7rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.6rem 1rem;
+  }
+  .caps legend {
+    font-size: 0.78rem;
+    color: var(--color-text-dim, var(--color-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0 0.3rem;
+  }
+  .cap-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .cap-group-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-dim, var(--color-muted));
+    margin-bottom: 0.1rem;
+  }
+  .cap-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .cap-label { white-space: nowrap; }
+  .cap-id {
+    font-size: 0.7rem;
+    color: var(--color-text-dim, var(--color-muted));
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
 </style>

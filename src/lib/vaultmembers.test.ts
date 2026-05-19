@@ -19,6 +19,9 @@ vi.mock('./api.ts', async (importOriginal) => {
     removeMember: vi.fn(),
     createInvite: vi.fn(),
     revokeInvite: vi.fn(),
+    createRole: vi.fn(),
+    updateRole: vi.fn(),
+    deleteRole: vi.fn(),
   };
 });
 
@@ -31,11 +34,15 @@ import {
   type Invite,
 } from './types.ts';
 
+// Mirrors the server's seed Admin shape exactly: CapAll = "*".
+// Earlier drafts of these tests carried hand-written dotted strings
+// (vault.member.manage etc.) that don't exist in the real server;
+// keeping them would mask the very bug this slice is fixing.
 const adminRole: RemoteRole = {
   id: 'r-admin',
   vault_id: 'v1',
   name: 'Admin',
-  capabilities: ['vault.member.manage', 'vault.member.invite', 'vault.role.manage', 'note.edit'],
+  capabilities: ['*'],
   is_seed: true,
 };
 const viewerRole: RemoteRole = {
@@ -53,7 +60,7 @@ const alice: RemoteMember = {
   username: 'alice',
   display_name: 'Alice',
   role_name: 'Admin',
-  capabilities: adminRole.capabilities,
+  capabilities: ['*'], // matches adminRole.capabilities — keep in sync
   joined_at: '2026-04-01T00:00:00Z',
 };
 const bob: RemoteMember = {
@@ -120,8 +127,8 @@ describe('VaultMembersStore.openVault', () => {
 describe('VaultMembersStore.capabilitiesOf', () => {
   it('returns the member\'s caps when they\'re in the list', async () => {
     await vaultMembers.openVault('v1');
-    expect(vaultMembers.capabilitiesOf('u-alice')).toContain('vault.member.manage');
-    expect(vaultMembers.capabilitiesOf('u-bob')).not.toContain('vault.member.manage');
+    expect(vaultMembers.capabilitiesOf('u-alice')).toContain('*');
+    expect(vaultMembers.capabilitiesOf('u-bob')).not.toContain('*');
   });
 
   it('returns [] for unknown / nullish users', async () => {
@@ -141,7 +148,7 @@ describe('VaultMembersStore.changeRole', () => {
     const bobNew = vaultMembers.members.find((m) => m.user_id === 'u-bob');
     expect(bobNew?.role_id).toBe('r-admin');
     expect(bobNew?.role_name).toBe('Admin');
-    expect(bobNew?.capabilities).toContain('vault.member.manage');
+    expect(bobNew?.capabilities).toContain('*');
     expect(api.updateMemberRole).toHaveBeenCalledWith('v1', 'u-bob', 'r-admin');
   });
 
@@ -179,6 +186,106 @@ describe('VaultMembersStore.removeMember', () => {
     await expect(vaultMembers.removeMember('u-alice')).rejects.toBeInstanceOf(ApiError);
     expect(vaultMembers.members).toHaveLength(2);
     expect(vaultMembers.lastError).toBe('You can’t remove yourself from the vault.');
+  });
+});
+
+describe('VaultMembersStore.userHasCapability', () => {
+  it('admin with CapAll = "*" sees every affordance', async () => {
+    // This is the test that closes the bug from the previous slice:
+    // the modal had `myCaps.includes('vault.member.manage')` which
+    // would never be true for an Admin (whose role grants "*"), so
+    // every admin button was hidden. userHasCapability fixes that
+    // with the same wildcard semantics the server uses.
+    await vaultMembers.openVault('v1');
+    expect(vaultMembers.userHasCapability('u-alice', 'roles.manage')).toBe(true);
+    expect(vaultMembers.userHasCapability('u-alice', 'members.manage')).toBe(true);
+    expect(vaultMembers.userHasCapability('u-alice', 'audit.read')).toBe(true);
+  });
+
+  it('viewer with note.read only is denied admin actions', async () => {
+    await vaultMembers.openVault('v1');
+    expect(vaultMembers.userHasCapability('u-bob', 'note.read')).toBe(true);
+    expect(vaultMembers.userHasCapability('u-bob', 'members.manage')).toBe(false);
+    expect(vaultMembers.userHasCapability('u-bob', 'roles.manage')).toBe(false);
+  });
+
+  it('unknown user has no capabilities', async () => {
+    await vaultMembers.openVault('v1');
+    expect(vaultMembers.userHasCapability('u-ghost', 'note.read')).toBe(false);
+  });
+});
+
+describe('VaultMembersStore role CRUD', () => {
+  it('createRole appends to the list and returns the role', async () => {
+    await vaultMembers.openVault('v1');
+    const editor: RemoteRole = {
+      id: 'r-editor',
+      vault_id: 'v1',
+      name: 'Editor',
+      capabilities: ['note.read', 'note.edit'],
+      is_seed: false,
+    };
+    vi.mocked(api.createRole).mockResolvedValueOnce(editor);
+    const out = await vaultMembers.createRole({
+      name: 'Editor',
+      capabilities: ['note.read', 'note.edit'],
+    });
+    expect(out.id).toBe('r-editor');
+    expect(vaultMembers.roles.map((r) => r.id)).toContain('r-editor');
+  });
+
+  it('updateRole optimistically merges then replaces with server row', async () => {
+    const custom: RemoteRole = {
+      id: 'r-custom',
+      vault_id: 'v1',
+      name: 'Custom',
+      capabilities: ['note.read'],
+      is_seed: false,
+    };
+    vi.mocked(api.listVaultRoles).mockResolvedValueOnce([adminRole, viewerRole, custom]);
+    vaultMembers.clear();
+    await vaultMembers.openVault('v1');
+
+    const updated: RemoteRole = { ...custom, name: 'Renamed', capabilities: ['note.read', 'note.edit'] };
+    vi.mocked(api.updateRole).mockResolvedValueOnce(updated);
+
+    await vaultMembers.updateRole('r-custom', { name: 'Renamed', capabilities: updated.capabilities });
+    const got = vaultMembers.roles.find((r) => r.id === 'r-custom');
+    expect(got?.name).toBe('Renamed');
+    expect(got?.capabilities).toEqual(['note.read', 'note.edit']);
+  });
+
+  it('updateRole rolls back on server error and surfaces seed_role mapping', async () => {
+    await vaultMembers.openVault('v1');
+    vi.mocked(api.updateRole).mockRejectedValueOnce(
+      new ApiError(409, { error: 'seed_role_immutable' }),
+    );
+    const before = vaultMembers.roles.find((r) => r.id === 'r-admin');
+    await expect(
+      vaultMembers.updateRole('r-admin', { name: 'NotAdmin' }),
+    ).rejects.toBeInstanceOf(ApiError);
+    const after = vaultMembers.roles.find((r) => r.id === 'r-admin');
+    expect(after?.name).toBe(before?.name);
+    expect(vaultMembers.lastError).toBe('Built-in roles can’t be edited or deleted.');
+  });
+
+  it('deleteRole optimistically removes and rolls back on role_in_use', async () => {
+    await vaultMembers.openVault('v1');
+    vi.mocked(api.deleteRole).mockRejectedValueOnce(
+      new ApiError(409, { error: 'role_in_use' }),
+    );
+    await expect(vaultMembers.deleteRole('r-viewer')).rejects.toBeInstanceOf(ApiError);
+    expect(vaultMembers.roles.map((r) => r.id)).toContain('r-viewer');
+    expect(vaultMembers.lastError).toBe(
+      'Can’t delete a role that still has members. Reassign them first.',
+    );
+  });
+
+  it('deleteRole succeeds and removes the row', async () => {
+    await vaultMembers.openVault('v1');
+    vi.mocked(api.deleteRole).mockResolvedValueOnce(undefined);
+    await vaultMembers.deleteRole('r-viewer');
+    expect(vaultMembers.roles.map((r) => r.id)).not.toContain('r-viewer');
   });
 });
 

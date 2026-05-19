@@ -17,9 +17,12 @@ import {
   type InviteCreated,
 } from './types.ts';
 import * as api from './api.ts';
+import { hasCapability } from './capabilities.ts';
 
 // Re-export so callers can import the shape from one place.
 export type CreateInviteInput = api.CreateInviteInput;
+export type CreateRoleInput = api.CreateRoleInput;
+export type UpdateRoleInput = api.UpdateRoleInput;
 
 class VaultMembersStore {
   vaultID = $state<string | null>(null);
@@ -92,6 +95,15 @@ class VaultMembersStore {
   capabilitiesOf(userID: string | undefined | null): string[] {
     if (!userID) return [];
     return this.members.find((m) => m.user_id === userID)?.capabilities ?? [];
+  }
+
+  /** Wildcard-aware capability check for a given user. Use this rather
+   *  than `capabilitiesOf(x).includes(needed)` — the server's
+   *  CapabilitySet treats `*` and `prefix.*` as wildcards, so a raw
+   *  includes() would deny admins (whose role carries `*`) every
+   *  affordance. See lib/capabilities.ts. */
+  userHasCapability(userID: string | undefined | null, needed: string): boolean {
+    return hasCapability(this.capabilitiesOf(userID), needed);
   }
 
   async changeRole(userID: string, roleID: string): Promise<void> {
@@ -167,6 +179,57 @@ class VaultMembersStore {
       // already toasted by the caller; ignore on background refresh
     }
   }
+
+  // ---- role mutations -----------------------------------------------------
+
+  async createRole(input: CreateRoleInput): Promise<RemoteRole> {
+    if (!this.vaultID) throw new Error('no vault selected');
+    try {
+      const role = await api.createRole(this.vaultID, input);
+      this.roles = [...this.roles, role];
+      return role;
+    } catch (e) {
+      this.lastError = describeError(e);
+      throw e;
+    }
+  }
+
+  async updateRole(roleID: string, input: UpdateRoleInput): Promise<RemoteRole> {
+    if (!this.vaultID) throw new Error('no vault selected');
+    const prev = this.roles;
+    // Optimistic merge so the form feels instant. Seed roles are
+    // guarded by the server anyway; the modal hides edit affordances
+    // for them so this branch only fires on custom roles.
+    this.roles = this.roles.map((r) =>
+      r.id === roleID
+        ? { ...r, name: input.name ?? r.name, capabilities: input.capabilities ?? r.capabilities }
+        : r,
+    );
+    try {
+      const role = await api.updateRole(this.vaultID, roleID, input);
+      // Replace the optimistic row with the server's canonical one
+      // (preserves any server-side normalisation, e.g. dedup).
+      this.roles = this.roles.map((r) => (r.id === roleID ? role : r));
+      return role;
+    } catch (e) {
+      this.roles = prev;
+      this.lastError = describeError(e);
+      throw e;
+    }
+  }
+
+  async deleteRole(roleID: string): Promise<void> {
+    if (!this.vaultID) return;
+    const prev = this.roles;
+    this.roles = this.roles.filter((r) => r.id !== roleID);
+    try {
+      await api.deleteRole(this.vaultID, roleID);
+    } catch (e) {
+      this.roles = prev;
+      this.lastError = describeError(e);
+      throw e;
+    }
+  }
 }
 
 function describeError(err: unknown): string {
@@ -180,6 +243,13 @@ function describeError(err: unknown): string {
         return 'You can’t remove or demote the last admin.';
       case 'self_remove':
         return 'You can’t remove yourself from the vault.';
+      case 'seed_role_immutable':
+      case 'seed_role':
+        return 'Built-in roles can’t be edited or deleted.';
+      case 'role_in_use':
+        return 'Can’t delete a role that still has members. Reassign them first.';
+      case 'role_name_taken':
+        return 'A role with that name already exists.';
       case 'invite_expired':
         return 'This invite has expired.';
       case 'invite_revoked':

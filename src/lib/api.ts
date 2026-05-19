@@ -180,6 +180,43 @@ export async function listVaultRoles(vaultID: string): Promise<RemoteRole[]> {
   return out.roles ?? [];
 }
 
+export interface CreateRoleInput {
+  name: string;
+  capabilities: string[];
+}
+
+export interface UpdateRoleInput {
+  name?: string;
+  capabilities?: string[];
+}
+
+export async function createRole(
+  vaultID: string,
+  input: CreateRoleInput,
+): Promise<RemoteRole> {
+  return request<RemoteRole>(`/api/vaults/${vaultID}/roles`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function updateRole(
+  vaultID: string,
+  roleID: string,
+  input: UpdateRoleInput,
+): Promise<RemoteRole> {
+  return request<RemoteRole>(`/api/vaults/${vaultID}/roles/${encodeURIComponent(roleID)}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export async function deleteRole(vaultID: string, roleID: string): Promise<void> {
+  await request<void>(`/api/vaults/${vaultID}/roles/${encodeURIComponent(roleID)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function listVaultMembers(vaultID: string): Promise<RemoteMember[]> {
   const out = await request<{ members: RemoteMember[] }>(`/api/vaults/${vaultID}/members`);
   return out.members ?? [];

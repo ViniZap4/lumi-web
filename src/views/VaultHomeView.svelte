@@ -6,8 +6,12 @@
   import { renderMarkdown } from '../lib/markdown.ts';
   import { ApiError } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
-  import { EditorSession } from '../lib/editor-session.svelte.ts';
-  import NoteEditor from '../components/NoteEditor.svelte';
+  // Editor + Yjs runtime is lazy-loaded on first edit; types stay
+  // static so the rest of the view keeps its existing typing.
+  import type { EditorSession as EditorSessionT } from '../lib/editor-session.svelte.ts';
+
+  type NoteEditorComp = typeof import('../components/NoteEditor.svelte').default;
+  type EditorSessionCtor = typeof import('../lib/editor-session.svelte.ts').EditorSession;
 
   // Vim-style list cursor. Tracks position even when selectedID is null.
   let cursor = $state(0);
@@ -20,10 +24,15 @@
 
   // Slice 4.4 — Yjs+CM6 editor session. EditorSession owns the Y.Doc
   // and provider; reactive `status` + `peers` flow into the bar.
+  // Slice 4.6 — the editor module + Yjs runtime are split into an
+  // async chunk; module references are cached after the first load.
   let editMode = $state(false);
-  let editSession = $state<EditorSession | null>(null);
+  let editSession = $state<EditorSessionT | null>(null);
   let editError = $state<string | null>(null);
   let saving = $state(false);
+  let editorLoading = $state(false);
+  let NoteEditor = $state<NoteEditorComp | null>(null);
+  let EditorSession = $state<EditorSessionCtor | null>(null);
 
   let lastDelete = $state(0); // 'dd' double-tap timestamp
 
@@ -110,7 +119,7 @@
     // Enter edit on the focused note: 'e'.
     if (e.key === 'e' && notes.selectedID) {
       e.preventDefault();
-      enterEdit();
+      void enterEdit();
       return;
     }
     // Delete focused: 'dd' double-tap.
@@ -190,23 +199,45 @@
     }
   }
 
-  function enterEdit(): void {
+  async function enterEdit(): Promise<void> {
     if (!notes.content || !auth.user || !vaults.selectedID || !notes.selectedID) return;
     const token = api.getToken();
     if (!token) return;
-    const sess = new EditorSession();
-    // Seed the Y.Text with the current FS body BEFORE wiring the
-    // provider — if there's no peer yet, this becomes the initial
-    // doc state; if a peer is already editing, the WS provider's
-    // first SyncStep2 will reconcile on connect. Either way the user
-    // sees their saved content immediately, not a flash of blank.
-    if ((notes.content.body ?? '') !== '' && sess.ytext.length === 0) {
-      sess.ytext.insert(0, notes.content.body ?? '');
-    }
-    sess.open(vaults.selectedID, notes.selectedID, token, auth.user);
-    editSession = sess;
-    editMode = true;
+    if (editorLoading) return;
+
+    editorLoading = true;
     editError = null;
+    try {
+      // First edit per session pulls the CM6 + vim + y-codemirror.next
+      // + yjs + y-websocket chunks. Subsequent edits reuse the cached
+      // module references. Loaded in parallel so latency is one
+      // round-trip, not two.
+      if (!NoteEditor || !EditorSession) {
+        const [editorMod, sessionMod] = await Promise.all([
+          import('../components/NoteEditor.svelte'),
+          import('../lib/editor-session.svelte.ts'),
+        ]);
+        NoteEditor = editorMod.default;
+        EditorSession = sessionMod.EditorSession;
+      }
+
+      const sess = new EditorSession();
+      // Seed the Y.Text with the current FS body BEFORE wiring the
+      // provider — if there's no peer yet, this becomes the initial
+      // doc state; if a peer is already editing, the WS provider's
+      // first SyncStep2 will reconcile on connect. Either way the user
+      // sees their saved content immediately, not a flash of blank.
+      if (notes.content && (notes.content.body ?? '') !== '' && sess.ytext.length === 0) {
+        sess.ytext.insert(0, notes.content.body ?? '');
+      }
+      sess.open(vaults.selectedID, notes.selectedID, token, auth.user);
+      editSession = sess;
+      editMode = true;
+    } catch (e) {
+      editError = `Failed to load editor: ${(e as Error).message}`;
+    } finally {
+      editorLoading = false;
+    }
   }
 
   function cancelEdit(): void {
@@ -309,7 +340,7 @@
       {:else if notes.contentError}
         <div class="error">{notes.contentError}</div>
       {:else if notes.content}
-        {#if editMode && editSession}
+        {#if editMode && editSession && NoteEditor}
           <div class="editor-frame">
             <div class="editor-bar">
               <div class="editor-meta">
@@ -339,11 +370,15 @@
               <kbd>Esc</kbd> closes the editor.
             </div>
           </div>
+        {:else if editorLoading}
+          <div class="placeholder">Loading editor…</div>
         {:else}
           <article class="rendered">
             <h1 class="rendered-title">{notes.selected?.title}</h1>
             <div class="rendered-actions">
-              <button class="link-button" onclick={enterEdit} type="button">Edit</button>
+              <button class="link-button" onclick={() => void enterEdit()} disabled={editorLoading} type="button">
+                {editorLoading ? 'Loading…' : 'Edit'}
+              </button>
               <button class="link-button danger" onclick={() => (modal = 'delete-confirm')} type="button">Delete</button>
             </div>
             <!-- DOMPurify-sanitised HTML, see lib/markdown.ts. -->

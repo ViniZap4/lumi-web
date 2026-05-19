@@ -95,6 +95,26 @@ class ThemeStore {
     this.apply();
   }
 
+  /** Pick which theme applies when mode resolves to "dark". Silently
+   *  ignores names that don't exist or aren't dark themes — guards
+   *  against bad localStorage data and any future UI bugs. */
+  setDarkName(name: string): void {
+    const t = themes[name];
+    if (!t || !t.isDark) return;
+    this.settings = { ...this.settings, darkName: name };
+    persist(this.settings);
+    this.apply();
+  }
+
+  /** Pick which theme applies when mode resolves to "light". */
+  setLightName(name: string): void {
+    const t = themes[name];
+    if (!t || t.isDark) return;
+    this.settings = { ...this.settings, lightName: name };
+    persist(this.settings);
+    this.apply();
+  }
+
   destroy(): void {
     if (this.mediaQuery && this.mediaHandler) {
       this.mediaQuery.removeEventListener('change', this.mediaHandler);

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { auth } from '../lib/auth.svelte.ts';
   import { vaults } from '../lib/vaults.svelte.ts';
+  import { uiState } from '../lib/uistate.svelte.ts';
   import type { Vault } from '../lib/types.ts';
 
   // Keyboard navigation cursor (vim-style j/k + Enter).
@@ -58,6 +59,7 @@
     <div class="brand">lumi</div>
     <div class="who">
       <span class="user">{auth.user?.display_name ?? auth.user?.username}</span>
+      <button class="link-button" onclick={() => uiState.openThemePicker()} type="button">Theme</button>
       <button class="link-button" onclick={signOut} type="button">Sign out</button>
     </div>
   </header>

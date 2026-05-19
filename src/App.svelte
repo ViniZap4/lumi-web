@@ -3,10 +3,12 @@
   import { auth } from './lib/auth.svelte.ts';
   import { vaults } from './lib/vaults.svelte.ts';
   import { theme } from './lib/theme.svelte.ts';
+  import { uiState } from './lib/uistate.svelte.ts';
 
   import LoginView from './views/LoginView.svelte';
   import VaultsView from './views/VaultsView.svelte';
   import VaultHomeView from './views/VaultHomeView.svelte';
+  import ThemePickerModal from './components/ThemePickerModal.svelte';
 
   onMount(async () => {
     theme.init();
@@ -34,6 +36,10 @@
   <VaultsView />
 {:else}
   <VaultHomeView />
+{/if}
+
+{#if uiState.themePickerOpen}
+  <ThemePickerModal />
 {/if}
 
 <style>

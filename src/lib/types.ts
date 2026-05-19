@@ -48,6 +48,33 @@ export interface InviteAcceptExistingResponse {
   vault: InviteVaultSummary;
 }
 
+// Server's invite list shape — these are the admin-facing rows for
+// managing existing invite links inside a vault. The token field is
+// the raw invite token; build the link with the same URL pattern
+// LoginView consumes (`/?invite=<token>`).
+export interface Invite {
+  token: string;
+  vault_id: string;
+  role_id: string;
+  inviter_user_id: string;
+  email_hint?: string;
+  max_uses: number;
+  use_count: number;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string | null;
+}
+
+// Server's response when an invite is freshly created. Includes the
+// pre-built URL so the UI doesn't have to guess the right origin.
+export interface InviteCreated {
+  token: string;
+  url: string;
+  expires_at: string;
+  max_uses: number;
+  use_count: number;
+}
+
 export interface RemoteRole {
   id: string;
   vault_id: string;

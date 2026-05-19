@@ -22,6 +22,8 @@ import {
   type ServerError,
   type InviteAcceptSignupResponse,
   type InviteAcceptExistingResponse,
+  type Invite,
+  type InviteCreated,
 } from './types.ts';
 
 export const API_URL: string =
@@ -181,6 +183,55 @@ export async function listVaultRoles(vaultID: string): Promise<RemoteRole[]> {
 export async function listVaultMembers(vaultID: string): Promise<RemoteMember[]> {
   const out = await request<{ members: RemoteMember[] }>(`/api/vaults/${vaultID}/members`);
   return out.members ?? [];
+}
+
+export async function updateMemberRole(
+  vaultID: string,
+  userID: string,
+  roleID: string,
+): Promise<void> {
+  await request<void>(`/api/vaults/${vaultID}/members/${userID}`, {
+    method: 'PATCH',
+    body: { role_id: roleID },
+  });
+}
+
+export async function removeMember(vaultID: string, userID: string): Promise<void> {
+  await request<void>(`/api/vaults/${vaultID}/members/${userID}`, { method: 'DELETE' });
+}
+
+// ---- invites (vault-scoped management surface) -----------------------------
+//
+// Separate from the top-level invite *accept* helpers — these manage
+// the lifecycle of invite links for a given vault.
+
+export async function listVaultInvites(vaultID: string): Promise<Invite[]> {
+  const out = await request<{ invites: Invite[] }>(`/api/vaults/${vaultID}/invites`);
+  return out.invites ?? [];
+}
+
+export interface CreateInviteInput {
+  role_id: string;
+  max_uses: number;
+  expires_at: string; // ISO 8601
+  email_hint?: string;
+}
+
+export async function createInvite(
+  vaultID: string,
+  input: CreateInviteInput,
+): Promise<InviteCreated> {
+  return request<InviteCreated>(`/api/vaults/${vaultID}/invites`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function revokeInvite(vaultID: string, token: string): Promise<void> {
+  await request<void>(
+    `/api/vaults/${vaultID}/invites/${encodeURIComponent(token)}`,
+    { method: 'DELETE' },
+  );
 }
 
 // ---- notes -----------------------------------------------------------------

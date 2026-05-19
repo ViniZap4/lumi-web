@@ -7,6 +7,9 @@
   import { ApiError } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
+  import VaultSettingsModal from '../components/VaultSettingsModal.svelte';
+
+  let showSettings = $state(false);
   // Editor + Yjs runtime is lazy-loaded on first edit; types stay
   // static so the rest of the view keeps its existing typing.
   import type { EditorSession as EditorSessionT } from '../lib/editor-session.svelte.ts';
@@ -297,6 +300,7 @@
     <div class="topbar-right">
       <button class="link-button" onclick={openNewNote} type="button">+ New</button>
       <button class="link-button" onclick={() => void notes.refresh()} type="button">Refresh</button>
+      <button class="link-button" onclick={() => (showSettings = true)} type="button">Settings</button>
       <button class="link-button" onclick={() => uiState.openThemePicker()} type="button">Theme</button>
     </div>
   </header>
@@ -455,6 +459,10 @@
         </div>
       </div>
     </div>
+  {/if}
+
+  {#if showSettings}
+    <VaultSettingsModal onclose={() => (showSettings = false)} />
   {/if}
 </div>
 

@@ -175,6 +175,29 @@ export async function createVault(input: CreateVaultInput): Promise<Vault> {
   return request<Vault>('/api/vaults', { method: 'POST', body: input });
 }
 
+// v3 Phase O — hand the vault to another member. Owner-only on the
+// server (403 otherwise); 400 `validation` when the target isn't a
+// member, `user_id_required` when the id is blank. Returns the fresh
+// vault DTO with the new owner_user_id.
+export async function transferOwnership(vaultID: string, userID: string): Promise<Vault> {
+  return request<Vault>(`/api/vaults/${vaultID}/transfer-ownership`, {
+    method: 'POST',
+    body: { user_id: userID },
+  });
+}
+
+// v3 Phase O — fork the vault's current state into a brand-new vault
+// owned by `recipientUsername` (no membership, no live link). Requires
+// capability vault.export. 400 `recipient_not_found` /
+// `recipient_username_required` on bad input. Returns the fork's DTO
+// (carries `copied_from` provenance).
+export async function copyVault(vaultID: string, recipientUsername: string): Promise<Vault> {
+  return request<Vault>(`/api/vaults/${vaultID}/copies`, {
+    method: 'POST',
+    body: { recipient_username: recipientUsername },
+  });
+}
+
 export async function listVaultRoles(vaultID: string): Promise<RemoteRole[]> {
   const out = await request<{ roles: RemoteRole[] }>(`/api/vaults/${vaultID}/roles`);
   return out.roles ?? [];

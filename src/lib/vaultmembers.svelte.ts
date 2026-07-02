@@ -243,6 +243,8 @@ function describeError(err: unknown): string {
         return 'You can’t remove or demote the last admin.';
       case 'self_remove':
         return 'You can’t remove yourself from the vault.';
+      case 'owner_protected':
+        return 'The vault owner can’t be removed or demoted below Admin. Transfer ownership first.';
       case 'seed_role_immutable':
       case 'seed_role':
         return 'Built-in roles can’t be edited or deleted.';

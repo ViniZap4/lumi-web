@@ -15,6 +15,8 @@ vi.mock('./api.ts', async (importOriginal) => {
     ...actual,
     listVaults: vi.fn(async () => []),
     createVault: vi.fn(),
+    transferOwnership: vi.fn(),
+    copyVault: vi.fn(),
   };
 });
 
@@ -28,6 +30,7 @@ const sampleVault = (over: Partial<Vault> = {}): Vault => ({
   name: 'Work',
   created_by: 'u1',
   created_at: '2026-05-19T00:00:00Z',
+  owner_user_id: 'u1',
   ...over,
 });
 
@@ -66,5 +69,112 @@ describe('VaultStore.create', () => {
     vi.mocked(api.createVault).mockResolvedValueOnce(sampleVault());
     await vaults.create({ name: 'X', slug: 'custom' });
     expect(api.createVault).toHaveBeenCalledWith({ name: 'X', slug: 'custom' });
+  });
+});
+
+describe('VaultStore owner exposure (v3 Phase O)', () => {
+  it('selectedOwnerID mirrors the selected vault\'s owner_user_id', () => {
+    vaults.list = [
+      sampleVault({ id: 'v1', owner_user_id: 'u-alice' }),
+      sampleVault({ id: 'v2', owner_user_id: 'u-bob' }),
+    ];
+    vaults.select('v2');
+    expect(vaults.selectedOwnerID).toBe('u-bob');
+    vaults.select('v1');
+    expect(vaults.selectedOwnerID).toBe('u-alice');
+  });
+
+  it('selectedOwnerID is null with no selection', () => {
+    vaults.list = [sampleVault()];
+    expect(vaults.selectedOwnerID).toBeNull();
+  });
+
+  it('isOwner compares against the selected vault and is null-safe', () => {
+    vaults.list = [sampleVault({ id: 'v1', owner_user_id: 'u-alice' })];
+    vaults.select('v1');
+    expect(vaults.isOwner('u-alice')).toBe(true);
+    expect(vaults.isOwner('u-bob')).toBe(false);
+    expect(vaults.isOwner(null)).toBe(false);
+    expect(vaults.isOwner(undefined)).toBe(false);
+    vaults.select(null);
+    expect(vaults.isOwner('u-alice')).toBe(false);
+  });
+});
+
+describe('VaultStore.transferOwnership', () => {
+  it('replaces the vault row with the server DTO (new owner)', async () => {
+    vaults.list = [
+      sampleVault({ id: 'v1', owner_user_id: 'u-alice' }),
+      sampleVault({ id: 'v2', owner_user_id: 'u-alice' }),
+    ];
+    vaults.select('v1');
+    vi.mocked(api.transferOwnership).mockResolvedValueOnce(
+      sampleVault({ id: 'v1', owner_user_id: 'u-bob' }),
+    );
+
+    const out = await vaults.transferOwnership('v1', 'u-bob');
+    expect(out.owner_user_id).toBe('u-bob');
+    expect(api.transferOwnership).toHaveBeenCalledWith('v1', 'u-bob');
+    expect(vaults.selectedOwnerID).toBe('u-bob');
+    // The other vault is untouched.
+    expect(vaults.list.find((v) => v.id === 'v2')?.owner_user_id).toBe('u-alice');
+    expect(vaults.lastError).toBeNull();
+  });
+
+  it('surfaces validation errors into lastError and rethrows', async () => {
+    vaults.list = [sampleVault({ id: 'v1', owner_user_id: 'u-alice' })];
+    vi.mocked(api.transferOwnership).mockRejectedValueOnce(
+      new ApiError(400, { error: 'validation' }),
+    );
+    await expect(vaults.transferOwnership('v1', 'u-ghost')).rejects.toBeInstanceOf(ApiError);
+    expect(vaults.lastError).toBe('validation');
+    // List is untouched on failure.
+    expect(vaults.list[0].owner_user_id).toBe('u-alice');
+  });
+
+  it('surfaces 403 (not the owner) and rethrows', async () => {
+    vaults.list = [sampleVault({ id: 'v1' })];
+    vi.mocked(api.transferOwnership).mockRejectedValueOnce(
+      new ApiError(403, { error: 'forbidden', detail: 'only the owner may transfer' }),
+    );
+    await expect(vaults.transferOwnership('v1', 'u-bob')).rejects.toMatchObject({ status: 403 });
+    expect(vaults.lastError).toBe('only the owner may transfer');
+  });
+});
+
+describe('VaultStore.sendCopy', () => {
+  it('returns the fork DTO without touching the local list', async () => {
+    vaults.list = [sampleVault({ id: 'v1' })];
+    const fork = sampleVault({
+      id: 'v-fork',
+      slug: 'work-copy',
+      name: 'Work',
+      owner_user_id: 'u-bob',
+      copied_from: {
+        vault_id: 'v1',
+        slug: 'work',
+        copied_by: 'u-alice',
+        copied_at: '2026-07-02T00:00:00Z',
+      },
+    });
+    vi.mocked(api.copyVault).mockResolvedValueOnce(fork);
+
+    const out = await vaults.sendCopy('v1', 'bob');
+    expect(out.id).toBe('v-fork');
+    expect(out.copied_from?.vault_id).toBe('v1');
+    expect(api.copyVault).toHaveBeenCalledWith('v1', 'bob');
+    // We're not a member of the fork — it must not enter our list.
+    expect(vaults.list.map((v) => v.id)).toEqual(['v1']);
+    expect(vaults.lastError).toBeNull();
+  });
+
+  it('surfaces recipient_not_found into lastError and rethrows', async () => {
+    vi.mocked(api.copyVault).mockRejectedValueOnce(
+      new ApiError(400, { error: 'recipient_not_found' }),
+    );
+    await expect(vaults.sendCopy('v1', 'ghost')).rejects.toMatchObject({
+      code: 'recipient_not_found',
+    });
+    expect(vaults.lastError).toBe('recipient_not_found');
   });
 });

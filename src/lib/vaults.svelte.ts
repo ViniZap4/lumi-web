@@ -19,6 +19,18 @@ class VaultStore {
     this.selectedID == null ? null : this.list.find((v) => v.id === this.selectedID) ?? null,
   );
 
+  // v3 Phase O: owner of the currently-selected vault. Views compare
+  // member user_ids against this to render the "owner" badge and to
+  // guard remove / role-change affordances.
+  selectedOwnerID = $derived<string | null>(this.selected?.owner_user_id ?? null);
+
+  /** True when `userID` owns the currently-selected vault. Null-safe:
+   *  returns false before a vault is selected or while signed out. */
+  isOwner(userID: string | undefined | null): boolean {
+    if (!userID || this.selectedOwnerID == null) return false;
+    return this.selectedOwnerID === userID;
+  }
+
   async load(): Promise<void> {
     this.loading = true;
     this.lastError = null;
@@ -62,6 +74,52 @@ class VaultStore {
       // consistent with the next refresh.
       this.list = [v, ...this.list.filter((x) => x.id !== v.id)];
       return v;
+    } catch (e) {
+      if (e instanceof ApiError) {
+        this.lastError = e.detail ?? e.code;
+      } else if (e instanceof Error) {
+        this.lastError = e.message;
+      } else {
+        this.lastError = 'Unknown error';
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * v3 Phase O — transfer ownership of a vault to another member.
+   * Replaces the vault's row in the live list with the server's fresh
+   * DTO (new owner_user_id) so derived owner state updates in place.
+   * Errors set `lastError` and rethrow so callers can render inline.
+   */
+  async transferOwnership(vaultID: string, userID: string): Promise<Vault> {
+    this.lastError = null;
+    try {
+      const v = await api.transferOwnership(vaultID, userID);
+      this.list = this.list.map((x) => (x.id === v.id ? v : x));
+      return v;
+    } catch (e) {
+      if (e instanceof ApiError) {
+        this.lastError = e.detail ?? e.code;
+      } else if (e instanceof Error) {
+        this.lastError = e.message;
+      } else {
+        this.lastError = 'Unknown error';
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * v3 Phase O — send a copy of a vault to another user by username.
+   * The fork belongs to the recipient (we're not a member of it), so
+   * the local list is untouched; the returned DTO is only for the
+   * confirmation message. Errors set `lastError` and rethrow.
+   */
+  async sendCopy(vaultID: string, recipientUsername: string): Promise<Vault> {
+    this.lastError = null;
+    try {
+      return await api.copyVault(vaultID, recipientUsername);
     } catch (e) {
       if (e instanceof ApiError) {
         this.lastError = e.detail ?? e.code;

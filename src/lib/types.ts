@@ -16,12 +16,26 @@ export interface SessionResponse {
   user: SessionUser;
 }
 
+// Provenance stamp on a vault created via "share a copy" (v3 Phase O).
+// Records where the fork came from; absent on organically-created vaults.
+export interface VaultCopiedFrom {
+  vault_id: string;
+  slug: string;
+  copied_by: string;
+  copied_at: string;
+}
+
 export interface Vault {
   id: string;
   slug: string;
   name: string;
   created_by: string;
   created_at: string;
+  // v3 Phase O: every vault has exactly one owner. The owner always
+  // holds an Admin-equivalent grant that members.manage can't remove.
+  owner_user_id: string;
+  // Present only on vaults forked via POST /copies.
+  copied_from?: VaultCopiedFrom | null;
 }
 
 // The server's invite-accept endpoints return a slimmer vault payload
@@ -119,10 +133,13 @@ export interface NoteSnapshot {
 }
 
 // Server error envelope — every 4xx / 5xx response. detail is optional
-// and free-form; callers usually surface error verbatim.
+// and free-form; callers usually surface error verbatim. Some newer
+// endpoints (owner_protected, Phase O) put the human-readable text in
+// `message` instead of `detail` — ApiError normalises both into detail.
 export interface ServerError {
   error: string;
   detail?: string;
+  message?: string;
   capability?: string; // present on capability_missing
 }
 
@@ -135,10 +152,10 @@ export class ApiError extends Error {
   capability?: string;
 
   constructor(status: number, body: ServerError) {
-    super(body.detail ?? body.error);
+    super(body.detail ?? body.message ?? body.error);
     this.status = status;
     this.code = body.error;
-    this.detail = body.detail;
+    this.detail = body.detail ?? body.message;
     this.capability = body.capability;
   }
 }

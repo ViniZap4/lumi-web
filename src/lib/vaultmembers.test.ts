@@ -163,6 +163,19 @@ describe('VaultMembersStore.changeRole', () => {
     expect(vaultMembers.lastError).toBe('You can’t remove or demote the last admin.');
   });
 
+  it('rolls back and maps owner_protected on demote-the-owner (v3 Phase O)', async () => {
+    await vaultMembers.openVault('v1');
+    vi.mocked(api.updateMemberRole).mockRejectedValueOnce(
+      new ApiError(409, { error: 'owner_protected', message: 'owner must stay Admin' }),
+    );
+    await expect(vaultMembers.changeRole('u-alice', 'r-viewer')).rejects.toBeInstanceOf(ApiError);
+    const alicePost = vaultMembers.members.find((m) => m.user_id === 'u-alice');
+    expect(alicePost?.role_id).toBe('r-admin');
+    expect(vaultMembers.lastError).toBe(
+      'The vault owner can’t be removed or demoted below Admin. Transfer ownership first.',
+    );
+  });
+
   it('no-ops when target role doesn\'t exist', async () => {
     await vaultMembers.openVault('v1');
     await vaultMembers.changeRole('u-bob', 'r-bogus');
@@ -186,6 +199,21 @@ describe('VaultMembersStore.removeMember', () => {
     await expect(vaultMembers.removeMember('u-alice')).rejects.toBeInstanceOf(ApiError);
     expect(vaultMembers.members).toHaveLength(2);
     expect(vaultMembers.lastError).toBe('You can’t remove yourself from the vault.');
+  });
+
+  it('rolls back and maps owner_protected (v3 Phase O) to friendly text', async () => {
+    // The server refuses to remove the vault owner. The envelope
+    // carries `message` (not `detail`); describeError maps the code
+    // to a stable friendly string either way.
+    await vaultMembers.openVault('v1');
+    vi.mocked(api.removeMember).mockRejectedValueOnce(
+      new ApiError(409, { error: 'owner_protected', message: 'owner cannot be removed' }),
+    );
+    await expect(vaultMembers.removeMember('u-alice')).rejects.toBeInstanceOf(ApiError);
+    expect(vaultMembers.members).toHaveLength(2);
+    expect(vaultMembers.lastError).toBe(
+      'The vault owner can’t be removed or demoted below Admin. Transfer ownership first.',
+    );
   });
 });
 

@@ -309,6 +309,15 @@
     <aside class="note-list" aria-label="Notes">
       {#if notes.loadingList}
         <div class="placeholder">Loading…</div>
+      {:else if notes.listErrorStatus === 403}
+        <!-- The vault IS in our list (we routed here from it) but its
+             notes 403 — on a federated replica this usually means the
+             home server hasn't granted this account access yet. -->
+        <div class="placeholder">
+          You don’t have access to this vault’s notes yet. If this is a
+          federated replica, you may be awaiting an access grant from
+          the home server — ask its operator, then refresh.
+        </div>
       {:else if notes.listError}
         <div class="error">{notes.listError}</div>
       {:else if notes.list.length === 0}

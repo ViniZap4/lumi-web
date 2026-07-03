@@ -19,13 +19,22 @@
     type CreateRoleInput,
     type UpdateRoleInput,
   } from '../lib/vaultmembers.svelte.ts';
-  import { ApiError, type Invite, type RemoteMember, type RemoteRole } from '../lib/types.ts';
+  import { federation, validateMemberKey } from '../lib/federation.svelte.ts';
+  import {
+    ApiError,
+    type Federation,
+    type FederationInvite,
+    type FederatedMember,
+    type Invite,
+    type RemoteMember,
+    type RemoteRole,
+  } from '../lib/types.ts';
   import { CAPABILITY_CATALOGUE, hasCapability } from '../lib/capabilities.ts';
 
   interface Props { onclose: () => void; }
   const { onclose }: Props = $props();
 
-  type Tab = 'members' | 'invites' | 'roles' | 'sharing';
+  type Tab = 'members' | 'invites' | 'roles' | 'sharing' | 'federation';
   let tab = $state<Tab>('members');
 
   // ---- capability gates (UX only — server still enforces) ----
@@ -38,6 +47,7 @@
   let canInvite = $derived(hasCapability(myCaps, 'members.invite'));
   let canManageRoles = $derived(hasCapability(myCaps, 'roles.manage'));
   let canExport = $derived(hasCapability(myCaps, 'vault.export'));
+  let canFederate = $derived(hasCapability(myCaps, 'vault.federate'));
 
   // ---- ownership (v3 Phase O) ----
   //
@@ -83,6 +93,29 @@
     return Object.entries(groups);
   })();
 
+  // ---- federation state (v3 F-phases) ----
+  let fedRowError = $state<string | null>(null);
+  let pendingRevokeFederation = $state<Federation | null>(null);
+  let fedRevokeSubmitting = $state(false);
+  let pendingRemoveFedMember = $state<FederatedMember | null>(null);
+
+  // Federation-invite create form. Both fields optional: hint pins the
+  // invite to one server URL, blank expiry defers to the server.
+  let fedInviteOpen = $state(false);
+  let fedInviteServerHint = $state('');
+  let fedInviteExpiresAt = $state('');
+  let fedInviteSubmitting = $state(false);
+  let fedInviteError = $state<string | null>(null);
+  // The raw token — held in memory only, shown ONCE after creation.
+  let lastFedInviteToken = $state<string | null>(null);
+  let fedTokenCopiedAt = $state(0);
+
+  // Federated-member add form.
+  let fedMemberKey = $state('');
+  let fedMemberRoleID = $state('');
+  let fedMemberSubmitting = $state(false);
+  let fedMemberError = $state<string | null>(null);
+
   // ---- create-invite form state ----
   let createOpen = $state(false);
   let inviteRoleID = $state<string>('');
@@ -108,10 +141,16 @@
       inviteRoleID = vaultMembers.roles[0].id;
     }
   });
+  $effect(() => {
+    if (!fedMemberRoleID && vaultMembers.roles.length > 0) {
+      fedMemberRoleID = vaultMembers.roles[0].id;
+    }
+  });
 
   // Hydrate when the modal mounts.
   onMount(() => {
     void vaultMembers.openVault(vaults.selectedID);
+    void federation.openVault(vaults.selectedID);
     window.addEventListener('keydown', handleKey);
   });
   onDestroy(() => {
@@ -135,12 +174,24 @@
         pendingDeleteRole = null;
         return;
       }
+      if (pendingRevokeFederation) {
+        pendingRevokeFederation = null;
+        return;
+      }
+      if (pendingRemoveFedMember) {
+        pendingRemoveFedMember = null;
+        return;
+      }
       if (roleEditorOpen) {
         closeRoleEditor();
         return;
       }
       if (createOpen) {
         createOpen = false;
+        return;
+      }
+      if (fedInviteOpen) {
+        fedInviteOpen = false;
         return;
       }
       onclose();
@@ -338,6 +389,156 @@
     }
   }
 
+  // ---- federation actions (v3 F-phases) ----
+
+  function fedErrorText(e: unknown): string {
+    if (e instanceof ApiError) {
+      if (e.code === 'capability_missing' || e.code === 'forbidden') {
+        return 'You don’t have permission for that action.';
+      }
+      if (e.code === 'conflict') {
+        return 'That federation link was already revoked.';
+      }
+      return e.detail ?? e.code;
+    }
+    return (e as Error).message;
+  }
+
+  function openFedInviteForm(): void {
+    fedInviteOpen = true;
+    fedInviteError = null;
+    lastFedInviteToken = null;
+  }
+
+  function closeFedInviteForm(): void {
+    fedInviteOpen = false;
+    fedInviteError = null;
+    fedInviteServerHint = '';
+    fedInviteExpiresAt = '';
+    // Don't drop lastFedInviteToken — the operator may still need to
+    // copy it; it's gone for good once the modal closes.
+  }
+
+  async function submitFedInvite(e: Event): Promise<void> {
+    e.preventDefault();
+    if (fedInviteSubmitting) return;
+    let expIso: string | undefined;
+    if (fedInviteExpiresAt) {
+      const t = new Date(fedInviteExpiresAt).getTime();
+      if (Number.isNaN(t)) {
+        fedInviteError = 'Expiry date is invalid.';
+        return;
+      }
+      expIso = new Date(fedInviteExpiresAt).toISOString();
+    }
+    fedInviteSubmitting = true;
+    fedInviteError = null;
+    try {
+      const created = await federation.createInvite({
+        server_url_hint: fedInviteServerHint.trim() || undefined,
+        expires_at: expIso,
+      });
+      lastFedInviteToken = created.token;
+      closeFedInviteForm();
+    } catch (e) {
+      fedInviteError = fedErrorText(e);
+    } finally {
+      fedInviteSubmitting = false;
+    }
+  }
+
+  async function copyFedToken(token: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(token);
+      fedTokenCopiedAt = Date.now();
+    } catch {
+      // Clipboard may be unavailable (insecure context, etc.).
+    }
+  }
+
+  async function onRevokeFedInvite(inv: FederationInvite): Promise<void> {
+    fedRowError = null;
+    try {
+      await federation.revokeInvite(inv.token);
+    } catch (e) {
+      fedRowError = fedErrorText(e);
+    }
+  }
+
+  async function confirmRevokeFederation(): Promise<void> {
+    if (!pendingRevokeFederation || fedRevokeSubmitting) return;
+    fedRevokeSubmitting = true;
+    fedRowError = null;
+    try {
+      await federation.revokeFederation(pendingRevokeFederation.id);
+      pendingRevokeFederation = null;
+    } catch (e) {
+      pendingRevokeFederation = null;
+      fedRowError = fedErrorText(e);
+    } finally {
+      fedRevokeSubmitting = false;
+    }
+  }
+
+  async function submitFedMember(e: Event): Promise<void> {
+    e.preventDefault();
+    if (fedMemberSubmitting || !fedMemberRoleID) return;
+    const key = fedMemberKey.trim();
+    // Client-side pre-check so a malformed key doesn't need a
+    // round-trip; the server revalidates (400 validation) anyway.
+    const problem = validateMemberKey(key);
+    if (problem) {
+      fedMemberError = problem;
+      return;
+    }
+    fedMemberSubmitting = true;
+    fedMemberError = null;
+    try {
+      await federation.addMember(key, fedMemberRoleID);
+      fedMemberKey = '';
+    } catch (e) {
+      fedMemberError = fedErrorText(e);
+    } finally {
+      fedMemberSubmitting = false;
+    }
+  }
+
+  async function onChangeFedMemberRole(m: FederatedMember, e: Event): Promise<void> {
+    const select = e.target as HTMLSelectElement;
+    const newRoleID = select.value;
+    if (newRoleID === m.role_id) return;
+    fedRowError = null;
+    const newRole = vaultMembers.roles.find((r) => r.id === newRoleID);
+    try {
+      await federation.changeMemberRole(m.member_key, newRoleID, newRole?.name);
+    } catch (e) {
+      select.value = m.role_id; // match the rolled-back model
+      fedRowError = fedErrorText(e);
+    }
+  }
+
+  async function confirmRemoveFedMember(): Promise<void> {
+    if (!pendingRemoveFedMember) return;
+    fedRowError = null;
+    try {
+      await federation.removeMember(pendingRemoveFedMember.member_key);
+      pendingRemoveFedMember = null;
+    } catch (e) {
+      fedRowError = fedErrorText(e);
+    }
+  }
+
+  function fedInviteStateLabel(i: FederationInvite): string {
+    if (i.revoked) return 'revoked';
+    if (i.used) return 'used';
+    if (i.expires_at && new Date(i.expires_at).getTime() <= Date.now()) return 'expired';
+    return 'active';
+  }
+
+  function isFedInviteActive(i: FederationInvite): boolean {
+    return fedInviteStateLabel(i) === 'active';
+  }
+
   // ---- formatting helpers ----
 
   function fmtDate(s: string | null | undefined): string {
@@ -496,6 +697,14 @@
         aria-selected={tab === 'sharing'}
         onclick={() => (tab = 'sharing')}
       >Sharing</button>
+      <button
+        type="button"
+        class="tab"
+        class:active={tab === 'federation'}
+        role="tab"
+        aria-selected={tab === 'federation'}
+        onclick={() => (tab = 'federation')}
+      >Federation ({federation.federations.length})</button>
     </div>
 
     {#if vaultMembers.loading}
@@ -843,6 +1052,219 @@
       </section>
     {/if}
 
+    {#if tab === 'federation'}
+      <section class="body">
+        {#if federation.loading}
+          <div class="placeholder">Loading…</div>
+        {:else}
+          {#if federation.lastError}<div class="error">{federation.lastError}</div>{/if}
+          {#if fedRowError}<div class="error">{fedRowError}</div>{/if}
+
+          <h3>Federated servers</h3>
+          <p class="hint">
+            Servers this vault syncs with. Every listed server holds a
+            full plaintext replica of the vault’s content.
+          </p>
+          {#if federation.federations.length === 0}
+            <div class="placeholder">This vault isn’t federated with any other server.</div>
+          {:else}
+            <ul class="rows">
+              {#each federation.federations as f (f.id)}
+                <li class="row" class:inactive={f.status !== 'active'}>
+                  <div class="row-main">
+                    <div class="name">
+                      <span class="badge fed-{f.role}">{f.role}</span>
+                      <span class="badge state-{f.status}">{f.status}</span>
+                      {f.peer_url}
+                    </div>
+                    <div class="meta">
+                      {#if f.jurisdiction}jurisdiction {f.jurisdiction} · {/if}
+                      {#if f.role === 'home'}replication lag: acked seq {f.last_acked_seq} · {/if}
+                      linked {fmtDate(f.created_at)}{#if f.revoked_at} · revoked {fmtDate(f.revoked_at)}{/if}
+                    </div>
+                  </div>
+                  <div class="row-actions">
+                    {#if canFederate && f.status === 'active'}
+                      <button
+                        class="link danger"
+                        type="button"
+                        onclick={() => (pendingRevokeFederation = f)}
+                      >Revoke…</button>
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+
+          <h3 class="fed-section">Federation invites</h3>
+          {#if !canFederate}
+            <p class="hint">
+              You don’t have permission to manage federation for this
+              vault (requires <code>vault.federate</code>).
+            </p>
+          {:else}
+            <p class="hint">
+              Inviting another server federates this vault: the other
+              operator’s server will store all of this vault’s content
+              <strong>in plaintext on their infrastructure</strong> and
+              keeps its copy even if you later revoke the link. Only
+              federate with operators you trust.
+            </p>
+            <div class="invite-bar">
+              <button class="primary" type="button" onclick={openFedInviteForm}>+ New federation invite</button>
+              {#if lastFedInviteToken}
+                <div class="created-row">
+                  <input class="select" readonly value={lastFedInviteToken} />
+                  <button class="link" type="button" onclick={() => copyFedToken(lastFedInviteToken!)}>
+                    {Date.now() - fedTokenCopiedAt < 2000 ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              {/if}
+            </div>
+            {#if lastFedInviteToken}
+              <p class="hint token-once">
+                This token is shown only once — hand it to the other
+                operator out-of-band. Anyone who redeems it gets a full
+                plaintext replica of this vault.
+              </p>
+            {/if}
+
+            {#if fedInviteOpen}
+              <form class="create-form" onsubmit={submitFedInvite}>
+                <label>
+                  Follower server URL (optional — pins the invite to one server)
+                  <input
+                    class="input"
+                    type="url"
+                    placeholder="https://other-server.example"
+                    bind:value={fedInviteServerHint}
+                    disabled={fedInviteSubmitting}
+                  />
+                </label>
+                <label>
+                  Expires at (optional)
+                  <input
+                    class="input"
+                    type="datetime-local"
+                    bind:value={fedInviteExpiresAt}
+                    disabled={fedInviteSubmitting}
+                  />
+                </label>
+                {#if fedInviteError}<div class="error">{fedInviteError}</div>{/if}
+                <div class="form-actions">
+                  <button class="primary" type="submit" disabled={fedInviteSubmitting}>
+                    {fedInviteSubmitting ? '…' : 'Create federation invite'}
+                  </button>
+                  <button class="link" type="button" onclick={closeFedInviteForm} disabled={fedInviteSubmitting}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            {/if}
+
+            {#if federation.invites.length === 0}
+              <div class="placeholder">No federation invites yet.</div>
+            {:else}
+              <ul class="rows">
+                {#each federation.invites as inv (inv.token)}
+                  <li class="row" class:inactive={!isFedInviteActive(inv)}>
+                    <div class="row-main">
+                      <div class="name">
+                        <span class="badge state-{fedInviteStateLabel(inv)}">{fedInviteStateLabel(inv)}</span>
+                        {inv.server_url_hint || '(any server)'}
+                      </div>
+                      <div class="meta">
+                        created {fmtDate(inv.created_at)} · expires {fmtDate(inv.expires_at)}
+                      </div>
+                    </div>
+                    <div class="row-actions">
+                      {#if isFedInviteActive(inv)}
+                        <button class="link danger" type="button" onclick={() => onRevokeFedInvite(inv)}>Revoke</button>
+                      {/if}
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          {/if}
+
+          <h3 class="fed-section">Federated members</h3>
+          <p class="hint">
+            Users from federated servers with a role in this vault.
+            Membership is authored here — on the vault’s home server.
+          </p>
+          {#if canManageMembers}
+            <form class="create-form" onsubmit={submitFedMember}>
+              <div class="form-row two">
+                <label>
+                  Member key
+                  <input
+                    class="input"
+                    type="text"
+                    placeholder="username@https://server"
+                    bind:value={fedMemberKey}
+                    disabled={fedMemberSubmitting}
+                  />
+                </label>
+                <label>
+                  Role
+                  <select class="select" bind:value={fedMemberRoleID} disabled={fedMemberSubmitting}>
+                    {#each vaultMembers.roles as r (r.id)}
+                      <option value={r.id}>{r.name}</option>
+                    {/each}
+                  </select>
+                </label>
+              </div>
+              {#if fedMemberError}<div class="error">{fedMemberError}</div>{/if}
+              <div class="form-actions">
+                <button
+                  class="primary"
+                  type="submit"
+                  disabled={fedMemberSubmitting || !fedMemberKey.trim() || !fedMemberRoleID}
+                >{fedMemberSubmitting ? '…' : 'Add federated member'}</button>
+              </div>
+            </form>
+          {/if}
+          {#if federation.members.length === 0}
+            <div class="placeholder">No federated members.</div>
+          {:else}
+            <ul class="rows">
+              {#each federation.members as m (m.member_key)}
+                <li class="row">
+                  <div class="row-main">
+                    <div class="name">{m.member_key}</div>
+                    <div class="meta">joined {fmtDate(m.joined_at)}</div>
+                  </div>
+                  <div class="row-actions">
+                    {#if canManageMembers && vaultMembers.roles.length > 0}
+                      <select
+                        class="select"
+                        value={m.role_id}
+                        onchange={(e) => onChangeFedMemberRole(m, e)}
+                        aria-label="Role"
+                      >
+                        {#each vaultMembers.roles as r (r.id)}
+                          <option value={r.id}>{r.name}</option>
+                        {/each}
+                      </select>
+                      <button
+                        class="link danger"
+                        type="button"
+                        onclick={() => (pendingRemoveFedMember = m)}
+                      >Remove</button>
+                    {:else}
+                      <span class="role-readonly">{m.role_name}</span>
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
+      </section>
+    {/if}
+
     {#if pendingDeleteRole}
       <div
         class="overlay nested"
@@ -906,6 +1328,75 @@
               disabled={transferSubmitting}
               onclick={() => (pendingTransfer = null)}
             >Cancel</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if pendingRevokeFederation}
+      <div
+        class="overlay nested"
+        role="presentation"
+        onclick={() => (pendingRevokeFederation = null)}
+        onkeydown={(e) => { if (e.key === 'Escape') pendingRevokeFederation = null; }}
+      >
+        <div
+          class="panel small"
+          role="alertdialog"
+          aria-modal="true"
+          tabindex="-1"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+        >
+          <h2>Revoke federation with {pendingRevokeFederation.peer_url}?</h2>
+          <p class="hint">
+            Syncing stops, and this vault will no longer send updates to
+            that server. Be aware: <strong>the other server keeps the
+            copy of the vault it already has</strong> — it was trusted
+            with plaintext, and revoking the link can’t reach into
+            another operator’s infrastructure to delete it.
+          </p>
+          <div class="form-actions">
+            <button
+              class="primary danger"
+              type="button"
+              disabled={fedRevokeSubmitting}
+              onclick={confirmRevokeFederation}
+            >{fedRevokeSubmitting ? '…' : 'Revoke federation'}</button>
+            <button
+              class="link"
+              type="button"
+              disabled={fedRevokeSubmitting}
+              onclick={() => (pendingRevokeFederation = null)}
+            >Cancel</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if pendingRemoveFedMember}
+      <div
+        class="overlay nested"
+        role="presentation"
+        onclick={() => (pendingRemoveFedMember = null)}
+        onkeydown={(e) => { if (e.key === 'Escape') pendingRemoveFedMember = null; }}
+      >
+        <div
+          class="panel small"
+          role="alertdialog"
+          aria-modal="true"
+          tabindex="-1"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+        >
+          <h2>Remove {pendingRemoveFedMember.member_key}?</h2>
+          <p class="hint">
+            The revocation is authored here and propagated to follower
+            servers; they’ll lose access once their server applies it.
+          </p>
+          <div class="form-actions">
+            <button class="primary danger" type="button" onclick={confirmRemoveFedMember}>Remove</button>
+            <button class="link" type="button" onclick={() => (pendingRemoveFedMember = null)}>Cancel</button>
           </div>
         </div>
       </div>
@@ -1096,6 +1587,10 @@
   .badge.state-revoked { color: var(--color-error); border-color: currentColor; }
   .badge.state-expired { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
   .badge.state-exhausted { color: var(--color-text-dim, var(--color-muted)); }
+  .badge.state-used { color: var(--color-text-dim, var(--color-muted)); }
+  .badge.state-severed { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
+  .badge.fed-home { color: var(--color-primary); border-color: currentColor; }
+  .badge.fed-follower { color: var(--color-secondary); border-color: currentColor; }
 
   .select, .input {
     padding: 0.32rem 0.5rem;
@@ -1144,6 +1639,15 @@
     display: grid;
     grid-template-columns: 1fr 1fr 1.5fr;
     gap: 0.5rem;
+  }
+  .form-row.two {
+    grid-template-columns: 2fr 1fr;
+  }
+  .fed-section {
+    margin-top: 1.1rem;
+  }
+  .token-once {
+    margin-bottom: 0.7rem;
   }
   .form-row label, .create-form > label {
     display: flex;

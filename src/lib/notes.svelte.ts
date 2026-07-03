@@ -12,6 +12,10 @@ class NotesStore {
   list = $state<NoteSummary[]>([]);
   loadingList = $state(false);
   listError = $state<string | null>(null);
+  // HTTP status behind listError (null for non-API failures). Lets the
+  // view special-case 403 — e.g. a federated replica whose home server
+  // hasn't granted this account access yet — without string-matching.
+  listErrorStatus = $state<number | null>(null);
 
   selectedID = $state<string | null>(null);
   selected = $derived<NoteSummary | null>(
@@ -30,6 +34,7 @@ class NotesStore {
     this.selectedID = null;
     this.content = null;
     this.listError = null;
+    this.listErrorStatus = null;
     this.contentError = null;
     if (vaultID == null) return;
     await this.refresh();
@@ -39,6 +44,7 @@ class NotesStore {
     if (this.vaultID == null) return;
     this.loadingList = true;
     this.listError = null;
+    this.listErrorStatus = null;
     try {
       const out = await api.listNotes(this.vaultID, { limit: 200 });
       this.list = out.notes;
@@ -49,6 +55,7 @@ class NotesStore {
       }
     } catch (e) {
       this.listError = describeError(e);
+      this.listErrorStatus = e instanceof ApiError ? e.status : null;
     } finally {
       this.loadingList = false;
     }

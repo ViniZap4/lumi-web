@@ -64,7 +64,7 @@ describe('CAPABILITY_CATALOGUE', () => {
       'note.read', 'note.create', 'note.edit', 'note.delete', 'note.move',
       'members.invite', 'members.manage',
       'roles.manage',
-      'vault.manage', 'vault.export',
+      'vault.manage', 'vault.export', 'vault.federate',
       'audit.read',
     ]);
     const got = new Set(CAPABILITY_CATALOGUE.map((c) => c.id));

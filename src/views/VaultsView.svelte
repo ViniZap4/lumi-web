@@ -5,8 +5,17 @@
   import { uiState } from '../lib/uistate.svelte.ts';
   import type { Vault } from '../lib/types.ts';
   import VaultCreateModal from '../components/VaultCreateModal.svelte';
+  import FederationJoinModal from '../components/FederationJoinModal.svelte';
 
   let showCreate = $state(false);
+  let showJoinFederated = $state(false);
+
+  // Joining a federation materialises a local replica vault — refresh
+  // the list so it appears, then jump straight into it.
+  async function onFederatedJoin(vaultID: string): Promise<void> {
+    await vaults.load();
+    vaults.select(vaultID);
+  }
 
   // Keyboard navigation cursor (vim-style j/k + Enter).
   let cursor = $state(0);
@@ -72,6 +81,7 @@
       <h1>Your vaults</h1>
       <div class="title-actions">
         <button class="link-button" onclick={() => (showCreate = true)} type="button">+ New vault</button>
+        <button class="link-button" onclick={() => (showJoinFederated = true)} type="button">Join federated vault</button>
         <button class="link-button" onclick={() => vaults.load()} type="button">Refresh</button>
       </div>
     </div>
@@ -116,6 +126,13 @@
   <VaultCreateModal
     onclose={() => (showCreate = false)}
     onCreated={(id) => vaults.select(id)}
+  />
+{/if}
+
+{#if showJoinFederated}
+  <FederationJoinModal
+    onclose={() => (showJoinFederated = false)}
+    onJoined={(id) => void onFederatedJoin(id)}
   />
 {/if}
 

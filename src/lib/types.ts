@@ -89,6 +89,62 @@ export interface InviteCreated {
   use_count: number;
 }
 
+// ---- federation (v3 F-phases) ----------------------------------------------
+//
+// A vault's home server authors membership/control; other servers get
+// invited and follow (SPEC-V3 "Federation"). These mirror the wire
+// shapes of lumi-server main @ 82b0a1d.
+
+// One row of GET /api/vaults/:vault/federation-invites — also the
+// creation response. Unlike member invites the raw token is shown
+// exactly once by the UI at creation time; the list rows still carry
+// it because it doubles as the row identifier for DELETE.
+export interface FederationInvite {
+  token: string;
+  vault_id: string;
+  server_url_hint?: string | null;
+  expires_at?: string | null;
+  created_at: string;
+  used: boolean;
+  revoked: boolean;
+}
+
+export type FederationRole = 'home' | 'follower';
+export type FederationStatus = 'active' | 'revoked' | 'severed';
+
+// One row of GET /api/vaults/:vault/federations. Visible to any
+// member (LGPD notice — members must be able to see where their data
+// replicates). `last_acked_seq` is the follower's replication
+// watermark for the control-state doc; meaningful on home-role rows.
+export interface Federation {
+  id: string;
+  vault_id: string;
+  role: FederationRole;
+  peer_url: string;
+  status: FederationStatus;
+  last_acked_seq: number;
+  jurisdiction?: string | null;
+  created_at: string;
+  revoked_at?: string | null;
+}
+
+// POST /api/federation/join response — this server became a follower
+// of a remote vault; `vault` is the local replica the caller can open.
+export interface FederationJoinResponse {
+  vault: InviteVaultSummary;
+  federation: Federation;
+}
+
+// One row of GET /api/vaults/:vault/federated-members. member_key is
+// `username@https://server` — cross-server members can't FK local
+// users, so the key is the identity.
+export interface FederatedMember {
+  member_key: string;
+  role_id: string;
+  role_name: string;
+  joined_at: string;
+}
+
 export interface RemoteRole {
   id: string;
   vault_id: string;

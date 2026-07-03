@@ -24,6 +24,10 @@ import {
   type InviteAcceptExistingResponse,
   type Invite,
   type InviteCreated,
+  type Federation,
+  type FederationInvite,
+  type FederationJoinResponse,
+  type FederatedMember,
 } from './types.ts';
 
 export const API_URL: string =
@@ -292,6 +296,116 @@ export async function revokeInvite(vaultID: string, token: string): Promise<void
     `/api/vaults/${vaultID}/invites/${encodeURIComponent(token)}`,
     { method: 'DELETE' },
   );
+}
+
+// ---- federation (v3 F-phases) -----------------------------------------------
+//
+// Home-server authority model: the vault's home server authors
+// membership and control; invited servers follow. Invite / federation
+// management needs capability `vault.federate` (Admin's `*` covers
+// it); the federations *list* is readable by any member — LGPD notice.
+
+export interface CreateFederationInviteInput {
+  // Pin the invite to one follower server's URL (optional).
+  server_url_hint?: string;
+  // ISO 8601. Omitted = server default / no expiry.
+  expires_at?: string;
+}
+
+export async function createFederationInvite(
+  vaultID: string,
+  input: CreateFederationInviteInput,
+): Promise<FederationInvite> {
+  return request<FederationInvite>(`/api/vaults/${vaultID}/federation-invites`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function listFederationInvites(vaultID: string): Promise<FederationInvite[]> {
+  const out = await request<{ invites: FederationInvite[] }>(
+    `/api/vaults/${vaultID}/federation-invites`,
+  );
+  return out.invites ?? [];
+}
+
+export async function revokeFederationInvite(vaultID: string, token: string): Promise<void> {
+  await request<void>(
+    `/api/vaults/${vaultID}/federation-invites/${encodeURIComponent(token)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function listFederations(vaultID: string): Promise<Federation[]> {
+  const out = await request<{ federations: Federation[] }>(`/api/vaults/${vaultID}/federations`);
+  return out.federations ?? [];
+}
+
+// Sever a federation link. 409 {"error":"conflict"} when it's already
+// revoked. NB: the peer keeps its copy of the data — it was trusted
+// with plaintext (SPEC-V3 threat model); the UI must say so.
+export async function revokeFederation(vaultID: string, federationID: string): Promise<void> {
+  await request<void>(
+    `/api/vaults/${vaultID}/federations/${encodeURIComponent(federationID)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export interface JoinFederationInput {
+  home_url: string;
+  token: string;
+  // Operator-declared data-residency jurisdiction — shown to the
+  // vault owner on the home server (LGPD residency notice).
+  jurisdiction?: string;
+}
+
+// Make THIS server a follower of a remote vault. Any authed user.
+// Returns the local replica vault + the new federation row.
+export async function joinFederation(
+  input: JoinFederationInput,
+): Promise<FederationJoinResponse> {
+  return request<FederationJoinResponse>('/api/federation/join', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function listFederatedMembers(vaultID: string): Promise<FederatedMember[]> {
+  const out = await request<{ federated_members: FederatedMember[] }>(
+    `/api/vaults/${vaultID}/federated-members`,
+  );
+  return out.federated_members ?? [];
+}
+
+// member_key is `username@https://server`. 400 {"error":"validation"}
+// on a malformed key or a role foreign to this vault.
+export async function addFederatedMember(
+  vaultID: string,
+  memberKey: string,
+  roleID: string,
+): Promise<FederatedMember> {
+  return request<FederatedMember>(`/api/vaults/${vaultID}/federated-members`, {
+    method: 'POST',
+    body: { member_key: memberKey, role_id: roleID },
+  });
+}
+
+export async function updateFederatedMemberRole(
+  vaultID: string,
+  memberKey: string,
+  roleID: string,
+): Promise<void> {
+  await request<void>(`/api/vaults/${vaultID}/federated-members`, {
+    method: 'PATCH',
+    body: { member_key: memberKey, role_id: roleID },
+  });
+}
+
+export async function removeFederatedMember(vaultID: string, memberKey: string): Promise<void> {
+  await request<void>(`/api/vaults/${vaultID}/federated-members`, {
+    method: 'DELETE',
+    body: { member_key: memberKey },
+  });
 }
 
 // ---- notes -----------------------------------------------------------------

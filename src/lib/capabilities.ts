@@ -36,6 +36,7 @@ export const CAPABILITY_CATALOGUE: CapabilityDef[] = [
   { id: 'roles.manage',   label: 'Manage roles',   group: 'Roles' },
   { id: 'vault.manage',   label: 'Manage vault',   group: 'Vault' },
   { id: 'vault.export',   label: 'Export vault',   group: 'Vault' },
+  { id: 'vault.federate', label: 'Federate vault', group: 'Vault' },
   { id: 'audit.read',     label: 'Read audit log', group: 'Audit' },
 ];
 

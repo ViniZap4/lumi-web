@@ -32,7 +32,7 @@ describe('registration rules', () => {
 
 describe('audit filters', () => {
 	it('keeps valid filters and drops malformed ones', () => {
-		const f = filtersOf(new URL('http://x/auditoria?escopo=admin&usuario=NOPE&cofre=0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D&antes=12'));
+		const f = filtersOf(new URL('http://x/auditoria?escopo=admin&usuario=a%20b&cofre=0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D&antes=12'));
 		expect(f).toMatchObject({ scope: 'admin', user: '', vault: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', before: 12, invalid: ['usuario'] });
 		expect(filtersOf(new URL('http://x/auditoria?antes=-1&escopo=x'))).toMatchObject({ scope: 'all', before: undefined });
 	});

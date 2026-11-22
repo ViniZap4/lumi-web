@@ -8,6 +8,7 @@ export type UserState = 'active' | 'disabled' | 'locked';
 export type TokenState = 'active' | 'expired' | 'revoked';
 export type FederationStatus = 'active' | 'revoked' | 'severed';
 export type FederationRole = 'home' | 'follower';
+export type InviteState = 'active' | 'expired' | 'revoked' | 'exhausted';
 
 export interface TokenRef {
 	readonly id: string;
@@ -29,6 +30,15 @@ export interface AdminStatus {
 	readonly wsConnections: number;
 	readonly startedAt: string;
 	readonly token: TokenRef;
+	/** Round trip of a trivial query, in milliseconds. */
+	readonly dbLatencyMs: number;
+	readonly usersDisabled: number;
+	readonly usersLocked: number;
+	readonly crdtBytes: number;
+	readonly logins24h: number;
+	readonly loginFailures24h: number;
+	readonly invitesActive: number;
+	readonly goVersion: string;
 }
 
 export interface AdminUser {
@@ -43,6 +53,10 @@ export interface AdminUser {
 	readonly ownedVaults: number;
 	readonly vaults: number;
 	readonly createdAt: string;
+	/** Newest auth.login in the audit log. */
+	readonly lastLoginAt: string | null;
+	/** Newest use of any live session. */
+	readonly lastSeenAt: string | null;
 	/** Only from GET /users/{id}. */
 	readonly ownedVaultIds: readonly string[] | null;
 }
@@ -68,6 +82,50 @@ export interface AdminVault {
 	readonly crdtBytes: number;
 	readonly federation: { readonly role: FederationRole; readonly activeLinks: number } | null;
 	readonly createdAt: string;
+	/** The vault's change sequence (vault_heads.seq). */
+	readonly headSeq: number;
+	readonly lastChangeAt: string | null;
+	readonly invitesActive: number;
+}
+
+export interface Ref {
+	readonly id: string;
+	readonly username: string;
+}
+
+export interface VaultMember {
+	readonly user: Ref;
+	readonly displayName: string;
+	readonly role: { readonly id: string; readonly name: string };
+	readonly owner: boolean;
+	readonly joinedAt: string;
+}
+
+export interface VaultRole {
+	readonly id: string;
+	readonly name: string;
+	readonly seed: boolean;
+	readonly members: number;
+}
+
+export interface VaultMembers {
+	readonly members: readonly VaultMember[];
+	readonly roles: readonly VaultRole[];
+}
+
+export interface AdminInvite {
+	/** SHA-256 hex of the invite token: names the invite, can't be used to join. */
+	readonly id: string;
+	readonly vault: { readonly id: string; readonly slug: string; readonly name: string };
+	readonly inviter: Ref;
+	readonly role: { readonly id: string; readonly name: string };
+	readonly emailHint: string | null;
+	readonly maxUses: number;
+	readonly useCount: number;
+	readonly state: InviteState;
+	readonly expiresAt: string;
+	readonly createdAt: string;
+	readonly revokedAt: string | null;
 }
 
 export interface AdminFederation {
@@ -128,6 +186,19 @@ export interface AuditQuery {
 	readonly scope?: 'all' | 'admin';
 	readonly user?: string;
 	readonly vault?: string;
+	/** An exact action, or a prefix written as "auth.*". */
+	readonly action?: string;
+	/** RFC 3339; created_at >= since. */
+	readonly since?: string;
+	/** RFC 3339; created_at < until. */
+	readonly until?: string;
+}
+
+export type UserStateFilter = UserState;
+
+/** The ?action= shape the API accepts (ADMIN.md): an exact action or a "prefix.*". */
+export function isAuditAction(value: string): boolean {
+	return value.length <= 64 && /^[a-z_]+(\.[a-z_]+)*(\.\*)?$/.test(value);
 }
 
 // ---- errors -------------------------------------------------------------------
@@ -273,6 +344,9 @@ export function isSessionId(value: string): boolean {
 	return /^[0-9a-f]{64}$/.test(value);
 }
 
+/** Invite ids are the SHA-256 hex of the invite token, like sessions. */
+export const isInviteId = isSessionId;
+
 function object(v: unknown): Record<string, unknown> {
 	if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Shape('object');
 	return v as Record<string, unknown>;
@@ -290,6 +364,10 @@ function int(v: unknown): number {
 }
 function intOrNull(v: unknown): number | null {
 	return v === null || v === undefined ? null : int(v);
+}
+function num(v: unknown): number {
+	if (typeof v !== 'number' || !Number.isFinite(v)) throw new Shape('number');
+	return v;
 }
 function bool(v: unknown): boolean {
 	if (typeof v !== 'boolean') throw new Shape('bool');
@@ -331,6 +409,8 @@ export function decodeUser(raw: unknown): AdminUser {
 		ownedVaults: int(o.owned_vaults),
 		vaults: int(o.vaults),
 		createdAt: str(o.created_at),
+		lastLoginAt: strOrNull(o.last_login_at),
+		lastSeenAt: strOrNull(o.last_seen_at),
 		ownedVaultIds: o.owned_vault_ids === undefined ? null : list(o.owned_vault_ids, uuid)
 	};
 }
@@ -368,7 +448,61 @@ export function decodeVault(raw: unknown): AdminVault {
 					activeLinks: int(fed.active_links)
 				}
 			: null,
-		createdAt: str(o.created_at)
+		createdAt: str(o.created_at),
+		headSeq: int(o.head_seq),
+		lastChangeAt: strOrNull(o.last_change_at),
+		invitesActive: int(o.invites_active)
+	};
+}
+
+function ref(raw: unknown): Ref {
+	const o = object(raw);
+	return { id: uuid(o.id), username: str(o.username) };
+}
+
+function roleRef(raw: unknown): { id: string; name: string } {
+	const o = object(raw);
+	return { id: uuid(o.id), name: str(o.name) };
+}
+
+export function decodeMembers(raw: unknown): VaultMembers {
+	const o = object(raw);
+	return {
+		members: list(o.members, (m) => {
+			const x = object(m);
+			return {
+				user: ref(x.user),
+				displayName: str(x.display_name),
+				role: roleRef(x.role),
+				owner: bool(x.owner),
+				joinedAt: str(x.joined_at)
+			};
+		}),
+		roles: list(o.roles, (r) => {
+			const x = object(r);
+			return { id: uuid(x.id), name: str(x.name), seed: bool(x.seed), members: int(x.members) };
+		})
+	};
+}
+
+export function decodeInvite(raw: unknown): AdminInvite {
+	const o = object(raw);
+	const id = str(o.id);
+	if (!isInviteId(id)) throw new Shape('invite id');
+	const v = object(o.vault);
+	const inviter = object(o.inviter);
+	return {
+		id,
+		vault: { id: uuid(v.id), slug: str(v.slug), name: str(v.name) },
+		inviter: { id: uuid(inviter.id), username: str(inviter.username) },
+		role: roleRef(o.role),
+		emailHint: strOrNull(o.email_hint),
+		maxUses: int(o.max_uses),
+		useCount: int(o.use_count),
+		state: oneOf(o.state, ['active', 'expired', 'revoked', 'exhausted'] as const),
+		expiresAt: str(o.expires_at),
+		createdAt: str(o.created_at),
+		revokedAt: strOrNull(o.revoked_at)
 	};
 }
 
@@ -433,7 +567,15 @@ export function decodeStatus(raw: unknown): AdminStatus {
 		feedConnections: int(o.feed_connections),
 		wsConnections: int(o.ws_connections),
 		startedAt: str(o.started_at),
-		token: { id: uuid(t.id), name: str(t.name), expiresAt: str(t.expires_at) }
+		token: { id: uuid(t.id), name: str(t.name), expiresAt: str(t.expires_at) },
+		dbLatencyMs: num(o.db_latency_ms),
+		usersDisabled: int(o.users_disabled),
+		usersLocked: int(o.users_locked),
+		crdtBytes: int(o.crdt_bytes),
+		logins24h: int(o.logins_24h),
+		loginFailures24h: int(o.login_failures_24h),
+		invitesActive: int(o.invites_active),
+		goVersion: str(o.go_version)
 	};
 }
 
@@ -489,10 +631,9 @@ export class AdminClient {
 		return this.#json('GET', '/status', undefined, decodeStatus);
 	}
 
-	async users(o: PageOptions = {}): Promise<Page<AdminUser>> {
-		return this.#json('GET', `/users${query({ after: o.after, limit: o.limit })}`, undefined, (r) =>
-			page(r, decodeUser)
-		);
+	async users(o: PageOptions & { q?: string; state?: UserStateFilter } = {}): Promise<Page<AdminUser>> {
+		const qs = query({ q: o.q, state: o.state, after: o.after, limit: o.limit });
+		return this.#json('GET', `/users${qs}`, undefined, (r) => page(r, decodeUser));
 	}
 
 	async user(id: string): Promise<AdminUser> {
@@ -521,6 +662,11 @@ export class AdminClient {
 		return this.#empty('POST', `/users/${pathId(id)}/unlock`);
 	}
 
+	/** Ends every session of the user; resolves to how many there were. */
+	async revokeUserSessions(id: string): Promise<number> {
+		return this.#json('DELETE', `/users/${pathId(id)}/sessions`, undefined, (r) => int(object(r).revoked));
+	}
+
 	async deleteUser(id: string, deleteOwnedVaults = false): Promise<void> {
 		const q = deleteOwnedVaults ? '?delete_owned_vaults=true' : '';
 		return this.#empty('DELETE', `/users/${pathId(id)}${q}`);
@@ -541,11 +687,11 @@ export class AdminClient {
 		return this.#empty('DELETE', `/sessions/${id}`);
 	}
 
-	async vaults(o: PageOptions & { user?: string } = {}): Promise<Page<AdminVault>> {
+	async vaults(o: PageOptions & { user?: string; q?: string } = {}): Promise<Page<AdminVault>> {
 		const user = o.user === undefined ? undefined : pathId(o.user);
 		return this.#json(
 			'GET',
-			`/vaults${query({ user, after: o.after, limit: o.limit })}`,
+			`/vaults${query({ user, q: o.q, after: o.after, limit: o.limit })}`,
 			undefined,
 			(r) => page(r, decodeVault)
 		);
@@ -557,6 +703,21 @@ export class AdminClient {
 
 	async deleteVault(id: string): Promise<void> {
 		return this.#empty('DELETE', `/vaults/${pathId(id)}`);
+	}
+
+	async vaultMembers(id: string): Promise<VaultMembers> {
+		return this.#json('GET', `/vaults/${pathId(id)}/members`, undefined, decodeMembers);
+	}
+
+	async invites(o: PageOptions & { vault?: string; state?: 'active' | 'all' } = {}): Promise<Page<AdminInvite>> {
+		const vault = o.vault === undefined ? undefined : pathId(o.vault);
+		const qs = query({ vault, state: o.state, after: o.after, limit: o.limit });
+		return this.#json('GET', `/invites${qs}`, undefined, (r) => page(r, decodeInvite));
+	}
+
+	async revokeInvite(id: string): Promise<void> {
+		if (!isInviteId(id)) return Promise.reject(new AdminError('notFound', 404));
+		return this.#empty('DELETE', `/invites/${id}`);
 	}
 
 	async federations(o: PageOptions & { vault?: string } = {}): Promise<Page<AdminFederation>> {
@@ -586,7 +747,17 @@ export class AdminClient {
 	async audit(q: AuditQuery = {}): Promise<AuditPage> {
 		const user = q.user === undefined ? undefined : pathId(q.user);
 		const vault = q.vault === undefined ? undefined : pathId(q.vault);
-		const qs = query({ before: q.before, limit: q.limit, scope: q.scope, user, vault });
+		if (q.action !== undefined && !isAuditAction(q.action)) throw new AdminError('invalid', 400, { field: 'action' });
+		const qs = query({
+			before: q.before,
+			limit: q.limit,
+			scope: q.scope,
+			user,
+			vault,
+			action: q.action,
+			since: q.since,
+			until: q.until
+		});
 		return this.#json('GET', `/audit${qs}`, undefined, (raw) => {
 			const o = object(raw);
 			return { entries: list(o.entries, decodeAudit), more: bool(o.more), next: strOrNull(o.next) };

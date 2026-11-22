@@ -1,6 +1,7 @@
 import type { Handle } from '@sveltejs/kit/hooks';
 import { isPublic } from '#lib/server/guard.ts';
 import { cookieName, sessions } from '#lib/server/sessions.ts';
+import { THEME_COOKIE, themeOf } from '#lib/theme.ts';
 
 const SECURITY_HEADERS: Record<string, string> = {
 	'X-Content-Type-Options': 'nosniff',
@@ -34,5 +35,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (!event.locals.session && !isPublic(event.url.pathname)) {
 		return seeOther(cookie ? '/entrar?motivo=sessao' : '/entrar');
 	}
-	return secure(await resolve(event));
+	// The operator's theme goes on <html> from the server, so no inline script is needed to avoid a flash.
+	const theme = themeOf(event.cookies.get(THEME_COOKIE));
+	return secure(
+		await resolve(event, { transformPageChunk: ({ html }) => html.replace('%lumi.theme%', theme) })
+	);
 };

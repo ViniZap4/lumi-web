@@ -43,6 +43,7 @@ export function actionEvent(opts: {
 		request: new Request(`https://lumi-admin.tail1234.ts.net${opts.path}`, { method: 'POST', body }),
 		locals: { session: opts.session === undefined ? liveSession() : opts.session },
 		cookies: cookies(),
+		depends: () => {},
 		getClientAddress: () => opts.ip ?? '100.64.0.7'
 	};
 }

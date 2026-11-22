@@ -4,10 +4,10 @@ import { handle } from './hooks.server.ts';
 import { isPublic } from '#lib/server/guard.ts';
 import { sessions } from '#lib/server/sessions.ts';
 
-function event(url: string, cookie?: string): RequestEvent {
+function event(url: string, cookie?: string, theme?: string): RequestEvent {
 	return {
 		url: new URL(url),
-		cookies: { get: (name: string) => (name === 'lumi_admin' ? cookie : undefined) },
+		cookies: { get: (name: string) => (name === 'lumi_admin' ? cookie : name === 'lumi_admin_theme' ? theme : undefined) },
 		locals: {}
 	} as unknown as RequestEvent;
 }
@@ -51,6 +51,18 @@ describe('auth guard', () => {
 		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
 		const health = await handle({ event: event('http://localhost/healthz'), resolve });
 		expect(health.status).toBe(200);
+		sessions.delete(s.id);
+	});
+
+	it('puts only a known theme on <html>, from the cookie', async () => {
+		const s = sessions.create('lpa_x', { id: 't', name: 'painel', expiresAt: Number.MAX_SAFE_INTEGER });
+		const html = '<html data-theme="%lumi.theme%">';
+		const resolve = async (_e: unknown, opts?: { transformPageChunk?: (i: { html: string; done: boolean }) => string }) =>
+			new Response(opts?.transformPageChunk?.({ html, done: true }) ?? html);
+		for (const [cookie, want] of [['light', 'light'], ['"><script>', 'auto'], [undefined, 'auto']] as const) {
+			const res = await handle({ event: event('http://localhost/', s.id, cookie), resolve: resolve as never });
+			expect(await res.text()).toBe(`<html data-theme="${want}">`);
+		}
 		sessions.delete(s.id);
 	});
 });

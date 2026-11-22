@@ -11,8 +11,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund
 
-# Embutido no bundle (import.meta.env) no build. O deploy passa
-# https://lumi-api.<tailnet>.ts.net.
+# Embutido no bundle (import.meta.env) no build. Desde os livros (wave 2) é só o
+# servidor sugerido no formulário "Adicionar servidor"; o usuário pode cadastrar
+# outros em tempo de execução. O deploy passa https://lumi-api.<tailnet>.ts.net.
 ARG VITE_LUMI_SERVER_URL=http://localhost:8080
 
 COPY . .

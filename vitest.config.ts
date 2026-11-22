@@ -17,6 +17,9 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 // https://vitest.dev/config/
 export default defineConfig({
   plugins: [svelte({ hot: false })],
+  // Resolve Svelte's client runtime (not the SSR build) so component
+  // tests can mount() into jsdom.
+  resolve: { conditions: ['browser'] },
   test: {
     environment: 'node',
     globals: false,

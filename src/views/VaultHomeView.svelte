@@ -42,7 +42,7 @@
 
   // Reset edit state whenever the focused note changes. ONLY
   // notes.selectedID is a dependency: the body runs untracked, because
-  // reading editMode/editSession here (directly or via cancelEdit) made
+  // reading editMode/editSession here (directly or via exitEdit) made
   // the effect re-run when enterEdit flipped editMode — cancelling the
   // edit the instant it started.
   let lastSelectedID: string | null = untrack(() => notes.selectedID);
@@ -51,7 +51,7 @@
     untrack(() => {
       if (id === lastSelectedID) return;
       lastSelectedID = id;
-      if (editMode) cancelEdit();
+      if (editSession && editSession.noteID !== id) exitEdit();
       editError = null;
     });
   });
@@ -74,6 +74,12 @@
   });
 
   onDestroy(() => {
+    // Tear the editor session down (socket + Y.Doc) — e.g. on logout
+    // App.svelte unmounts this view while an editor is open.
+    if (editSession) {
+      editSession.destroy();
+      editSession = null;
+    }
     // Drop the per-vault cache so the next vault load starts clean.
     void notes.openVault(null);
   });
@@ -98,7 +104,7 @@
   }
 
   function handleKey(e: KeyboardEvent): void {
-    // Cmd/Ctrl+S to save edits, regardless of focus inside the editor.
+    // Cmd/Ctrl+S: refresh after the live save, regardless of focus.
     if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
       void saveEdit();
@@ -226,18 +232,19 @@
   }
 
   async function enterEdit(): Promise<void> {
-    if (!notes.content || !auth.user || !vaults.selectedID || !notes.selectedID) return;
+    const vaultID = vaults.selectedID;
+    const noteID = notes.selectedID;
+    const user = auth.user;
+    if (!notes.content || !user || !vaultID || !noteID) return;
     const token = api.getToken();
     if (!token) return;
-    if (editorLoading) return;
+    if (editorLoading || editSession) return;
 
     editorLoading = true;
     editError = null;
     try {
       // First edit per session pulls the CM6 + vim + y-codemirror.next
-      // + yjs + y-websocket chunks. Subsequent edits reuse the cached
-      // module references. Loaded in parallel so latency is one
-      // round-trip, not two.
+      // + yjs + y-websocket chunks, in parallel.
       if (!NoteEditor || !EditorSession) {
         const [editorMod, sessionMod] = await Promise.all([
           import('../components/NoteEditor.svelte'),
@@ -246,18 +253,18 @@
         NoteEditor = editorMod.default;
         EditorSession = sessionMod.EditorSession;
       }
+      // The user may have moved on while the chunk loaded.
+      if (notes.selectedID !== noteID || vaults.selectedID !== vaultID || editSession) return;
 
-      const sess = new EditorSession();
-      // Seed the Y.Text with the current FS body BEFORE wiring the
-      // provider — if there's no peer yet, this becomes the initial
-      // doc state; if a peer is already editing, the WS provider's
-      // first SyncStep2 will reconcile on connect. Either way the user
-      // sees their saved content immediately, not a flash of blank.
-      if (notes.content && (notes.content.body ?? '') !== '' && sess.ytext.length === 0) {
-        sess.ytext.insert(0, notes.content.body ?? '');
-      }
-      sess.open(vaults.selectedID, notes.selectedID, token, auth.user);
-      editSession = sess;
+      // Join rule (CRDT client protocol §2): start from an EMPTY doc
+      // and let the server's SyncStep2 deliver the text. Seeding the
+      // Y.Text with the REST body here duplicated the whole note,
+      // because the server's doc already holds that text under a
+      // different clientID. Until the session reports `synced`, the
+      // template shows a read-only preview instead of the editor.
+      editSession = new EditorSession(vaultID, noteID, token, user, {
+        onAuthFailure: () => auth.handleSessionLost(),
+      });
       editMode = true;
     } catch (e) {
       editError = `Failed to load editor: ${(e as Error).message}`;
@@ -266,40 +273,54 @@
     }
   }
 
-  function cancelEdit(): void {
-    if (editSession) {
-      editSession.destroy();
+  /** Leave edit mode and destroy the single-note session. */
+  function exitEdit(): void {
+    const sess = editSession;
+    if (sess) {
+      // Show the latest collaborative text in the preview right away;
+      // the server mirrors it to disk ~500 ms later.
+      if (sess.synced && !sess.isDestroyed) {
+        notes.applyLocalBody(sess.noteID, sess.ytext.toString());
+      }
+      sess.destroy();
       editSession = null;
     }
     editMode = false;
     editError = null;
   }
 
+  // Server-side mirror debounce (wsync.DefaultMirrorDebounce) + margin.
+  const MIRROR_SETTLE_MS = 800;
+
   /**
-   * Cmd/Ctrl+S explicitly forces an FS sync now. As of server slice
-   * 4.5, every WS update is auto-mirrored to the on-disk markdown
-   * file after a 500 ms debounce — so this button is mainly for
-   * "I want to ensure FS is up-to-date right now before closing
-   * the tab / running git commit". /diff also refreshes the pg
-   * updated_at and the audit log row.
+   * Cmd/Ctrl+S. Every Yjs update is already persisted by the server
+   * on receipt and mirrored to the markdown file after a 500 ms
+   * debounce, so there is nothing to push. In particular we must NOT
+   * POST the full text to /diff: the server diffs it against its
+   * current state, which silently reverts concurrent remote edits we
+   * have not received yet (last-writer-wins). Save just waits for the
+   * mirror to settle and refreshes the list metadata.
    */
   async function saveEdit(): Promise<void> {
-    if (saving || !editSession || !vaults.selectedID || !notes.selectedID) return;
+    const sess = editSession;
+    if (saving || !sess) return;
+    if (!sess.synced || sess.status !== 'connected') {
+      editError = 'Offline — your edits are kept locally and will sync when the connection returns.';
+      return;
+    }
     saving = true;
     editError = null;
     try {
-      const text = editSession.ytext.toString();
-      const snap = await api.applyNoteDiff(vaults.selectedID, notes.selectedID, text);
-      // Refresh the metadata row so updated_at moves; preview will
-      // re-render once we exit edit mode (or stay in if user wants).
-      void notes.refresh();
-      // We do NOT exit edit mode here — saving feels modeless.
-      void snap;
-    } catch (e) {
-      editError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+      await new Promise((r) => setTimeout(r, MIRROR_SETTLE_MS));
+      await notes.refresh();
     } finally {
       saving = false;
     }
+  }
+
+  function initialiseFromFile(): void {
+    if (!editSession || !notes.content) return;
+    editSession.initialiseFromFile(notes.content.body ?? '');
   }
 
   // Pre-compute the sanitised preview HTML on every content change.
@@ -382,7 +403,7 @@
             <div class="editor-bar">
               <div class="editor-meta">
                 <span class="editor-title">Editing {notes.selected?.title}</span>
-                <span class="conn-pill conn-{editSession.status}">{editSession.status}</span>
+                <span class="conn-pill conn-{editSession.status}" data-testid="conn-status">{editSession.status}</span>
                 {#if editSession.peers.length > 0}
                   <span class="peers">
                     {#each editSession.peers as p (p.clientID)}
@@ -392,18 +413,41 @@
                 {/if}
               </div>
               <div class="editor-actions">
-                <button class="primary-button" onclick={saveEdit} disabled={saving} type="button">
-                  {saving ? 'Saving…' : 'Save to disk'}
+                <button class="primary-button" onclick={saveEdit} disabled={saving || !editSession.synced} type="button">
+                  {saving ? 'Saving…' : 'Save'}
                 </button>
-                <button class="link-button" onclick={cancelEdit} type="button">Done</button>
+                <button class="link-button" onclick={exitEdit} type="button">Done</button>
               </div>
             </div>
             {#if editError}<div class="error">{editError}</div>{/if}
-            <NoteEditor session={editSession} onexit={cancelEdit} />
+            {#if editSession.lastError}<div class="error" data-testid="session-error">{editSession.lastError}</div>{/if}
+            {#if !editSession.synced}
+              <!-- Join rule: read-only preview until the server's
+                   SyncStep2 has arrived. Never a local seed. -->
+              <div class="placeholder" data-testid="editor-syncing">
+                {editSession.stopped ? 'Live editing unavailable.' : 'Connecting to live editor… (read-only until synced)'}
+              </div>
+              <article class="rendered readonly-preview">
+                {@html previewHtml}
+              </article>
+            {:else if editSession.emptyAtSync && (notes.content.body ?? '') !== ''}
+              <!-- Legacy note: server CRDT never initialised. Editing an
+                   empty doc would overwrite the file on the next mirror,
+                   so require an explicit action. -->
+              <div class="error" data-testid="editor-uninitialised">
+                The server has no live-editing state for this note yet. Load the
+                file's current contents into the shared document to start editing.
+                <button class="link-button" onclick={initialiseFromFile} type="button">Load file contents</button>
+              </div>
+              <article class="rendered readonly-preview">
+                {@html previewHtml}
+              </article>
+            {:else}
+              <NoteEditor session={editSession} onexit={exitEdit} />
+            {/if}
             <div class="hint">
-              Edits sync live to other web peers via Yjs and to the on-disk file every
-              ~500 ms.
-              <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> forces an immediate FS sync.
+              Edits are saved continuously and sync live to other peers; the file on
+              disk follows within ~500 ms.
               <kbd>Cmd/Ctrl</kbd>+<kbd>Enter</kbd>, vim <kbd>:q</kbd> or <em>Done</em> closes the editor.
             </div>
           </div>

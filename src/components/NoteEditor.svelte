@@ -53,6 +53,12 @@
 
   function mountEditor(): void {
     if (!container || view) return;
+    // Only ever mount on a synced session (the view gates on
+    // session.synced). The CodeMirror doc MUST start equal to the
+    // Y.Text: y-codemirror.next's ySync only forwards *deltas*, so an
+    // empty CM doc over a non-empty Y.Text would apply every later
+    // remote delta at the wrong offsets.
+    const initialDoc = session.ytext.toString();
     registerVimExit();
     activeExit = () => onexit?.();
 
@@ -96,7 +102,7 @@
     ];
 
     view = new EditorView({
-      state: EditorState.create({ extensions }),
+      state: EditorState.create({ doc: initialDoc, extensions }),
       parent: container,
     });
   }
@@ -110,7 +116,7 @@
   }
 </script>
 
-<div class="note-editor-host" bind:this={container}></div>
+<div class="note-editor-host" data-testid="note-editor" bind:this={container}></div>
 
 <style>
   .note-editor-host {

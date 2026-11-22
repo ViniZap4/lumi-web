@@ -201,6 +201,19 @@ class NotesStore {
     }
   }
 
+  /** Reflect a body we already know (e.g. the final collaborative text
+   *  when leaving the editor) in the preview without a round trip. The
+   *  server mirrors the CRDT to disk with a debounce, so an immediate
+   *  /content fetch could still return the previous body. */
+  applyLocalBody(id: string, body: string): void {
+    if (this.selectedID !== id || this.content == null || this.content.id !== id) return;
+    // Supersede any in-flight content fetch that predates this body.
+    this.contentSeq++;
+    this.abortContent();
+    this.loadingContent = false;
+    this.content = { ...this.content, body };
+  }
+
   private abortList(): void {
     this.listAbort?.abort();
     this.listAbort = null;

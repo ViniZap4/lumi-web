@@ -38,6 +38,22 @@ class AuthStore {
   /** True once we have a validated session. */
   authenticated = $derived(this.user != null);
 
+  constructor() {
+    // Any token-bearing request answering 401 / token_expired means
+    // the session is dead server-side: drop it so App.svelte routes
+    // back to the login view instead of every store showing its own
+    // "unauthorized" error.
+    api.onUnauthorized(() => this.handleSessionLost());
+  }
+
+  /** Called when the server rejects our token (REST 401 or an editor
+   *  WebSocket auth failure). Idempotent. */
+  handleSessionLost(): void {
+    if (this.user == null && api.getToken() == null) return;
+    this.clearSession();
+    this.lastError = 'Your session expired. Sign in again.';
+  }
+
   // ---- lifecycle ----
 
   /**

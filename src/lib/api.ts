@@ -44,6 +44,28 @@ export function getToken(): string | null {
   return token;
 }
 
+// Global session-loss hook. A 401 on any token-bearing request means
+// the session is gone (expired, revoked, server restarted with a new
+// key): every store would otherwise surface its own "unauthorized"
+// error while the app keeps rendering authenticated views. The auth
+// store registers a handler that clears the session so App.svelte
+// falls back to the login screen. Anonymous requests (login,
+// register, invite accept) never trigger it — a 401 there is a
+// credentials error for the form to show.
+export type UnauthorizedHandler = (err: ApiError) => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+export function onUnauthorized(h: UnauthorizedHandler | null): void {
+  unauthorizedHandler = h;
+}
+
+/** True when an error means "the session is no longer valid". */
+export function isAuthFailure(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    (err.status === 401 || err.code === 'token_expired' || err.code === 'unauthorized')
+  );
+}
+
 // ---- core request helper ---------------------------------------------------
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -59,8 +81,9 @@ interface RequestOpts {
 
 async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (!opts.anonymous && token) {
-    headers['X-Lumi-Token'] = token;
+  const sentToken = !opts.anonymous ? token : null;
+  if (sentToken) {
+    headers['X-Lumi-Token'] = sentToken;
   }
   const res = await fetch(`${API_URL}${path}`, {
     method: opts.method ?? 'GET',
@@ -88,7 +111,19 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
   if (!res.ok) {
     const errBody: ServerError =
       (payload as ServerError | null) ?? { error: 'unknown', detail: res.statusText };
-    throw new ApiError(res.status, errBody);
+    const err = new ApiError(res.status, errBody);
+    // Only react to auth failures of requests that actually carried
+    // our token — and only if that token is still the active one (a
+    // late 401 for a token we already rotated away must not log the
+    // fresh session out).
+    if (!opts.anonymous && sentToken != null && sentToken === token && isAuthFailure(err)) {
+      try {
+        unauthorizedHandler?.(err);
+      } catch {
+        // handler failures must not mask the original error
+      }
+    }
+    throw err;
   }
   return payload as T;
 }
@@ -413,6 +448,7 @@ export async function removeFederatedMember(vaultID: string, memberKey: string):
 export interface ListNotesOpts {
   limit?: number;
   offset?: number;
+  signal?: AbortSignal;
 }
 
 export async function listNotes(
@@ -423,15 +459,21 @@ export async function listNotes(
   if (opts.limit != null) qs.set('limit', String(opts.limit));
   if (opts.offset != null) qs.set('offset', String(opts.offset));
   const q = qs.toString();
-  return request(`/api/vaults/${vaultID}/notes${q ? '?' + q : ''}`);
+  return request(`/api/vaults/${vaultID}/notes${q ? '?' + q : ''}`, { signal: opts.signal });
 }
 
 export async function getNote(vaultID: string, noteID: string): Promise<NoteSummary> {
   return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}`);
 }
 
-export async function getNoteContent(vaultID: string, noteID: string): Promise<NoteContent> {
-  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}/content`);
+export async function getNoteContent(
+  vaultID: string,
+  noteID: string,
+  signal?: AbortSignal,
+): Promise<NoteContent> {
+  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}/content`, {
+    signal,
+  });
 }
 
 export interface CreateNoteInput {

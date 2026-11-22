@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { withFlash } from '../enhance.ts';
+	import { withToast } from '../enhance.ts';
 	import { confirmed } from '../rules.ts';
 
 	type Props = {
@@ -18,6 +18,9 @@
 		ready?: boolean;
 		children?: Snippet;
 		onfailure?: (message: string, data: Record<string, unknown> | undefined) => void;
+		onsuccess?: (data: Record<string, unknown> | undefined) => void;
+		/** No success toast: the caller shows the result itself. */
+		quiet?: boolean;
 	};
 
 	let {
@@ -31,7 +34,9 @@
 		requireLabel,
 		ready = true,
 		children,
-		onfailure
+		onfailure,
+		onsuccess,
+		quiet = false
 	}: Props = $props();
 
 	const uid = $props.id();
@@ -65,9 +70,13 @@
 	<form
 		method="POST"
 		{action}
-		use:enhance={withFlash({
+		use:enhance={withToast({
 			pending: (on) => (pending = on),
-			success: () => (open = false),
+			quiet,
+			success: (data) => {
+				open = false;
+				onsuccess?.(data);
+			},
 			failure: (message, data) => {
 				error = message;
 				onfailure?.(message, data);
@@ -117,18 +126,32 @@
 
 <style>
 	dialog {
-		width: min(32rem, calc(100vw - 2rem));
-		padding: 1.25rem;
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius);
-		background: var(--color-overlay-bg);
+		width: min(34rem, calc(100vw - 2rem));
+		padding: 1.4rem;
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius-lg);
+		background: var(--color-surface);
 		color: var(--color-text);
+		box-shadow: var(--shadow-2);
+	}
+	dialog[open] {
+		animation: pop 160ms ease-out;
+	}
+	@keyframes pop {
+		from {
+			opacity: 0;
+			transform: translateY(6px) scale(0.98);
+		}
+	}
+	h2 {
+		font-size: 1.1rem;
 	}
 	dialog.danger {
 		border-color: var(--color-error);
 	}
 	dialog::backdrop {
 		background: rgb(0 0 0 / 0.55);
+		backdrop-filter: blur(2px);
 	}
 	.body {
 		color: var(--color-text);

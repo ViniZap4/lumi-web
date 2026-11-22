@@ -53,6 +53,21 @@ export async function read<T>(event: Context, run: (api: AdminClient) => Promise
 	}
 }
 
+/**
+ * A secondary read (a dashboard panel, a detail page's side list): a failure shows as "unavailable" instead of
+ * taking the whole page down. A dead token still signs out.
+ */
+export async function readOptional<T>(event: Context, run: (api: AdminClient) => Promise<T>): Promise<T | null> {
+	const session = requireSession(event);
+	try {
+		return await run(clientFor(session.token, addressOf(event)));
+	} catch (error) {
+		if (!(error instanceof AdminError)) throw error;
+		if (error.kind === 'unauthorized') signOut(event, session);
+		return null;
+	}
+}
+
 export type Failure = { ok: false; message: string; [key: string]: unknown };
 export type ActResult = { ok: true; message: string } | ActionFailure<Failure>;
 

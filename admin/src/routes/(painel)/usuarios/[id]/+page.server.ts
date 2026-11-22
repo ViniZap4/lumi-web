@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { type AdminVault, isSessionId, isUUID } from '#lib/admin.ts';
-import { act, field, invalid, read } from '#lib/server/api.ts';
+import { act, field, invalid, read, readOptional } from '#lib/server/api.ts';
+import { generatePassword } from '#lib/server/password.ts';
 import { confirmed, passwordProblem } from '#lib/rules.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -14,30 +15,48 @@ function userId(raw: string): string {
 
 export const load: PageServerLoad = async (event) => {
 	const id = userId(event.params.id);
-	const [user, sessions, vaults] = await read(event, (api) =>
-		Promise.all([api.user(id), api.sessions({ user: id, limit: 200 }), api.vaults({ user: id, limit: 200 })])
-	);
+	const [[user, sessions, vaults], activity] = await Promise.all([
+		read(event, (api) =>
+			Promise.all([api.user(id), api.sessions({ user: id, limit: 200 }), api.vaults({ user: id, limit: 200 })])
+		),
+		readOptional(event, (api) => api.audit({ user: id, limit: 12 }))
+	]);
 	return {
 		user,
 		sessions: sessions.items,
 		sessionsMore: sessions.more,
 		vaults: vaults.items,
 		vaultsMore: vaults.more,
-		created: event.url.searchParams.has('criado')
+		activity: activity?.entries ?? null
 	};
 };
 
 export const actions: Actions = {
+	/** With "gerar", the panel picks a temporary password and returns it once, in this answer only (no-store). */
 	password: async (event) => {
 		const id = userId(event.params.id);
 		const data = await event.request.formData();
-		const password = field(data, 'password');
+		const generate = field(data, 'mode') === 'gerar';
+		const password = generate ? generatePassword() : field(data, 'password');
 		const problem = passwordProblem(password);
 		if (problem) return invalid(problem);
-		if (password !== field(data, 'password_repeat')) return invalid('As senhas não conferem.');
-		return act(event, 'Senha redefinida. Bloqueio zerado e sessões do usuário encerradas.', (api) =>
+		if (!generate && password !== field(data, 'password_repeat')) return invalid('As senhas não conferem.');
+		const result = await act(event, 'Senha redefinida. Bloqueio zerado e sessões do usuário encerradas.', (api) =>
 			api.setPassword(id, password)
 		);
+		return 'ok' in result && result.ok ? { ...result, generated: generate ? password : null } : result;
+	},
+	/** Force logout: every session of the user, on every device. */
+	logoutAll: async (event) => {
+		const id = userId(event.params.id);
+		let n = 0;
+		const result = await act(event, '', async (api) => {
+			n = await api.revokeUserSessions(id);
+		});
+		if ('ok' in result && result.ok) {
+			return { ok: true, message: n === 1 ? '1 sessão encerrada.' : `${n} sessões encerradas.` };
+		}
+		return result;
 	},
 	disable: (event) =>
 		act(event, 'Usuário desativado. As sessões dele foram encerradas.', (api) =>

@@ -71,24 +71,21 @@ export function shortId(id: string): string {
 	return id.slice(0, 8);
 }
 
-const actions: Record<string, string> = {
-	'admin.token.create': 'Token de admin criado (terminal)',
-	'admin.token.revoke': 'Token de admin revogado',
-	'admin.user.create': 'Usuário criado pelo admin',
-	'admin.user.password': 'Senha redefinida pelo admin',
-	'admin.user.disable': 'Usuário desativado',
-	'admin.user.enable': 'Usuário reativado',
-	'admin.user.unlock': 'Usuário desbloqueado',
-	'admin.user.delete': 'Usuário apagado pelo admin',
-	'admin.session.revoke': 'Sessão encerrada pelo admin',
-	'admin.vault.delete': 'Cofre apagado pelo admin',
-	'admin.federation.revoke': 'Federação revogada pelo admin',
-	'user.delete': 'Usuário apagado',
-	'vault.delete': 'Cofre apagado',
-	'federation.revoke': 'Federação revogada'
-};
+/** "3 d 4 h", "5 h 12 min", "8 min": the two largest units of a duration. */
+export function formatDuration(msecs: number): string {
+	const m = Math.max(0, Math.floor(msecs / 60_000));
+	const d = Math.floor(m / 1440);
+	const h = Math.floor((m % 1440) / 60);
+	const min = m % 60;
+	if (d > 0) return h > 0 ? `${d} d ${h} h` : `${d} d`;
+	if (h > 0) return min > 0 ? `${h} h ${min} min` : `${h} h`;
+	return `${min} min`;
+}
 
-/** A Portuguese label for the known audit actions; unknown ones show as they come. */
-export function actionLabel(action: string): string {
-	return actions[action] ?? action;
+export function formatMs(ms: number): string {
+	return ms < 10 ? `${new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 }).format(ms)} ms` : `${formatInt(Math.round(ms))} ms`;
+}
+
+export function plural(n: number, one: string, many: string): string {
+	return `${formatInt(n)} ${n === 1 ? one : many}`;
 }

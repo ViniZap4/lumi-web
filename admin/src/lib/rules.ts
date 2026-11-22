@@ -39,3 +39,8 @@ export function displayNameProblem(name: string): string | null {
 export function confirmed(typed: string, expected: string): boolean {
 	return expected !== '' && typed.trim() === expected;
 }
+
+/** Whether a password form (PasswordChoice) can be sent: generating always can, typing needs a valid matching pair. */
+export function passwordReady(mode: string, password: string, repeat: string): boolean {
+	return mode === 'gerar' || (passwordProblem(password) === null && password === repeat);
+}

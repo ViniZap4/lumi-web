@@ -11,9 +11,15 @@
 </svelte:head>
 
 <main class="login">
-	<h1><span class="logo" aria-hidden="true">◆</span> lumi · administração</h1>
+	<div class="brand">
+		<span class="logo" aria-hidden="true">◆</span>
+		<div>
+			<h1>lumi</h1>
+			<p class="muted">Administração do servidor</p>
+		</div>
+	</div>
 	{#if data.reason}
-		<p class="banner" role="status">{data.reason}</p>
+		<p class="banner info" role="status">{data.reason}</p>
 	{/if}
 	<form
 		method="POST"
@@ -48,7 +54,7 @@
 		{#if form?.message}
 			<p class="error" id="token-error" role="alert">{form.message}</p>
 		{/if}
-		<button class="btn primary" type="submit" disabled={pending} aria-busy={pending}>
+		<button class="btn primary wide" type="submit" disabled={pending} aria-busy={pending}>
 			{pending ? 'Conferindo…' : 'Entrar'}
 		</button>
 	</form>
@@ -65,19 +71,49 @@
 
 <style>
 	.login {
-		max-width: 30rem;
-		margin: 10vh auto 2rem;
+		max-width: 28rem;
+		margin: 12vh auto 2rem;
 		padding: 0 1rem;
 	}
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 0.85rem;
+		margin-bottom: 1.5rem;
+	}
+	.brand h1 {
+		margin: 0;
+		font-family: var(--font-mono);
+		font-size: 1.6rem;
+	}
+	.brand p {
+		margin: 0;
+	}
 	.logo {
-		color: var(--color-accent);
+		display: grid;
+		place-items: center;
+		width: 48px;
+		height: 48px;
+		border-radius: 13px;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+		color: var(--color-on-primary);
+		font-size: 1.3rem;
+		box-shadow: var(--shadow-2);
+	}
+	.card {
+		padding: 1.4rem;
+	}
+	.wide {
+		width: 100%;
+		min-height: 40px;
 	}
 	.error {
 		color: var(--color-error);
 	}
 	summary {
 		cursor: pointer;
-		color: var(--color-secondary);
+		font-weight: 600;
+		color: var(--color-text-2);
 	}
 	details[open] summary {
 		margin-bottom: 0.5rem;

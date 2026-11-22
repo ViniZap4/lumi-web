@@ -37,7 +37,7 @@
 		display: flex;
 		justify-content: space-between;
 		gap: 0.75rem;
-		margin-top: 1rem;
+		margin: 0 0 1rem;
 	}
 	.next {
 		margin-left: auto;

@@ -21,5 +21,12 @@ export function cursorOf(url: URL): string | undefined {
 	return raw && /^[0-9A-Za-z_-]{1,512}$/.test(raw) ? raw : undefined;
 }
 
+/** A search box (?busca=): trimmed, at most 64 characters, no control characters; empty means no filter. */
+export function searchOf(url: URL): string | undefined {
+	const raw = (url.searchParams.get('busca') ?? '').trim();
+	if (raw === '' || raw.length > 64 || /\p{Cc}/u.test(raw)) return undefined;
+	return raw;
+}
+
 /** The token format of lumi-server (internal/admin/token.go): lpa_ + base64url of 32 bytes. */
 export const TOKEN_RE = /^lpa_[A-Za-z0-9_-]{43}$/;

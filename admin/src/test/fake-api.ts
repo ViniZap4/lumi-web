@@ -18,6 +18,8 @@ export function user(over: Record<string, unknown> = {}) {
 		owned_vaults: 0,
 		vaults: 0,
 		created_at: '2026-11-01T10:00:00Z',
+		last_login_at: '2026-11-21T09:00:00Z',
+		last_seen_at: null,
 		...over
 	};
 }
@@ -34,6 +36,9 @@ export function vault(over: Record<string, unknown> = {}) {
 		crdt_bytes: 2048,
 		federation: null,
 		created_at: '2026-11-01T10:00:00Z',
+		head_seq: 12,
+		last_change_at: '2026-11-21T09:00:00Z',
+		invites_active: 0,
 		...over
 	};
 }
@@ -53,6 +58,14 @@ export function status(over: Record<string, unknown> = {}) {
 		ws_connections: 1,
 		started_at: '2026-11-20T10:00:00Z',
 		token: { id: TOKEN_ID, name: 'painel', expires_at: '2099-01-01T00:00:00Z' },
+		db_latency_ms: 1.25,
+		users_disabled: 0,
+		users_locked: 1,
+		crdt_bytes: 4096,
+		logins_24h: 5,
+		login_failures_24h: 2,
+		invites_active: 1,
+		go_version: 'go1.25.5',
 		...over
 	};
 }

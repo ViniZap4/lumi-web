@@ -20,6 +20,17 @@ npm test && npm run check && npm run build
 - O IP de quem usa o painel vai para a API em `X-Forwarded-For` (só se for um endereço), para a auditoria e o limite de falhas. Atrás de um proxy, defina `ADDRESS_HEADER=x-forwarded-for` e `XFF_DEPTH=1` (só se o proxy sempre escreve o cabeçalho).
 - "Sair" encerra só a sessão do painel: o token do terminal continua valendo até expirar ou ser revogado na página Tokens.
 
+## O que o painel faz
+
+- **Visão geral** (atualiza a cada 15 s): versão, Go, esquema, latência do banco, tempo no ar; contagens de usuários (desativados e bloqueados), sessões, entradas e falhas de login em 24 h, cofres, notas, armazenamento CRDT, conexões ao vivo, convites e federações; alertas (esquema sujo, migrações pendentes, token perto de expirar, contas bloqueadas, rajada de falhas de login, banco lento); maiores cofres, atividade recente, contas bloqueadas e últimas falhas.
+- **Usuários**: busca por nome, filtro por estado, último acesso; criar com senha definida ou **gerada** (mostrada uma vez); na página do usuário, sessões, cofres, atividade e as ações redefinir senha (gerada ou definida), desbloquear, encerrar todas as sessões, desativar/reativar e apagar (LGPD).
+- **Sessões**, **Tokens**: listar e encerrar/revogar.
+- **Cofres**: busca, tamanho, última mudança; na página do cofre, membros com papéis, convites (revogar), federação (revogar), atividade e apagar.
+- **Convites**: todos os links de entrada em cofres (o link nunca aparece: o id é o hash), com revogação.
+- **Federações**: estado e mudanças de controle pendentes no lado de origem.
+- **Auditoria**: filtros por ação (grupos como `auth.*`), usuário e cofre (nome ou id), período (horário de Brasília) e origem; exportação CSV (até 10 000 linhas, células protegidas contra fórmulas).
+- **Tema** claro, escuro ou do sistema (cookie lido no servidor; nenhum script inline). Avisos das ações em toasts.
+
 ## Teclado
 
-`g` e uma letra: `g i` visão geral, `g u` usuários, `g s` sessões, `g c` cofres, `g f` federações, `g t` tokens, `g a` auditoria. Diálogos nativos (`<dialog>`, Esc fecha), link "pular para o conteúdo", foco visível.
+`g` e uma letra: `g i` visão geral, `g u` usuários, `g s` sessões, `g c` cofres, `g v` convites, `g f` federações, `g t` tokens, `g a` auditoria. Diálogos nativos (`<dialog>`, Esc fecha), link "pular para o conteúdo", foco visível.

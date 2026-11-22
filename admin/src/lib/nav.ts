@@ -1,19 +1,47 @@
+import type { IconName } from './components/Icon.svelte';
+
 export interface NavItem {
 	readonly href: string;
 	readonly label: string;
 	/** Second key of the "g <key>" shortcut. */
 	readonly key: string;
+	readonly icon: IconName;
 }
 
-export const NAV: readonly NavItem[] = [
-	{ href: '/', label: 'Visão geral', key: 'i' },
-	{ href: '/usuarios', label: 'Usuários', key: 'u' },
-	{ href: '/sessoes', label: 'Sessões', key: 's' },
-	{ href: '/cofres', label: 'Cofres', key: 'c' },
-	{ href: '/federacoes', label: 'Federações', key: 'f' },
-	{ href: '/tokens', label: 'Tokens', key: 't' },
-	{ href: '/auditoria', label: 'Auditoria', key: 'a' }
+export interface NavSection {
+	readonly title?: string;
+	readonly items: readonly NavItem[];
+}
+
+export const SECTIONS: readonly NavSection[] = [
+	{
+		items: [{ href: '/', label: 'Visão geral', key: 'i', icon: 'home' }]
+	},
+	{
+		title: 'Contas',
+		items: [
+			{ href: '/usuarios', label: 'Usuários', key: 'u', icon: 'users' },
+			{ href: '/sessoes', label: 'Sessões', key: 's', icon: 'activity' }
+		]
+	},
+	{
+		title: 'Conteúdo',
+		items: [
+			{ href: '/cofres', label: 'Cofres', key: 'c', icon: 'vault' },
+			{ href: '/convites', label: 'Convites', key: 'v', icon: 'mail' },
+			{ href: '/federacoes', label: 'Federações', key: 'f', icon: 'globe' }
+		]
+	},
+	{
+		title: 'Servidor',
+		items: [
+			{ href: '/tokens', label: 'Tokens', key: 't', icon: 'key' },
+			{ href: '/auditoria', label: 'Auditoria', key: 'a', icon: 'shield' }
+		]
+	}
 ];
+
+export const NAV: readonly NavItem[] = SECTIONS.flatMap((s) => s.items);
 
 /** Whether a key press belongs to a text field (shortcuts never steal typing). */
 export function isTyping(target: EventTarget | null): boolean {

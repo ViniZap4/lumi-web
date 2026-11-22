@@ -6,6 +6,19 @@
 import { ApiError, type NoteSummary, type NoteContent } from './types.ts';
 import * as api from './api.ts';
 
+// Request sequencing
+// -------------------
+// Every async action captures a ticket before awaiting and re-checks
+// it afterwards; a stale response (the user switched vault/note, or a
+// newer refresh started) is dropped instead of overwriting newer
+// state. In-flight fetches that became irrelevant are also aborted so
+// they stop consuming bandwidth.
+//
+//   - `vaultEpoch` bumps on every vault switch and invalidates
+//     everything started under the previous vault.
+//   - `listSeq` orders list fetches (refresh); only the newest wins.
+//   - `contentSeq` orders content fetches (select / update refetch).
+
 class NotesStore {
   vaultID = $state<string | null>(null);
 
@@ -26,9 +39,18 @@ class NotesStore {
   loadingContent = $state(false);
   contentError = $state<string | null>(null);
 
+  private vaultEpoch = 0;
+  private listSeq = 0;
+  private contentSeq = 0;
+  private listAbort: AbortController | null = null;
+  private contentAbort: AbortController | null = null;
+
   /** Switch to a vault: clears state, fetches list. Idempotent. */
   async openVault(vaultID: string | null): Promise<void> {
     if (this.vaultID === vaultID) return;
+    this.vaultEpoch++;
+    this.abortList();
+    this.abortContent();
     this.vaultID = vaultID;
     this.list = [];
     this.selectedID = null;
@@ -36,44 +58,73 @@ class NotesStore {
     this.listError = null;
     this.listErrorStatus = null;
     this.contentError = null;
+    this.loadingList = false;
+    this.loadingContent = false;
     if (vaultID == null) return;
     await this.refresh();
   }
 
   async refresh(): Promise<void> {
-    if (this.vaultID == null) return;
+    const vaultID = this.vaultID;
+    if (vaultID == null) return;
+    const seq = ++this.listSeq;
+    this.abortList();
+    const ctrl = new AbortController();
+    this.listAbort = ctrl;
     this.loadingList = true;
     this.listError = null;
     this.listErrorStatus = null;
     try {
-      const out = await api.listNotes(this.vaultID, { limit: 200 });
+      const out = await api.listNotes(vaultID, { limit: 200, signal: ctrl.signal });
+      if (seq !== this.listSeq || vaultID !== this.vaultID) return;
       this.list = out.notes;
       // Keep selectedID stable if the note still exists; drop it otherwise.
       if (this.selectedID && !this.list.some((n) => n.id === this.selectedID)) {
         this.selectedID = null;
         this.content = null;
+        this.abortContent();
+        this.contentSeq++;
+        this.loadingContent = false;
       }
     } catch (e) {
+      if (seq !== this.listSeq || vaultID !== this.vaultID || isAbort(e)) return;
       this.listError = describeError(e);
       this.listErrorStatus = e instanceof ApiError ? e.status : null;
     } finally {
-      this.loadingList = false;
+      if (seq === this.listSeq) {
+        this.loadingList = false;
+        this.listAbort = null;
+      }
     }
   }
 
   async select(id: string | null): Promise<void> {
     if (this.selectedID === id) return;
+    const vaultID = this.vaultID;
+    const seq = ++this.contentSeq;
+    this.abortContent();
     this.selectedID = id;
     this.content = null;
-    if (id == null || this.vaultID == null) return;
-    this.loadingContent = true;
     this.contentError = null;
+    if (id == null || vaultID == null) {
+      this.loadingContent = false;
+      return;
+    }
+    const ctrl = new AbortController();
+    this.contentAbort = ctrl;
+    this.loadingContent = true;
     try {
-      this.content = await api.getNoteContent(this.vaultID, id);
+      const content = await api.getNoteContent(vaultID, id, ctrl.signal);
+      if (seq !== this.contentSeq || vaultID !== this.vaultID) return;
+      this.content = content;
     } catch (e) {
+      if (seq !== this.contentSeq || vaultID !== this.vaultID || isAbort(e)) return;
       this.contentError = describeError(e);
     } finally {
-      this.loadingContent = false;
+      if (seq === this.contentSeq) {
+        this.loadingContent = false;
+        this.contentAbort = null;
+      }
     }
   }
 
@@ -84,8 +135,11 @@ class NotesStore {
    * Server-side conflicts (duplicate-after-slugify) bubble up via
    * the standard ApiError. */
   async create(input: api.CreateNoteInput): Promise<NoteSummary | null> {
-    if (this.vaultID == null) return null;
-    const created = await api.createNote(this.vaultID, input);
+    const vaultID = this.vaultID;
+    if (vaultID == null) return null;
+    const epoch = this.vaultEpoch;
+    const created = await api.createNote(vaultID, input);
+    if (epoch !== this.vaultEpoch) return created; // user left the vault
     // Optimistically prepend; refresh anyway to pick up server-side
     // mutations (slug suffixing on title collision, etc).
     this.list = [created, ...this.list.filter((n) => n.id !== created.id)];
@@ -97,27 +151,72 @@ class NotesStore {
   /** PATCH the focused note. Pass any subset of {title, body, tags,
    * path}. Updates the list entry in place + refreshes content. */
   async update(input: api.UpdateNoteInput): Promise<NoteSummary | null> {
-    if (this.vaultID == null || this.selectedID == null) return null;
+    const vaultID = this.vaultID;
     const id = this.selectedID;
-    const updated = await api.updateNote(this.vaultID, id, input);
+    if (vaultID == null || id == null) return null;
+    const epoch = this.vaultEpoch;
+    const updated = await api.updateNote(vaultID, id, input);
+    if (epoch !== this.vaultEpoch) return updated;
     this.list = this.list.map((n) => (n.id === updated.id ? updated : n));
     // Re-fetch content so the preview reflects the new body / FS-
-    // round-tripped frontmatter.
-    if (input.body != null || input.title != null || input.tags != null) {
-      this.content = await api.getNoteContent(this.vaultID, updated.id);
+    // round-tripped frontmatter — but only if the user is still on
+    // that note, and only if no newer content fetch supersedes ours.
+    if (
+      (input.body != null || input.title != null || input.tags != null) &&
+      this.selectedID === updated.id
+    ) {
+      const seq = ++this.contentSeq;
+      this.abortContent();
+      const ctrl = new AbortController();
+      this.contentAbort = ctrl;
+      try {
+        const content = await api.getNoteContent(vaultID, updated.id, ctrl.signal);
+        if (seq === this.contentSeq && epoch === this.vaultEpoch && this.selectedID === updated.id) {
+          this.content = content;
+        }
+      } catch (e) {
+        if (!isAbort(e)) throw e;
+      } finally {
+        if (seq === this.contentSeq) this.contentAbort = null;
+      }
     }
     return updated;
   }
 
   /** DELETE the focused note. Clears selection on success. */
   async deleteSelected(): Promise<void> {
-    if (this.vaultID == null || this.selectedID == null) return;
+    const vaultID = this.vaultID;
     const id = this.selectedID;
-    await api.deleteNote(this.vaultID, id);
+    if (vaultID == null || id == null) return;
+    const epoch = this.vaultEpoch;
+    await api.deleteNote(vaultID, id);
+    if (epoch !== this.vaultEpoch) return;
     this.list = this.list.filter((n) => n.id !== id);
-    this.selectedID = null;
-    this.content = null;
+    if (this.selectedID === id) {
+      this.contentSeq++;
+      this.abortContent();
+      this.selectedID = null;
+      this.content = null;
+      this.loadingContent = false;
+    }
   }
+
+  private abortList(): void {
+    this.listAbort?.abort();
+    this.listAbort = null;
+  }
+
+  private abortContent(): void {
+    this.contentAbort?.abort();
+    this.contentAbort = null;
+  }
+}
+
+function isAbort(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError')
+  );
 }
 
 function describeError(err: unknown): string {

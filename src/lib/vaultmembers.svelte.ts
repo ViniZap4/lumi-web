@@ -33,6 +33,11 @@ class VaultMembersStore {
   loading = $state(false);
   lastError = $state<string | null>(null);
 
+  /** Vault whose data is fully hydrated (null while loading/cleared). */
+  private loadedVaultID: string | null = null;
+  /** Monotonic ticket; responses from an older ticket are dropped. */
+  private seq = 0;
+
   /** Hydrate everything for the given vault. Idempotent for repeat
    *  ids; calling with `null` clears state (e.g. when modal closes). */
   async openVault(id: string | null): Promise<void> {
@@ -40,11 +45,16 @@ class VaultMembersStore {
       this.clear();
       return;
     }
-    if (this.vaultID === id && (this.members.length > 0 || this.loading)) {
-      // Already loaded; the caller can refresh() if they want fresh.
+    // "Loaded" is tracked explicitly: a vault with zero rows is just
+    // as loaded as one with many (checking `list.length > 0` refetched
+    // empty vaults on every open).
+    if (this.vaultID === id && (this.loadedVaultID === id || this.loading)) {
+      // Already loaded / loading; the caller can refresh() for fresh data.
       return;
     }
+    const seq = ++this.seq;
     this.vaultID = id;
+    this.loadedVaultID = null;
     this.loading = true;
     this.lastError = null;
     try {
@@ -62,13 +72,16 @@ class VaultMembersStore {
           throw e;
         }),
       ]);
+      if (seq !== this.seq) return; // superseded by a newer open/clear
       this.members = members;
       this.roles = roles;
       this.invites = invites;
+      this.loadedVaultID = id;
     } catch (e) {
+      if (seq !== this.seq) return;
       this.lastError = describeError(e);
     } finally {
-      this.loading = false;
+      if (seq === this.seq) this.loading = false;
     }
   }
 
@@ -76,10 +89,14 @@ class VaultMembersStore {
     if (!this.vaultID) return;
     const id = this.vaultID;
     this.vaultID = null; // forces openVault to re-hydrate
+    this.loading = false;
     await this.openVault(id);
   }
 
   clear(): void {
+    this.seq++; // invalidate any in-flight hydration
+    this.loading = false;
+    this.loadedVaultID = null;
     this.vaultID = null;
     this.members = [];
     this.roles = [];
@@ -172,9 +189,11 @@ class VaultMembersStore {
   }
 
   private async reloadInvites(): Promise<void> {
-    if (!this.vaultID) return;
+    const id = this.vaultID;
+    if (!id) return;
     try {
-      this.invites = await api.listVaultInvites(this.vaultID);
+      const invites = await api.listVaultInvites(id);
+      if (this.vaultID === id) this.invites = invites;
     } catch {
       // already toasted by the caller; ignore on background refresh
     }

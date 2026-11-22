@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
   import { auth } from '../lib/auth.svelte.ts';
@@ -40,12 +40,20 @@
 
   let lastDelete = $state(0); // 'dd' double-tap timestamp
 
-  // Reset edit state whenever the focused note changes.
+  // Reset edit state whenever the focused note changes. ONLY
+  // notes.selectedID is a dependency: the body runs untracked, because
+  // reading editMode/editSession here (directly or via cancelEdit) made
+  // the effect re-run when enterEdit flipped editMode — cancelling the
+  // edit the instant it started.
+  let lastSelectedID: string | null = untrack(() => notes.selectedID);
   $effect(() => {
     const id = notes.selectedID;
-    if (editMode) cancelEdit();
-    editError = null;
-    void id; // intentional dep
+    untrack(() => {
+      if (id === lastSelectedID) return;
+      lastSelectedID = id;
+      if (editMode) cancelEdit();
+      editError = null;
+    });
   });
 
   // Hydrate notes whenever the active vault changes. The notes store

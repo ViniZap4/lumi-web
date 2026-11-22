@@ -52,7 +52,14 @@ export class FakeProvider {
   readonly awareness: Awareness;
   readonly doc: Y.Doc;
   readonly room: string;
-  readonly url: string;
+  readonly serverUrl: string;
+  /** URL of the current/last connection attempt. */
+  url: string;
+  /** Every URL dialled, in order (one per connection attempt). */
+  urls: string[] = [];
+  /** Ticket mode: per-attempt auth params (see ProviderFactoryOpts). */
+  private resolveParams: (() => Promise<Record<string, string>>) | null;
+  private dialling = false;
   synced = false;
   connected = false;
   shouldConnect = true;
@@ -75,13 +82,15 @@ export class FakeProvider {
     serverUrl: string,
     room: string,
     doc: Y.Doc,
-    opts: { params?: Record<string, string> } = {},
+    opts: { params?: Record<string, string>; resolveParams?: () => Promise<Record<string, string>> } = {},
     server: FakeServer = fakeServer,
   ) {
     this.server = server;
     this.doc = doc;
     this.room = room;
-    this.url = `${serverUrl}/${room}?${new URLSearchParams(opts.params ?? {}).toString()}`;
+    this.serverUrl = serverUrl;
+    this.resolveParams = opts.resolveParams ?? null;
+    this.url = this.urlFor(opts.params ?? {});
     this.awareness = new Awareness(doc);
     server.providers.push(this);
     doc.on('update', this.onClientUpdate);
@@ -102,10 +111,38 @@ export class FakeProvider {
     for (const fn of Array.from(this.handlers.get(ev) ?? [])) fn(...args);
   }
 
-  /** Open the socket and run the y-protocols handshake. */
+  private urlFor(params: Record<string, string>): string {
+    return `${this.serverUrl}/${this.room}?${new URLSearchParams(params).toString()}`;
+  }
+
+  /** Open the socket and run the y-protocols handshake. In ticket mode
+   *  the auth params are resolved first (async), once per attempt, and
+   *  a rejection is reported like a socket that closed before opening. */
   open(): void {
-    if (this.destroyed || !this.shouldConnect || this.connected) return;
+    if (this.destroyed || !this.shouldConnect || this.connected || this.dialling) return;
     this.emit('status', [{ status: 'connecting' }]);
+    if (this.resolveParams) {
+      this.dialling = true;
+      this.resolveParams().then(
+        (params) => {
+          this.dialling = false;
+          if (this.destroyed || !this.shouldConnect) return;
+          this.url = this.urlFor(params);
+          this.connectNow();
+        },
+        (err) => {
+          this.dialling = false;
+          if (this.destroyed || !this.shouldConnect) return;
+          this.emit('connection-close', [{ code: err?.closeCode ?? 1006 } as CloseEvent, this]);
+        },
+      );
+      return;
+    }
+    this.connectNow();
+  }
+
+  private connectNow(): void {
+    this.urls.push(this.url);
     this.connected = true;
     this.emit('status', [{ status: 'connected' }]);
     if (this.server.autoSync) this.handshake();
@@ -164,7 +201,12 @@ export class FakeProvider {
 
 /** Factory with the EditorSession ProviderFactory signature. */
 export function fakeProviderFactory(server: FakeServer = fakeServer) {
-  return (serverUrl: string, room: string, doc: Y.Doc, opts: { params: Record<string, string> }) =>
+  return (
+    serverUrl: string,
+    room: string,
+    doc: Y.Doc,
+    opts: { params: Record<string, string>; resolveParams?: () => Promise<Record<string, string>> },
+  ) =>
     new FakeProvider(serverUrl, room, doc, opts, server);
 }
 

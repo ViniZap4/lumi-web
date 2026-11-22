@@ -4,7 +4,7 @@
   import { notes } from '../lib/notes.svelte.ts';
   import { renderMarkdown } from '../lib/markdown.ts';
   import { ApiError } from '../lib/types.ts';
-  import { isAuthFailure } from '../lib/api.ts';
+  import { isAuthFailure, createNoteWsTicket } from '../lib/api.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
   import { accounts } from '../lib/accounts.svelte.ts';
@@ -294,6 +294,9 @@
           }
         },
         onAuthFailure: () => accounts.markNeedsLogin(key, 'sessão expirada'),
+        // Fresh single-use ticket per (re)connect; 404 → ?token= fallback.
+        fetchTicket: () => createNoteWsTicket(vaultID, noteID),
+        getToken: () => accounts.tokenFor(key),
       });
       sync.setEditor(vaultID, editSession);
       editMode = true;

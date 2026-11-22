@@ -40,6 +40,7 @@ import {
   type ServerInfo,
   type ChangesResponse,
 } from './types.ts';
+import type { WsTicket } from './ws-ticket.ts';
 
 /** Optional default/first server, baked at build time. Only used to
  *  prefill the "add server" form — never as an implicit target. */
@@ -502,6 +503,12 @@ export class ApiClient {
     await this.request<void>(`/api/vaults/${vaultID}/notes/${enc(noteID)}`, { method: 'DELETE' });
   }
 
+  /** Single-use, 30 s ticket for the note sync WebSocket (wave 3).
+   *  Older servers answer 404 — callers fall back to `?token=`. */
+  createNoteWsTicket(vaultID: string, noteID: string): Promise<WsTicket> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/ws-ticket`, { method: 'POST' });
+  }
+
   getNoteSnapshot(vaultID: string, noteID: string): Promise<NoteSnapshot> {
     return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/snapshot`);
   }
@@ -608,6 +615,7 @@ export async function getNoteContent(v: string, n: string, s?: AbortSignal) { re
 export async function createNote(v: string, i: CreateNoteInput) { return vc(v).createNote(v, i); }
 export async function updateNote(v: string, n: string, i: UpdateNoteInput) { return vc(v).updateNote(v, n, i); }
 export async function deleteNote(v: string, n: string) { return vc(v).deleteNote(v, n); }
+export async function createNoteWsTicket(v: string, n: string) { return vc(v).createNoteWsTicket(v, n); }
 export async function getNoteSnapshot(v: string, n: string) { return vc(v).getNoteSnapshot(v, n); }
 export async function applyNoteDiff(v: string, n: string, t: string, b?: string) { return vc(v).applyNoteDiff(v, n, t, b); }
 

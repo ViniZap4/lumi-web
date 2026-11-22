@@ -21,6 +21,7 @@ vi.mock('../lib/api.ts', async (importOriginal) => {
     listNotes: vi.fn(),
     getNoteContent: vi.fn(),
     applyNoteDiff: vi.fn(),
+    createNoteWsTicket: vi.fn(),
   };
 });
 
@@ -31,6 +32,7 @@ import { notes } from '../lib/notes.svelte.ts';
 import { accounts } from '../lib/accounts.svelte.ts';
 import { books } from '../lib/books.svelte.ts';
 import { fakeServer, flushMicrotasks } from '../test/fake-provider.ts';
+import { ApiError } from '../lib/types.ts';
 
 const BODY = '# Title\n\nhello world';
 
@@ -80,6 +82,8 @@ beforeEach(async () => {
     limit: 200,
     offset: 0,
   } as any);
+  // Default: an older server without the ticket endpoint (→ ?token=).
+  vi.mocked(api.createNoteWsTicket).mockRejectedValue(new ApiError(404, { error: 'not_found' }));
   vi.mocked(api.getNoteContent).mockResolvedValue({
     id: 'n1', vault_id: 'v1', path: 'n1.md', frontmatter: {}, body: BODY,
   });
@@ -112,12 +116,21 @@ describe('VaultHomeView editor', () => {
     // Line-accurate check via CodeMirror lines.
     const lines = Array.from(target.querySelectorAll('.cm-line')).map((l) => l.textContent);
     expect(lines).toEqual(BODY.split('\n'));
-    // Connected to the book's account server with its token.
+    // Connected to the book's account server with its token (the
+    // server has no ticket endpoint in this test → legacy fallback).
     expect(fakeServer.providers[0].url).toBe('wss://lumi.work.com/api/vaults/v1/notes/n1/sync?token=tk');
     // Server doc (what gets mirrored to disk) is untouched.
     expect(fakeServer.text('n1/sync')).toBe(BODY);
     // Joining never pushed the text through the LWW /diff path.
     expect(api.applyNoteDiff).not.toHaveBeenCalled();
+  });
+
+  it('dials with a single-use ticket when the server supports it', async () => {
+    vi.mocked(api.createNoteWsTicket).mockResolvedValue({ ticket: 'tkt-1', expires_at: '' });
+    await openNoteAndEdit();
+    await settle();
+    expect(api.createNoteWsTicket).toHaveBeenCalledWith('v1', 'n1');
+    expect(fakeServer.providers[0].url).toBe('wss://lumi.work.com/api/vaults/v1/notes/n1/sync?ticket=tkt-1');
   });
 
   it('stays in edit mode after entering it (selection effect does not cancel)', async () => {

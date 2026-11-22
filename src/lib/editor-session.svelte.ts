@@ -18,6 +18,12 @@
 //   4. Auth failures stop the reconnect loop (close codes 4401/4403/
 //      1008, or an HTTP-level upgrade rejection confirmed by an auth
 //      probe) instead of hammering the server forever.
+//   5. Socket auth (wave 3): when `fetchTicket` is given, every
+//      connection attempt — including each automatic reconnect — first
+//      fetches a fresh single-use ticket and dials `?ticket=`; older
+//      servers (404 on the ticket endpoint) fall back to `?token=`.
+//      A 4401 close on a ticketed socket gets ONE retry with a new
+//      ticket before it counts as an auth failure (see lib/ws-ticket.ts).
 //
 // Why imperative (not reactive)? Yjs has its own observer system;
 // wrapping Y.Text in a $state proxy fights it. Only connection
@@ -32,6 +38,7 @@ import type { Awareness } from 'y-protocols/awareness';
 import type { SessionUser } from './types.ts';
 import { wsBase } from './serverurl.ts';
 import type { EditorState } from './bookstatus.ts';
+import { WsTicketAuth, WsAuthError, createTicketSocketClass, type WsTicket, type WsAuthMode } from './ws-ticket.ts';
 
 export type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'closed';
 
@@ -74,11 +81,21 @@ export interface ProviderLike {
   destroy(): void;
 }
 
+export interface ProviderFactoryOpts {
+  /** Static query params (legacy token mode). */
+  params: Record<string, string>;
+  /** Per-attempt auth params (ticket mode). When present it must be
+   *  called once for EVERY connection attempt, reconnects included. */
+  resolveParams?: () => Promise<Record<string, string>>;
+  /** Underlying WebSocket implementation (tests). */
+  WebSocketImpl?: typeof WebSocket;
+}
+
 export type ProviderFactory = (
   serverUrl: string,
   room: string,
   doc: Y.Doc,
-  opts: { params: Record<string, string> },
+  opts: ProviderFactoryOpts,
 ) => ProviderLike;
 
 export type AuthProbeResult = 'ok' | 'unauthorized' | 'unknown';
@@ -98,10 +115,27 @@ export interface EditorSessionOptions {
   onAuthFailure?: () => void;
   /** Consecutive never-opened attempts before probing auth. */
   probeAfterFailures?: number;
+  /** POST /api/vaults/:vault/notes/:id/ws-ticket on the book's
+   *  account. When omitted the session dials `?token=` (legacy). */
+  fetchTicket?: () => Promise<WsTicket>;
+  /** Current account token, read at dial time for the `?token=`
+   *  fallback (re-login rotates it). Defaults to the constructor token. */
+  getToken?: () => string | null;
+  /** Underlying WebSocket implementation (tests). */
+  WebSocketImpl?: typeof WebSocket;
 }
 
-const defaultProviderFactory: ProviderFactory = (serverUrl, room, doc, opts) =>
-  new WebsocketProvider(serverUrl, room, doc, { params: opts.params }) as unknown as ProviderLike;
+export const defaultProviderFactory: ProviderFactory = (serverUrl, room, doc, opts) => {
+  const Impl = opts.WebSocketImpl ?? globalThis.WebSocket;
+  const WebSocketPolyfill = opts.resolveParams ? createTicketSocketClass(opts.resolveParams, Impl) : Impl;
+  return new WebsocketProvider(serverUrl, room, doc, {
+    params: opts.params,
+    WebSocketPolyfill,
+    // Not a y-websocket option (ignored by it); lets a test double that
+    // replaces the provider class see the per-attempt resolver.
+    ...({ resolveParams: opts.resolveParams } as object),
+  }) as unknown as ProviderLike;
+};
 
 async function defaultProbeAuth(): Promise<AuthProbeResult> {
   return 'unknown';
@@ -162,8 +196,21 @@ export class EditorSession {
   private failedAttempts = 0;
   private probing = false;
   private syncWaiters: Array<() => void> = [];
-  private readonly opts: Required<Omit<EditorSessionOptions, 'onAuthFailure' | 'serverUrl'>> &
+  /** Ticket resolver (null = legacy token-only session). */
+  private readonly wsAuth: WsTicketAuth | null;
+  /** The one-shot "4401 → fetch a new ticket" retry was used and no
+   *  handshake has succeeded since. */
+  private authRetryUsed = false;
+  private readonly opts: Required<
+    Omit<EditorSessionOptions, 'onAuthFailure' | 'serverUrl' | 'fetchTicket' | 'getToken' | 'WebSocketImpl'>
+  > &
     Pick<EditorSessionOptions, 'onAuthFailure'>;
+
+  /** How the socket authenticates: 'ticket', 'token' (legacy server or
+   *  no ticket support configured) or 'unknown' before the first dial. */
+  get authMode(): WsAuthMode {
+    return this.wsAuth ? this.wsAuth.mode : 'token';
+  }
 
   private readonly onStatus = (ev: { status: string }) => {
     if (this.destroyed || this.stopped) return;
@@ -188,6 +235,9 @@ export class EditorSession {
       return;
     }
     this.liveSynced = true;
+    // A full handshake proves the credentials work: re-arm the one-shot
+    // 4401 ticket retry.
+    this.authRetryUsed = false;
     // SyncStep2 after (re)connecting: offline edits were exchanged.
     this.pending = false;
     if (this.synced) return;
@@ -201,6 +251,15 @@ export class EditorSession {
   private readonly onClose = (ev: CloseEvent | null) => {
     if (this.destroyed || this.stopped) return;
     const code = ev?.code;
+    if (code === AUTH_CLOSE_CODE && this.authMode === 'ticket' && !this.authRetryUsed) {
+      // Ticket rejected (expired in flight, replayed, server restart):
+      // let y-websocket reconnect — the next attempt fetches a NEW
+      // ticket. A second 4401 before any successful handshake is an
+      // auth failure.
+      this.authRetryUsed = true;
+      this.openedThisAttempt = false;
+      return;
+    }
     if (code != null && code in FATAL_CLOSE_CODES) {
       this.stop(FATAL_CLOSE_CODES[code]);
       if (code === AUTH_CLOSE_CODE) this.opts.onAuthFailure?.();
@@ -252,9 +311,11 @@ export class EditorSession {
     // `params` as the query string → /api/vaults/:v/notes/:id/sync.
     const serverUrl = `${wsBase(options.serverUrl)}/api/vaults/${vaultID}/notes`;
     const room = `${encodeURIComponent(noteID)}/sync`;
-    this.provider = this.opts.providerFactory(serverUrl, room, this.ydoc, {
-      params: { token },
-    });
+    const getToken = options.getToken ?? (() => token);
+    this.wsAuth = options.fetchTicket ? new WsTicketAuth(options.fetchTicket, getToken) : null;
+    this.provider = this.opts.providerFactory(serverUrl, room, this.ydoc, this.wsAuth
+      ? { params: {}, resolveParams: () => this.resolveParams(), WebSocketImpl: options.WebSocketImpl }
+      : { params: { token }, WebSocketImpl: options.WebSocketImpl });
 
     this.provider.awareness.setLocalStateField('user', {
       name: user.display_name || user.username,
@@ -308,6 +369,22 @@ export class EditorSession {
 
   get isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  /** Auth params for one connection attempt (ticket mode). A rejected
+   *  account token is definitive: stop before the socket even reports
+   *  the failed attempt. */
+  private async resolveParams(): Promise<Record<string, string>> {
+    if (!this.wsAuth || this.destroyed || this.stopped) throw new WsAuthError(1006, 'session closed');
+    try {
+      return await this.wsAuth.params();
+    } catch (e) {
+      if (!this.destroyed && !this.stopped && e instanceof WsAuthError && e.closeCode in FATAL_CLOSE_CODES) {
+        this.stop(FATAL_CLOSE_CODES[e.closeCode]);
+        if (e.closeCode === AUTH_CLOSE_CODE) this.opts.onAuthFailure?.();
+      }
+      throw e;
+    }
   }
 
   private stop(reason: string): void {

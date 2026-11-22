@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, untrack } from 'svelte';
+  import { onMount, onDestroy, untrack, tick } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
   import { renderMarkdown } from '../lib/markdown.ts';
@@ -11,6 +11,9 @@
   import { sync } from '../lib/sync.svelte.ts';
   import { serverLabel } from '../lib/serverurl.ts';
   import { GChord, isEditableTarget } from '../lib/shortcuts.ts';
+  import { MillerNav } from '../lib/miller.svelte.ts';
+  import { breadcrumb, parentDir, type Entry } from '../lib/notetree.ts';
+  import MillerColumn from '../components/MillerColumn.svelte';
   import VaultSettingsModal from '../components/VaultSettingsModal.svelte';
   import VaultCreateModal from '../components/VaultCreateModal.svelte';
   import BookSwitcher from '../components/BookSwitcher.svelte';
@@ -24,8 +27,24 @@
   type NoteEditorComp = typeof import('../components/NoteEditor.svelte').default;
   type EditorSessionCtor = typeof import('../lib/editor-session.svelte.ts').EditorSession;
 
-  // Vim-style list cursor. Tracks position even when selectedID is null.
-  let cursor = $state(0);
+  // Yazi/miller browser (wave 3): parent | current | preview columns
+  // derived from note paths. Grammar mirrors tui-client/ui/keys_tree.go.
+  const nav = new MillerNav(() => notes.list);
+  /** 'browse' = walking columns; 'note' = the open note owns the main
+   *  pane (Enter/l on a note), parent column hidden. */
+  let pane = $state<'browse' | 'note'>('browse');
+  let showPreview = $state(true); // zp
+  let filterOpen = $state(false);
+  let filterInput = $state<HTMLInputElement | null>(null);
+  let currentColEl = $state<HTMLElement | null>(null);
+  let currentCol = $state<{ pageRows(): number } | null>(null);
+  let previewEl = $state<HTMLElement | null>(null);
+  const crumbs = $derived(breadcrumb(nav.dir));
+  const openKey = $derived(notes.selectedID ? 'n:' + notes.selectedID : null);
+  const liveMsg = $derived(
+    `${nav.dir === '' ? (vaults.selected?.name ?? 'Book') + ' root' : nav.dir}, ${nav.entries.length} items` +
+      (nav.filter ? `, filtered by “${nav.filter}”` : ''),
+  );
 
   // Slice 4.3 — modals.
   type Modal = null | 'new-note' | 'delete-confirm';
@@ -46,6 +65,7 @@
   let EditorSession = $state<EditorSessionCtor | null>(null);
 
   let lastDelete = $state(0); // 'dd' double-tap timestamp
+  let creating = false;
 
   // Reset edit state whenever the focused note changes. ONLY
   // notes.selectedID is a dependency: the body runs untracked, because
@@ -70,6 +90,11 @@
   $effect(() => {
     const vid = vaults.selectedID;
     untrack(() => {
+      if (notes.vaultID !== vid) {
+        nav.reset();
+        pane = 'browse';
+        filterOpen = false;
+      }
       if (editSession && editSession.vaultID !== vid) exitEdit();
       const b = vid ? books.bookForVault(vid) : null;
       if (b && notes.vaultID !== vid) sync.onBookOpened(b);
@@ -85,9 +110,55 @@
     if (activeRevoked) untrack(() => exitEdit());
   });
 
-  // Clamp cursor when the list shrinks (e.g. refresh).
+  // The preview follows the cursor (yazi): a note under the cursor is
+  // loaded into the preview column, a folder clears the selection.
+  // Rapid j/k is debounced so holding a key does not fire one content
+  // request per row; clicks and jumps select immediately.
+  const PREVIEW_DEBOUNCE_MS = 120;
+  let debounceNext = false;
+  let selTimer: ReturnType<typeof setTimeout> | null = null;
+  // A primitive, so the effect below re-runs when the cursor moves to
+  // another row — not when the tree is merely re-derived (refresh,
+  // feed changes) with the cursor still on the same row.
+  const cursorNoteID = $derived(nav.current?.kind === 'note' ? nav.current.note.id : null);
+  const cursorKey = $derived(nav.current?.key ?? null);
   $effect(() => {
-    if (cursor >= notes.list.length) cursor = Math.max(0, notes.list.length - 1);
+    void cursorKey;
+    const id = cursorNoteID;
+    untrack(() => {
+      if (selTimer) clearTimeout(selTimer);
+      selTimer = null;
+      if (id === notes.selectedID) return;
+      // Never yank the note out from under an active editor or a note
+      // being created.
+      if (editSession || creating) return;
+      if (debounceNext) {
+        selTimer = setTimeout(() => {
+          selTimer = null;
+          if (!editSession) void notes.select(id);
+        }, PREVIEW_DEBOUNCE_MS);
+      } else {
+        void notes.select(id);
+      }
+      debounceNext = false;
+    });
+  });
+
+  // A note selected from elsewhere (created, opened via a link) is
+  // revealed in its folder.
+  $effect(() => {
+    const id = notes.selectedID;
+    void notes.list; // re-run once a just-created note reaches the list
+    untrack(() => {
+      // A pending debounced preview means the user is moving away; a
+      // note being created is revealed once it reached its folder.
+      if (id && !selTimer && !creating) nav.reveal(id);
+    });
+  });
+
+  // Leaving a note that no longer exists returns to browsing.
+  $effect(() => {
+    if (pane === 'note' && !notes.selectedID) untrack(() => (pane = 'browse'));
   });
 
   onMount(() => {
@@ -96,6 +167,7 @@
   });
 
   onDestroy(() => {
+    if (selTimer) clearTimeout(selTimer);
     // Tear the editor session down (socket + Y.Doc) — e.g. on logout
     // App.svelte unmounts this view while an editor is open.
     if (editSession) {
@@ -112,7 +184,7 @@
   }
 
   // g1–g9 / gb / gg chords + ⌃⌘1–9 on macOS (SPEC-LIVROS §5).
-  const chord = new GChord();
+  const chord = new GChord(Date.now, { nav: true });
 
   function handleKey(e: KeyboardEvent): void {
     // Cmd/Ctrl+S: refresh after the live save, regardless of focus.
@@ -144,69 +216,208 @@
       e.preventDefault();
       if (c.kind === 'book') books.openShortcut(c.n);
       else if (c.kind === 'picker') books.openPicker();
-      else if (c.kind === 'top') cursor = 0;
+      else if (c.kind === 'top') pane === 'note' ? scrollNote('top') : nav.top();
+      else if (c.kind === 'home') goHome();
+      else if (c.kind === 'preview') showPreview = !showPreview;
       return;
     }
 
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (notes.selectedID) {
-        void notes.select(null);
-      } else {
-        back();
-      }
-      return;
-    }
-    if (e.key === 'h') {
-      e.preventDefault();
-      if (notes.selectedID) void notes.select(null);
-      else back();
-      return;
-    }
-    // New note: 'n' on list pane.
-    if (e.key === 'n') {
+    // Shared by both panes.
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       openNewNote();
       return;
     }
-    // Enter edit on the focused note: 'e'.
-    if (e.key === 'e' && notes.selectedID) {
+    if (e.key === 'r' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
-      void enterEdit();
+      void notes.refresh();
       return;
     }
-    // Delete focused: 'dd' double-tap.
-    if (e.key === 'd' && notes.selectedID) {
+    if (e.key === 'e' && !e.ctrlKey && !e.metaKey) {
+      const target = noteUnderFocus();
+      if (target) {
+        e.preventDefault();
+        void editNote(target);
+      }
+      return;
+    }
+    if (e.key === 'd' && !e.ctrlKey && !e.metaKey) {
+      // Delete: 'dd' double-tap, on the note under the cursor.
+      const target = noteUnderFocus();
+      if (!target) return;
       e.preventDefault();
       const now = Date.now();
       if (now - lastDelete < 500) {
-        modal = 'delete-confirm';
         lastDelete = 0;
+        void notes.select(target).then(() => {
+          if (notes.selectedID === target) modal = 'delete-confirm';
+        });
       } else {
         lastDelete = now;
       }
       return;
     }
 
-    if (notes.list.length === 0) return;
+    if (pane === 'note') return handleNoteKey(e);
+    handleBrowseKey(e);
+  }
 
-    if (e.key === 'j' || e.key === 'ArrowDown') {
+  /** Note id the next action applies to: the open note in the reader,
+   *  else the note under the browser cursor. */
+  function noteUnderFocus(): string | null {
+    if (pane === 'note') return notes.selectedID;
+    const cur = nav.current;
+    return cur?.kind === 'note' ? cur.note.id : null;
+  }
+
+  function handleBrowseKey(e: KeyboardEvent): void {
+    const k = e.key;
+    const page = currentCol?.pageRows() ?? 10;
+    let handled = true;
+    if (k === 'j' || k === 'ArrowDown') { debounceNext = true; nav.move(1); }
+    else if (k === 'k' || k === 'ArrowUp') { debounceNext = true; nav.move(-1); }
+    // (No Ctrl-f/Ctrl-b: those stay with the browser's find/back.)
+    else if (k === 'PageDown') { debounceNext = true; nav.move(page); }
+    else if (k === 'PageUp') { debounceNext = true; nav.move(-page); }
+    else if (e.ctrlKey && k === 'd') { debounceNext = true; nav.move(Math.ceil(page / 2)); }
+    else if (e.ctrlKey && k === 'u') { debounceNext = true; nav.move(-Math.ceil(page / 2)); }
+    else if (k === 'Home') nav.top();
+    else if (k === 'G' || k === 'End') nav.bottom();
+    else if (k === 'h' || k === 'ArrowLeft') { nav.left(); focusColumn(); }
+    else if (k === 'l' || k === 'ArrowRight' || k === 'Enter') activate();
+    else if (k === 'H') { nav.historyBack(); focusColumn(); }
+    else if (k === 'L') { nav.historyForward(); focusColumn(); }
+    else if (k === '/') void openFilter();
+    else if (k === 'Escape') {
+      if (nav.filter) { nav.setFilter(''); filterOpen = false; }
+      else back();
+    } else handled = false;
+    if (handled) e.preventDefault();
+  }
+
+  function handleNoteKey(e: KeyboardEvent): void {
+    const k = e.key;
+    let handled = true;
+    if (k === 'h' || k === 'ArrowLeft' || k === 'Escape') leaveNote();
+    else if (k === 'j' || k === 'ArrowDown') scrollNote(60);
+    else if (k === 'k' || k === 'ArrowUp') scrollNote(-60);
+    else if (e.ctrlKey && k === 'd') scrollNote('half');
+    else if (e.ctrlKey && k === 'u') scrollNote('-half');
+    else if (k === 'G' || k === 'End') scrollNote('bottom');
+    else if (k === 'Home') scrollNote('top');
+    else if (k === 'H') { leaveNote(); nav.historyBack(); }
+    else handled = false;
+    if (handled) e.preventDefault();
+  }
+
+  // ---- browser actions ---------------------------------------------------
+
+  /** l / Enter / → : descend into a folder, or open the note. */
+  function activate(): void {
+    const note = nav.right();
+    if (note) void openNote(note.note.id);
+    else focusColumn();
+  }
+
+  async function openNote(id: string): Promise<void> {
+    if (notes.selectedID !== id) void notes.select(id);
+    pane = 'note';
+    await tick();
+    previewEl?.focus();
+  }
+
+  function leaveNote(): void {
+    pane = 'browse';
+    void focusColumn();
+  }
+
+  function goHome(): void {
+    pane = 'browse';
+    nav.home();
+    void focusColumn();
+  }
+
+  async function focusColumn(force = false): Promise<void> {
+    await tick();
+    // Do not steal focus from a dialog or form control.
+    const a = document.activeElement as HTMLElement | null;
+    if (!force && a && a !== document.body && isEditableTarget(a)) return;
+    currentColEl?.focus({ preventScroll: true });
+  }
+
+  async function openFilter(): Promise<void> {
+    filterOpen = true;
+    await tick();
+    filterInput?.focus();
+    filterInput?.select();
+  }
+
+  function onFilterKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
       e.preventDefault();
-      if (cursor < notes.list.length - 1) cursor++;
-    } else if (e.key === 'k' || e.key === 'ArrowUp') {
+      nav.setFilter('');
+      filterOpen = false;
+      void focusColumn(true);
+    } else if (e.key === 'Enter') {
+      // Keep the filter, hand the keys back to the column.
       e.preventDefault();
-      if (cursor > 0) cursor--;
-    } else if (e.key === 'Enter' || e.key === 'l') {
+      filterOpen = nav.filter !== '';
+      void focusColumn(true);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      const n = notes.list[cursor];
-      if (n) void notes.select(n.id);
-    } else if (e.key === 'G') {
-      e.preventDefault();
-      cursor = notes.list.length - 1;
-    } else if (e.key === 'r') {
-      e.preventDefault();
-      void notes.refresh();
+      nav.move(e.key === 'ArrowDown' ? 1 : -1);
     }
+  }
+
+  function scrollNote(by: number | 'top' | 'bottom' | 'half' | '-half'): void {
+    const el = previewEl;
+    if (!el) return;
+    if (by === 'top') el.scrollTop = 0;
+    else if (by === 'bottom') el.scrollTop = el.scrollHeight;
+    else if (by === 'half') el.scrollTop += el.clientHeight / 2;
+    else if (by === '-half') el.scrollTop -= el.clientHeight / 2;
+    else el.scrollTop += by;
+  }
+
+  async function editNote(id: string): Promise<void> {
+    if (notes.selectedID !== id) await notes.select(id);
+    if (notes.selectedID !== id) return;
+    pane = 'note';
+    await enterEdit();
+  }
+
+  // Pointer: current column — folder enters, note previews; double
+  // click opens. Parent column — jump there. Preview column (folder
+  // children) — enter the folder with that child selected.
+  function pickCurrent(i: number, e: Entry): void {
+    nav.setCursor(i);
+    if (e.kind === 'folder') nav.right();
+    void focusColumn();
+  }
+
+  function openCurrent(i: number, e: Entry): void {
+    nav.setCursor(i);
+    if (e.kind === 'note') void openNote(e.note.id);
+  }
+
+  function pickParent(_i: number, e: Entry): void {
+    pane = 'browse';
+    if (e.kind === 'folder') nav.goTo(e.path);
+    else nav.goTo(parentDir(nav.dir) ?? '', e.key);
+    void focusColumn();
+  }
+
+  function pickPreview(_i: number, e: Entry): void {
+    const cur = nav.current;
+    if (cur?.kind !== 'folder') return;
+    nav.goTo(cur.path, e.key);
+    void focusColumn();
+  }
+
+  function pickCrumb(path: string): void {
+    pane = 'browse';
+    nav.goTo(path);
+    void focusColumn();
   }
 
   // ---- modals + actions --------------------------------------------------
@@ -226,11 +437,21 @@
   async function submitNewNote(): Promise<void> {
     const t = newNoteTitle.trim();
     if (!t) return;
+    // The server creates notes at the book root; move it into the
+    // folder being browsed.
+    const folder = nav.dir;
+    creating = true;
     try {
-      await notes.create({ title: t, body: '' });
+      const created = await notes.create({ title: t, body: '' });
+      if (created && folder && notes.selectedID === created.id) {
+        await notes.update({ path: `${folder}/${created.path.split('/').pop()}` });
+      }
       closeModal();
+      if (created) nav.reveal(created.id);
     } catch (e) {
       modalErr = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
+    } finally {
+      creating = false;
     }
   }
 
@@ -300,6 +521,7 @@
       });
       sync.setEditor(vaultID, editSession);
       editMode = true;
+      pane = 'note'; // the editor gets the wide pane
     } catch (e) {
       editError = `Failed to load editor: ${(e as Error).message}`;
     } finally {
@@ -384,67 +606,129 @@
     </div>
   </header>
 
-  <div class="split">
-    <aside class="note-list" aria-label="Notes">
-      <BookSwitcher />
-      {#each books.banners as b (b.id)}
-        <div class="banner" role="status">
-          {b.text}
-          <button class="link-button" type="button" onclick={() => books.dismissBanner(b.id)}>{b.kind === 'dedupe' ? 'Manter' : 'ok'}</button>
-        </div>
-      {/each}
-      {#if activeRevoked && books.active}
-        <div class="placeholder" data-testid="book-revoked">
-          Você não tem mais acesso a este livro.
-          <button class="link-button" type="button" onclick={() => books.active && books.removeFromList(books.active.id)}>Remover da lista</button>
-        </div>
-      {:else if activeStatus?.state === 'needs_login' && books.active}
-        <div class="placeholder" data-testid="book-needs-login">
-          Entre em {serverLabel(books.active.server_url)} para sincronizar.
-          <button class="link-button" type="button" onclick={() => books.active && uiState.openSignIn(books.active.server_url, books.active.account)}>Entrar</button>
-        </div>
-      {:else if notes.loadingList}
-        <div class="placeholder">Loading…</div>
-      {:else if notes.listErrorStatus === 403}
-        <!-- The vault IS in our list (we routed here from it) but its
-             notes 403 — on a federated replica this usually means the
-             home server hasn't granted this account access yet. -->
-        <div class="placeholder">
-          You don’t have access to this vault’s notes yet. If this is a
-          federated replica, you may be awaiting an access grant from
-          the home server — ask its operator, then refresh.
-        </div>
-      {:else if notes.listError}
-        <div class="error">{notes.listError}</div>
-      {:else if notes.list.length === 0}
-        <div class="placeholder">No notes yet.</div>
-      {:else}
-        <ul role="listbox">
-          {#each notes.list as n, i (n.id)}
-            <li
-              class="note-row"
-              class:active={cursor === i}
-              class:selected={notes.selectedID === n.id}
-              role="option"
-              aria-selected={notes.selectedID === n.id}
-              tabindex="0"
-              onclick={() => { cursor = i; void notes.select(n.id); }}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cursor = i; void notes.select(n.id); } }}
-              onmouseenter={() => (cursor = i)}
-            >
-              <span class="note-title">{n.title}</span>
-              <span class="note-meta">{fmtDate(n.updated_at)}</span>
-            </li>
-          {/each}
-        </ul>
+  <div class="nav-bar">
+    <div class="switcher-slot"><BookSwitcher /></div>
+    <nav class="breadcrumb" aria-label="Folder path" data-testid="breadcrumb">
+      {#if pane === 'note'}
+        <button class="crumb back" type="button" onclick={leaveNote} aria-label="Back to folder">←</button>
       {/if}
-    </aside>
+      {#each crumbs as c, i (c.path)}
+        {#if i > 0}<span class="sep" aria-hidden="true">/</span>{/if}
+        <button
+          class="crumb"
+          type="button"
+          aria-current={i === crumbs.length - 1 && pane === 'browse' ? 'location' : undefined}
+          onclick={() => pickCrumb(c.path)}
+        >{i === 0 ? (vaults.selected?.name ?? '/') : c.name}</button>
+      {/each}
+      {#if pane === 'note' && notes.selected}
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="crumb-note" aria-current="page">{notes.selected.title}</span>
+      {/if}
+    </nav>
+    <span class="note-count" aria-live="off">
+      {notes.list.length} notes{notes.loadingMore ? '…' : ''}
+    </span>
+  </div>
+  {#each books.banners as b (b.id)}
+    <div class="banner" role="status">
+      {b.text}
+      <button class="link-button" type="button" onclick={() => books.dismissBanner(b.id)}>{b.kind === 'dedupe' ? 'Manter' : 'ok'}</button>
+    </div>
+  {/each}
+  <div class="sr-only" aria-live="polite" data-testid="nav-live">{liveMsg}</div>
 
-    <main class="preview">
-      {#if !notes.selectedID}
+  {#if activeRevoked && books.active}
+    <div class="placeholder" data-testid="book-revoked">
+      Você não tem mais acesso a este livro.
+      <button class="link-button" type="button" onclick={() => books.active && books.removeFromList(books.active.id)}>Remover da lista</button>
+    </div>
+  {:else if activeStatus?.state === 'needs_login' && books.active}
+    <div class="placeholder" data-testid="book-needs-login">
+      Entre em {serverLabel(books.active.server_url)} para sincronizar.
+      <button class="link-button" type="button" onclick={() => books.active && uiState.openSignIn(books.active.server_url, books.active.account)}>Entrar</button>
+    </div>
+  {:else if notes.loadingList && notes.list.length === 0}
+    <div class="placeholder">Loading…</div>
+  {:else if notes.listErrorStatus === 403}
+    <!-- The vault IS in our list (we routed here from it) but its
+         notes 403 — on a federated replica this usually means the
+         home server hasn't granted this account access yet. -->
+    <div class="placeholder">
+      You don’t have access to this vault’s notes yet. If this is a
+      federated replica, you may be awaiting an access grant from
+      the home server — ask its operator, then refresh.
+    </div>
+  {:else if notes.listError}
+    <div class="error">{notes.listError}</div>
+  {:else if notes.list.length === 0}
+    <div class="placeholder">No notes yet. Press <kbd>n</kbd> to create one.</div>
+  {:else}
+  <div
+    class="miller"
+    class:note-mode={pane === 'note'}
+    class:no-preview={!showPreview && pane === 'browse'}
+    data-testid="miller"
+  >
+    <section class="col col-parent" aria-label="Parent folder">
+      {#if nav.parent != null}
+        <MillerColumn
+          entries={nav.parentEntries}
+          cursor={nav.parentCursor}
+          label="Parent folder {nav.parent === '' ? (vaults.selected?.name ?? 'root') : nav.parent}"
+          idPrefix="parent"
+          onpick={pickParent}
+        />
+      {:else}
+        <div class="col-empty">{vaults.selected?.name ?? 'Book'}</div>
+      {/if}
+    </section>
+
+    <section class="col col-current" aria-label="Current folder">
+      {#if filterOpen || nav.filter}
+        <div class="filter-row">
+          <span aria-hidden="true">/</span>
+          <input
+            class="filter-input"
+            type="search"
+            placeholder="filter this folder"
+            aria-label="Filter current folder"
+            value={nav.filter}
+            bind:this={filterInput}
+            oninput={(e) => nav.setFilter(e.currentTarget.value)}
+            onkeydown={onFilterKey}
+          />
+        </div>
+      {/if}
+      <MillerColumn
+        bind:this={currentCol}
+        bind:element={currentColEl}
+        entries={nav.entries}
+        cursor={nav.cursor}
+        label="Folder {nav.dir === '' ? (vaults.selected?.name ?? 'root') : nav.dir}"
+        idPrefix="cur"
+        active
+        {openKey}
+        emptyText={nav.filter ? 'No matches' : 'Empty folder'}
+        onpick={pickCurrent}
+        onopen={openCurrent}
+      />
+    </section>
+
+    <main class="col col-preview preview" bind:this={previewEl} tabindex="-1" aria-label="Preview">
+      {#if pane === 'browse' && nav.current?.kind === 'folder' && nav.previewEntries}
+        <MillerColumn
+          entries={nav.previewEntries}
+          cursor={nav.previewCursor}
+          label="Contents of {nav.current.path}"
+          idPrefix="preview"
+          onpick={pickPreview}
+        />
+      {:else if !notes.selectedID}
         <div class="placeholder">
-          Pick a note to read. <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>Enter</kbd> opens,
-          <kbd>h</kbd>/<kbd>Esc</kbd> back, <kbd>r</kbd> refresh.
+          <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>h</kbd>/<kbd>l</kbd> walk folders,
+          <kbd>Enter</kbd> opens, <kbd>H</kbd>/<kbd>L</kbd> history, <kbd>/</kbd> filter,
+          <kbd>gh</kbd> book root, <kbd>zp</kbd> preview, <kbd>r</kbd> refresh.
         </div>
       {:else if notes.loadingContent}
         <div class="placeholder">Loading…</div>
@@ -522,6 +806,7 @@
       {/if}
     </main>
   </div>
+  {/if}
 
   {#if modal === 'new-note'}
     <div
@@ -600,7 +885,8 @@
 
 <style>
   .vault-home {
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
     background: var(--color-background);
     color: var(--color-text);
     display: flex;
@@ -632,60 +918,132 @@
     color: var(--color-text-dim, var(--color-muted));
   }
 
-  .split {
-    display: grid;
-    grid-template-columns: minmax(220px, 320px) 1fr;
-    flex: 1;
-    min-height: 0;
+  .nav-bar {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--color-separator, var(--color-border));
+    min-height: 2.4rem;
   }
-
-  .note-list {
+  .switcher-slot {
+    width: 240px;
+    flex: none;
     border-right: 1px solid var(--color-separator, var(--color-border));
-    overflow-y: auto;
-    padding: 0.5rem;
   }
-
-  .note-list ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
+  .breadcrumb {
+    flex: 1;
+    min-width: 0;
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-  }
-
-  .note-row {
-    display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 0.15rem;
-    padding: 0.5rem 0.7rem;
-    border-radius: 4px;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-size: 0.85rem;
+  }
+  .crumb {
+    background: transparent;
+    border: none;
+    color: var(--color-secondary);
+    font-family: inherit;
+    font-size: inherit;
     cursor: pointer;
-    border: 1px solid transparent;
+    padding: 0.15rem 0.3rem;
+    border-radius: 3px;
   }
-
-  .note-row.active {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-  }
-  .note-row.selected {
-    border-color: var(--color-primary);
-  }
-
-  .note-title {
-    color: var(--color-text);
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .crumb:hover,
+  .crumb:focus-visible { background: var(--color-selected-bg, var(--color-overlay-bg)); }
+  .crumb[aria-current='location'] { color: var(--color-text); font-weight: 600; }
+  .crumb-note { color: var(--color-text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .sep { color: var(--color-text-dim, var(--color-muted)); }
+  .note-count {
+    align-self: center;
+    padding-right: 1rem;
+    font-size: 0.72rem;
+    color: var(--color-text-dim, var(--color-muted));
     white-space: nowrap;
   }
-  .note-meta {
+
+  /* Miller columns: parent | current | preview. */
+  .miller {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.4fr) minmax(0, 3fr);
+  }
+  .miller.no-preview {
+    grid-template-columns: minmax(140px, 1fr) minmax(0, 3fr) 0;
+  }
+  .miller.no-preview .col-preview { display: none; }
+  .miller.note-mode {
+    grid-template-columns: 0 minmax(200px, 1fr) minmax(0, 3.5fr);
+  }
+  .miller.note-mode .col-parent { display: none; }
+  .col {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--color-separator, var(--color-border));
+  }
+  /* Block (not flex): the article centres itself with max-width. */
+  .col-preview { border-right: none; display: block; }
+  .col-parent { opacity: 0.85; }
+  .col-empty {
+    padding: 0.6rem;
+    font-size: 0.8rem;
     color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.7rem;
+  }
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--color-separator, var(--color-border));
+    color: var(--color-secondary);
+  }
+  .filter-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: 0.85rem;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Narrow screens: one column at a time + breadcrumb. */
+  @media (max-width: 720px) {
+    .switcher-slot { width: auto; max-width: 45%; }
+    .note-count { display: none; }
+    .miller,
+    .miller.no-preview,
+    .miller.note-mode { grid-template-columns: minmax(0, 1fr); }
+    .miller .col-parent { display: none; }
+    .miller:not(.note-mode) .col-preview { display: none; }
+    .miller.note-mode .col-current { display: none; }
+    .miller.note-mode .col-preview { display: block; }
+    .preview { padding: 1rem; }
   }
 
   .preview {
     overflow-y: auto;
     padding: 1.5rem 2rem;
+    outline: none;
+  }
+  .miller:not(.note-mode) .col-preview:has(> :global(.miller-col)) {
+    padding: 0;
   }
 
   .rendered {

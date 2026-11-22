@@ -37,3 +37,14 @@ for (const name of ['localStorage', 'sessionStorage'] as const) {
     value: new MemoryStorage(),
   });
 }
+
+// jsdom has no layout and no ResizeObserver; Svelte's bind:clientHeight
+// needs the constructor. Sizes stay 0 (components fall back to a
+// default viewport).
+if (typeof (globalThis as any).ResizeObserver === 'undefined') {
+  (globalThis as any).ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+}

@@ -13,8 +13,11 @@ const USER = { id: 'u1', username: 'ana', display_name: 'Ana' };
 const ROOM = 'n1/sync';
 const BODY = '# Title\n\nhello world\n';
 
-function newSession(opts: ConstructorParameters<typeof EditorSession>[4] = {}) {
+const SERVER = 'https://lumi.work.com';
+
+function newSession(opts: Partial<ConstructorParameters<typeof EditorSession>[4]> = {}) {
   return new EditorSession('v1', 'n1', 'tk', USER, {
+    serverUrl: SERVER,
     providerFactory: fakeProviderFactory(),
     probeAuth: async () => 'ok',
     ...opts,
@@ -188,7 +191,7 @@ describe('single-note lifecycle', () => {
     const a = newSession();
     await a.whenSynced();
     a.destroy();
-    const b = new EditorSession('v1', 'n2', 'tk', USER, { providerFactory: fakeProviderFactory() });
+    const b = new EditorSession('v1', 'n2', 'tk', USER, { serverUrl: SERVER, providerFactory: fakeProviderFactory() });
     await b.whenSynced();
     expect(b.ydoc).not.toBe(a.ydoc);
     expect(b.ytext.toString()).toBe('note two');
@@ -201,6 +204,55 @@ describe('single-note lifecycle', () => {
     const s = newSession();
     const p = s.provider as unknown as FakeProvider;
     expect(p.url).toMatch(/\/api\/vaults\/v1\/notes\/n1\/sync\?token=tk$/);
+    s.destroy();
+  });
+});
+
+describe('account binding + sync-state inputs (SPEC-LIVROS)', () => {
+  it("connects to the book's account server, not a global one", async () => {
+    const s = new EditorSession('v9', 'n1', 'tk-b', USER, {
+      serverUrl: 'http://192.168.1.5:8080/lumi',
+      providerFactory: fakeProviderFactory(),
+    });
+    const p = fakeServer.providers.at(-1)!;
+    expect(p.url).toBe('ws://192.168.1.5:8080/lumi/api/vaults/v9/notes/n1/sync?token=tk-b');
+    s.destroy();
+  });
+
+  it('reports protocol states and pending offline edits until the next SyncStep2', async () => {
+    fakeServer.seed(ROOM, 'abc');
+    fakeServer.autoSync = false;
+    const s = newSession();
+    expect(s.protocolState).toBe('CONNECTING');
+    await flushMicrotasks();
+    expect(s.protocolState).toBe('SYNCING');
+    const p = fakeServer.providers.at(-1)!;
+    p.handshake();
+    expect(s.protocolState).toBe('LIVE');
+    expect(s.pending).toBe(false);
+
+    p.serverClose(1006);
+    expect(s.protocolState).toBe('OFFLINE');
+    s.ytext.insert(0, 'x');
+    expect(s.pending).toBe(true);
+
+    p.reconnect();
+    expect(s.protocolState).toBe('SYNCING');
+    expect(s.pending).toBe(true);
+    p.handshake();
+    expect(s.protocolState).toBe('LIVE');
+    expect(s.pending).toBe(false);
+    expect(fakeServer.text(ROOM)).toBe('xabc');
+    s.destroy();
+    expect(s.protocolState).toBe('closed');
+  });
+
+  it('live edits on a synced connection are not pending', async () => {
+    fakeServer.seed(ROOM, 'abc');
+    const s = newSession();
+    await s.whenSynced();
+    s.ytext.insert(0, 'y');
+    expect(s.pending).toBe(false);
     s.destroy();
   });
 });

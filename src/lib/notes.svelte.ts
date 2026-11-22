@@ -214,6 +214,33 @@ class NotesStore {
     this.content = { ...this.content, body };
   }
 
+  /** Apply an incremental `changes` page (SPEC-LIVROS §3.5) to the
+   *  list cache of the open vault. Idempotent: re-applying the same
+   *  page is a no-op. Ignored when another vault is open. Returns false
+   *  when ignored. */
+  applyChanges(
+    vaultID: string,
+    changed: NoteSummary[],
+    deleted: Array<{ id: string }>,
+  ): boolean {
+    if (vaultID !== this.vaultID) return false;
+    const gone = new Set(deleted.map((d) => d.id));
+    const upd = new Map(changed.map((n) => [n.id, n]));
+    let list = this.list.filter((n) => !gone.has(n.id)).map((n) => upd.get(n.id) ?? n);
+    const known = new Set(list.map((n) => n.id));
+    const fresh = changed.filter((n) => !known.has(n.id) && !gone.has(n.id));
+    if (fresh.length) list = [...fresh, ...list];
+    this.list = list;
+    if (this.selectedID && gone.has(this.selectedID)) {
+      this.contentSeq++;
+      this.abortContent();
+      this.selectedID = null;
+      this.content = null;
+      this.loadingContent = false;
+    }
+    return true;
+  }
+
   private abortList(): void {
     this.listAbort?.abort();
     this.listAbort = null;

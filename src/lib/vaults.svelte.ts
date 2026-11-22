@@ -1,6 +1,7 @@
-// Reactive vault list + selection. Hydrated on first authed render
-// via load(); the user picks a vault to enter, slice 4.2 will mount
-// the note browser against the selected vault id.
+// Reactive vault list + selection — the view-facing facade over the
+// books registry (books.svelte.ts installs `hooks` and drives `list` /
+// `selectedID`). Without hooks (unit tests) it behaves like the old
+// single-account store.
 //
 // Capabilities for the selected vault land here too so views can
 // gate UI ("show 'New Note' button" iff caller has note.create).
@@ -9,7 +10,14 @@
 import { ApiError, type Vault } from './types.ts';
 import * as api from './api.ts';
 
+export interface VaultStoreHooks {
+  load?: () => Promise<void>;
+  select?: (id: string | null) => void;
+  created?: (v: Vault, accountKey?: string) => void;
+}
+
 class VaultStore {
+  hooks: VaultStoreHooks = {};
   list = $state<Vault[]>([]);
   loading = $state(false);
   lastError = $state<string | null>(null);
@@ -32,6 +40,10 @@ class VaultStore {
   }
 
   async load(): Promise<void> {
+    if (this.hooks.load) {
+      await this.hooks.load();
+      return;
+    }
     this.loading = true;
     this.lastError = null;
     try {
@@ -51,6 +63,7 @@ class VaultStore {
 
   select(id: string | null): void {
     this.selectedID = id;
+    this.hooks.select?.(id);
   }
 
   clear(): void {
@@ -64,10 +77,14 @@ class VaultStore {
    * created vault so the caller can route the user straight into it.
    * Errors set `lastError` so the form can surface them inline.
    */
-  async create(input: api.CreateVaultInput): Promise<Vault> {
+  async create(input: api.CreateVaultInput, accountKey?: string): Promise<Vault> {
     this.lastError = null;
     try {
-      const v = await api.createVault(input);
+      const v = accountKey ? await api.createVault(input, accountKey) : await api.createVault(input);
+      if (this.hooks.created) {
+        this.hooks.created(v, accountKey);
+        return v;
+      }
       // Prepend rather than reload — keeps the existing list rendered
       // and avoids a brief "empty / loading" flash. listVaults() would
       // return them in created_at-desc order anyway, so prepend is

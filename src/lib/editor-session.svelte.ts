@@ -29,8 +29,9 @@
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import type { Awareness } from 'y-protocols/awareness';
-import * as api from './api.ts';
 import type { SessionUser } from './types.ts';
+import { wsBase } from './serverurl.ts';
+import type { EditorState } from './bookstatus.ts';
 
 export type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'closed';
 
@@ -83,10 +84,15 @@ export type ProviderFactory = (
 export type AuthProbeResult = 'ok' | 'unauthorized' | 'unknown';
 
 export interface EditorSessionOptions {
+  /** Normalised HTTP base URL of the server the ACTIVE BOOK's account
+   *  lives on (SPEC-LIVROS: editor uses the book's account). Required:
+   *  there is no global server any more. */
+  serverUrl: string;
   providerFactory?: ProviderFactory;
   /** Called after repeated failed connection attempts to tell an
    *  HTTP-level 401 upgrade rejection (browser sees close 1006) apart
-   *  from a network blip. Default: GET /api/users/me. */
+   *  from a network blip — typically GET /api/users/me on the book's
+   *  account client. Default: 'unknown' (keep retrying). */
   probeAuth?: () => Promise<AuthProbeResult>;
   /** Called once when the session concludes the token is dead. */
   onAuthFailure?: () => void;
@@ -98,20 +104,7 @@ const defaultProviderFactory: ProviderFactory = (serverUrl, room, doc, opts) =>
   new WebsocketProvider(serverUrl, room, doc, { params: opts.params }) as unknown as ProviderLike;
 
 async function defaultProbeAuth(): Promise<AuthProbeResult> {
-  try {
-    await api.me();
-    return 'ok';
-  } catch (e) {
-    return api.isAuthFailure(e) ? 'unauthorized' : 'unknown';
-  }
-}
-
-// Derive the WebSocket origin from the configured HTTP API_URL.
-function wsOrigin(): string {
-  const base = api.API_URL;
-  if (base.startsWith('https://')) return 'wss://' + base.slice('https://'.length);
-  if (base.startsWith('http://')) return 'ws://' + base.slice('http://'.length);
-  return base;
+  return 'unknown';
 }
 
 const PALETTE = [
@@ -140,6 +133,21 @@ export class EditorSession {
   lastError = $state<string | null>(null);
   /** Reconnecting was stopped for good (auth/permission/policy). */
   stopped = $state(false);
+  /** Local edits made while disconnected that have not been confirmed
+   *  by a SyncStep2 after reconnecting (SPEC-LIVROS §4.2 "pendente"). */
+  pending = $state(false);
+  /** Provider reports a completed handshake on the CURRENT connection
+   *  (flips back to false on disconnect, unlike `synced`). */
+  liveSynced = $state(false);
+
+  /** CRDT-CLIENT-PROTOCOL §2.1 state, for the book sync indicator. */
+  get protocolState(): EditorState {
+    if (this.destroyed) return 'closed';
+    if (this.stopped) return 'CLOSED';
+    if (this.status === 'connected') return this.liveSynced ? 'LIVE' : 'SYNCING';
+    if (!this.synced) return 'CONNECTING';
+    return 'OFFLINE';
+  }
 
   // ---- plain, owned by Yjs ----
   readonly vaultID: string;
@@ -154,7 +162,7 @@ export class EditorSession {
   private failedAttempts = 0;
   private probing = false;
   private syncWaiters: Array<() => void> = [];
-  private readonly opts: Required<Omit<EditorSessionOptions, 'onAuthFailure'>> &
+  private readonly opts: Required<Omit<EditorSessionOptions, 'onAuthFailure' | 'serverUrl'>> &
     Pick<EditorSessionOptions, 'onAuthFailure'>;
 
   private readonly onStatus = (ev: { status: string }) => {
@@ -166,13 +174,23 @@ export class EditorSession {
       this.status = 'connected';
     } else if (ev.status === 'connecting') {
       this.status = 'connecting';
+      this.liveSynced = false;
     } else {
       this.status = 'disconnected';
+      this.liveSynced = false;
     }
   };
 
   private readonly onSync = (isSynced: boolean) => {
-    if (this.destroyed || !isSynced || this.synced) return;
+    if (this.destroyed) return;
+    if (!isSynced) {
+      this.liveSynced = false;
+      return;
+    }
+    this.liveSynced = true;
+    // SyncStep2 after (re)connecting: offline edits were exchanged.
+    this.pending = false;
+    if (this.synced) return;
     this.emptyAtSync = this.ytext.length === 0;
     this.synced = true;
     const waiters = this.syncWaiters;
@@ -197,6 +215,13 @@ export class EditorSession {
     this.openedThisAttempt = false;
   };
 
+  private readonly onDocUpdate = (_u: Uint8Array, origin: unknown) => {
+    if (this.destroyed || origin === this.provider) return;
+    // A local edit while not live on a synced connection is "pending"
+    // until the next SyncStep2.
+    if (!(this.status === 'connected' && this.liveSynced)) this.pending = true;
+  };
+
   private readonly onAwareness = () => {
     if (this.destroyed) return;
     this.peers = collectPeers(this.provider.awareness);
@@ -207,7 +232,7 @@ export class EditorSession {
     noteID: string,
     token: string,
     user: SessionUser,
-    options: EditorSessionOptions = {},
+    options: EditorSessionOptions,
   ) {
     this.vaultID = vaultID;
     this.noteID = noteID;
@@ -225,7 +250,7 @@ export class EditorSession {
 
     // y-websocket appends `room` to serverUrl as a path segment and
     // `params` as the query string → /api/vaults/:v/notes/:id/sync.
-    const serverUrl = `${wsOrigin()}/api/vaults/${vaultID}/notes`;
+    const serverUrl = `${wsBase(options.serverUrl)}/api/vaults/${vaultID}/notes`;
     const room = `${encodeURIComponent(noteID)}/sync`;
     this.provider = this.opts.providerFactory(serverUrl, room, this.ydoc, {
       params: { token },
@@ -240,6 +265,7 @@ export class EditorSession {
     this.provider.on('sync', this.onSync);
     this.provider.on('connection-close', this.onClose);
     this.provider.awareness.on('change', this.onAwareness);
+    this.ydoc.on('update', this.onDocUpdate);
     // The provider may already be synced if the factory completed the
     // handshake synchronously (tests) — honour that.
     if (this.provider.synced) this.onSync(true);
@@ -268,6 +294,7 @@ export class EditorSession {
     if (this.destroyed) return;
     this.destroyed = true;
     try { this.provider.awareness.off('change', this.onAwareness); } catch {}
+    try { this.ydoc.off('update', this.onDocUpdate); } catch {}
     try { this.provider.off('status', this.onStatus); } catch {}
     try { this.provider.off('sync', this.onSync); } catch {}
     try { this.provider.off('connection-close', this.onClose); } catch {}

@@ -18,6 +18,10 @@
   import VaultCreateModal from '../components/VaultCreateModal.svelte';
   import BookSwitcher from '../components/BookSwitcher.svelte';
   import SyncStatusPopover from '../components/SyncStatusPopover.svelte';
+  import EditorSettingsModal from '../components/EditorSettingsModal.svelte';
+  import { editorSettings } from '../lib/editor-settings.svelte.ts';
+  import { dirOf } from '../lib/notetree.ts';
+  import { countWords, type EditorStats } from '../lib/textstats.ts';
 
   let showSettings = $state(false);
   // Editor + Yjs runtime is lazy-loaded on first edit; types stay
@@ -62,6 +66,7 @@
   let saving = $state(false);
   let editorLoading = $state(false);
   let NoteEditor = $state<NoteEditorComp | null>(null);
+  let editorStats = $state<EditorStats | null>(null);
   let EditorSession = $state<EditorSessionCtor | null>(null);
 
   let lastDelete = $state(0); // 'dd' double-tap timestamp
@@ -194,6 +199,14 @@
       return;
     }
 
+    // Cmd/Ctrl+Shift+, : editor settings, from anywhere in the book.
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'Comma') {
+      e.preventDefault();
+      editorSettings.open = !editorSettings.open;
+      return;
+    }
+    if (editorSettings.open) return; // the modal owns the keyboard
+
     if (modal != null) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -206,8 +219,29 @@
     if (e.defaultPrevented) return;
     if (isEditableTarget(e.target)) return;
 
+    // Cmd/Ctrl+E toggles reading <-> editing (Obsidian). Inside the
+    // editor CodeMirror handles it first; this covers focus elsewhere.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'e' || e.key === 'E')) {
+      if (e.shiftKey) {
+        e.preventDefault();
+        editorSettings.toggleEditMode();
+        return;
+      }
+      if (editMode) {
+        e.preventDefault();
+        exitEdit();
+        return;
+      }
+      const target = noteUnderFocus();
+      if (target) {
+        e.preventDefault();
+        void editNote(target);
+      }
+      return;
+    }
+
     // In edit mode, leaving is an explicit command only (Done button,
-    // Mod-Enter, vim :q) — never a stray Esc.
+    // Mod-Enter, Mod-E, vim :q) — never a stray Esc.
     if (editMode) return;
     if (uiState.accountModal || uiState.createBookOpen || showSettings) return;
 
@@ -320,6 +354,8 @@
   }
 
   async function openNote(id: string): Promise<void> {
+    // Per-device preference: open straight into the editor.
+    if (editorSettings.value.openIn === 'editing') return editNote(id);
     if (notes.selectedID !== id) void notes.select(id);
     pane = 'note';
     await tick();
@@ -544,6 +580,7 @@
     }
     editMode = false;
     editError = null;
+    editorStats = null;
   }
 
   // Server-side mirror debounce (wsync.DefaultMirrorDebounce) + margin.
@@ -584,6 +621,13 @@
   // marked is fast enough that we don't bother debouncing here; large
   // notes (10k+ lines) are the slice 4.4 / 4.6 perf concern.
   let previewHtml = $derived(notes.content ? renderMarkdown(notes.content.body) : '');
+  const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
+  const noteFolder = $derived(notes.selected ? dirOf(notes.selected.path) : '');
+  const noteCrumbs = $derived(noteFolder ? noteFolder.split('/') : []);
+
+  function setEditMode(m: 'live' | 'source'): void {
+    editorSettings.update({ editMode: m });
+  }
 
   function fmtDate(s: string): string {
     return s.replace('T', ' ').slice(0, 16);
@@ -736,10 +780,15 @@
         <div class="error">{notes.contentError}</div>
       {:else if notes.content}
         {#if editMode && editSession && NoteEditor}
-          <div class="editor-frame">
+          <div class="editor-frame" class:readable={editorSettings.value.readableWidth}>
             <div class="editor-bar">
               <div class="editor-meta">
-                <span class="editor-title">Editing {notes.selected?.title}</span>
+                <nav class="note-crumbs" aria-label="Note location">
+                  <span class="crumb">{vaults.selected?.name ?? 'Book'}</span>
+                  {#each noteCrumbs as c, i (i)}<span class="crumb-sep" aria-hidden="true">/</span><span class="crumb">{c}</span>{/each}
+                  <span class="crumb-sep" aria-hidden="true">/</span>
+                  <span class="editor-title">{notes.selected?.title}</span>
+                </nav>
                 <span class="conn-pill conn-{editSession.status}" data-testid="conn-status">{editSession.status}</span>
                 {#if editSession.peers.length > 0}
                   <span class="peers">
@@ -750,6 +799,17 @@
                 {/if}
               </div>
               <div class="editor-actions">
+                <div class="view-seg" role="group" aria-label="View mode" data-testid="view-mode">
+                  <button type="button" onclick={exitEdit} title="Reading view (Cmd/Ctrl+E)">Reading</button>
+                  <button type="button" class:active={editorSettings.value.editMode === 'live'}
+                    aria-pressed={editorSettings.value.editMode === 'live'}
+                    onclick={() => setEditMode('live')} title="Live Preview (Cmd/Ctrl+Shift+E)">Live</button>
+                  <button type="button" class:active={editorSettings.value.editMode === 'source'}
+                    aria-pressed={editorSettings.value.editMode === 'source'}
+                    onclick={() => setEditMode('source')} title="Source mode (Cmd/Ctrl+Shift+E)">Source</button>
+                </div>
+                <button class="icon-button" type="button" aria-label="Editor settings" title="Editor settings (Cmd/Ctrl+Shift+,)"
+                  onclick={() => (editorSettings.open = true)}>⚙</button>
                 <button class="primary-button" onclick={saveEdit} disabled={saving || !editSession.synced} type="button">
                   {saving ? 'Saving…' : 'Save'}
                 </button>
@@ -780,24 +840,46 @@
                 {@html previewHtml}
               </article>
             {:else}
-              <NoteEditor session={editSession} onexit={exitEdit} />
+              <NoteEditor
+                session={editSession}
+                settings={editorSettings.value}
+                onexit={exitEdit}
+                onopensettings={() => (editorSettings.open = true)}
+                ontogglemode={() => editorSettings.toggleEditMode()}
+                onstats={(st) => (editorStats = st)}
+              />
             {/if}
-            <div class="hint">
-              Edits are saved continuously and sync live to other peers; the file on
-              disk follows within ~500 ms.
-              <kbd>Cmd/Ctrl</kbd>+<kbd>Enter</kbd>, vim <kbd>:q</kbd> or <em>Done</em> closes the editor.
+            <div class="editor-status" data-testid="editor-status">
+              {#if editorStats}
+                <span>{editorStats.words} {editorStats.words === 1 ? 'word' : 'words'}</span>
+                <span>{editorStats.chars} chars</span>
+                <span>Ln {editorStats.line}, Col {editorStats.col}</span>
+              {/if}
+              <span>{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}{editorSettings.value.vim ? ' · vim' : ''}</span>
+              <span class="status-spacer"></span>
+              <span title="Edits sync live; the file on disk follows within ~500 ms.">
+                {editSession.pending ? 'Pending sync…' : editSession.liveSynced ? 'Saved live' : 'Offline — kept locally'}
+              </span>
             </div>
           </div>
         {:else if editorLoading}
           <div class="placeholder">Loading editor…</div>
         {:else}
           <article class="rendered">
+            {#if noteCrumbs.length > 0}
+              <nav class="note-crumbs reading-crumbs" aria-label="Note location">
+                <span class="crumb">{vaults.selected?.name ?? 'Book'}</span>
+                {#each noteCrumbs as c, i (i)}<span class="crumb-sep" aria-hidden="true">/</span><span class="crumb">{c}</span>{/each}
+              </nav>
+            {/if}
             <h1 class="rendered-title">{notes.selected?.title}</h1>
             <div class="rendered-actions">
-              <button class="link-button" onclick={() => void enterEdit()} disabled={editorLoading} type="button">
+              <button class="link-button" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title="Edit (e or Cmd/Ctrl+E)">
                 {editorLoading ? 'Loading…' : 'Edit'}
               </button>
+              <button class="link-button" onclick={() => (editorSettings.open = true)} type="button" title="Editor settings (Cmd/Ctrl+Shift+,)">Editor settings</button>
               <button class="link-button danger" onclick={() => (modal = 'delete-confirm')} type="button">Delete</button>
+              <span class="reading-meta">{readingWords} {readingWords === 1 ? 'word' : 'words'}</span>
             </div>
             <!-- DOMPurify-sanitised HTML, see lib/markdown.ts. -->
             {@html previewHtml}
@@ -806,6 +888,10 @@
       {/if}
     </main>
   </div>
+  {/if}
+
+  {#if editorSettings.open}
+    <EditorSettingsModal />
   {/if}
 
   {#if modal === 'new-note'}
@@ -1178,13 +1264,81 @@
   }
 
   .editor-frame {
-    max-width: 720px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
     height: 100%;
   }
+  .editor-frame.readable {
+    max-width: 52rem;
+  }
+  .note-crumbs {
+    display: flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--color-text-dim, var(--color-muted));
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .note-crumbs .crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .crumb-sep { opacity: 0.6; }
+  .reading-crumbs { margin-bottom: 0.3rem; font-size: 0.8rem; }
+  .reading-meta {
+    margin-left: auto;
+    color: var(--color-text-dim, var(--color-muted));
+    font-size: 0.78rem;
+    align-self: center;
+  }
+  .view-seg {
+    display: inline-flex;
+    border: 1px solid var(--color-border, var(--color-muted));
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .view-seg button {
+    background: transparent;
+    border: none;
+    color: var(--color-text-dim, var(--color-muted));
+    padding: 0.25rem 0.7rem;
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .view-seg button + button { border-left: 1px solid var(--color-border, var(--color-muted)); }
+  .view-seg button:hover { color: var(--color-text); }
+  .view-seg button.active {
+    background: var(--color-selected-bg, var(--color-overlay-bg));
+    color: var(--color-primary);
+  }
+  .icon-button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--color-text-dim, var(--color-muted));
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.25rem 0.4rem;
+    cursor: pointer;
+  }
+  .icon-button:hover { color: var(--color-text); border-color: var(--color-border, var(--color-muted)); }
+  .editor-status {
+    display: flex;
+    gap: 0.9rem;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 0.3rem 0.2rem 0;
+    border-top: 1px solid var(--color-separator, var(--color-border));
+    color: var(--color-text-dim, var(--color-muted));
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .status-spacer { flex: 1; }
   .editor-bar {
     display: flex;
     justify-content: space-between;
@@ -1199,8 +1353,11 @@
     flex-wrap: wrap;
   }
   .editor-title {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.9rem;
+    color: var(--color-text);
+    font-weight: 600;
+    font-size: 0.92rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .conn-pill {
     font-size: 0.72rem;
@@ -1231,10 +1388,6 @@
     display: flex;
     gap: 0.5rem;
     align-items: center;
-  }
-  .hint {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.78rem;
   }
 
   .primary-button {

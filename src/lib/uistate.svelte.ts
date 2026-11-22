@@ -1,11 +1,17 @@
 // Cross-cutting UI state that doesn't fit neatly into any domain
-// store. Currently just the theme picker open/close flag — App.svelte
-// mounts the modal off this so every authenticated view can open it
-// without each one owning the modal markup. Add other transient,
-// view-spanning flags here as they come up.
+// store: the theme picker, and the account modal used for
+// "Adicionar servidor…" and for re-entering an account that
+// "Precisa entrar" (SPEC-LIVROS §5).
+
+export interface AccountModalState {
+  server: string | null;
+  username: string | null;
+}
 
 class UIState {
   themePickerOpen = $state(false);
+  accountModal = $state<AccountModalState | null>(null);
+  createBookOpen = $state(false);
 
   openThemePicker(): void {
     this.themePickerOpen = true;
@@ -17,6 +23,18 @@ class UIState {
 
   toggleThemePicker(): void {
     this.themePickerOpen = !this.themePickerOpen;
+  }
+
+  openAddServer(): void {
+    this.accountModal = { server: null, username: null };
+  }
+
+  openSignIn(server: string, username: string): void {
+    this.accountModal = { server, username };
+  }
+
+  closeAccountModal(): void {
+    this.accountModal = null;
   }
 }
 

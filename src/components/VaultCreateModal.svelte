@@ -9,6 +9,9 @@
   import { onMount, onDestroy } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { ApiError } from '../lib/types.ts';
+  import { accounts } from '../lib/accounts.svelte.ts';
+  import { books } from '../lib/books.svelte.ts';
+  import { serverLabel } from '../lib/serverurl.ts';
 
   interface Props {
     onclose: () => void;
@@ -21,6 +24,10 @@
   let slug = $state('');
   let submitting = $state(false);
   let localError = $state<string | null>(null);
+  // "Novo livro: escolher onde" (SPEC-LIVROS §5) — which account
+  // (server) the book is created on. Defaults to the active book's.
+  const usable = $derived(accounts.list.filter((a) => a.status === 'ok'));
+  let accountKey = $state<string>(books.activeAccountKey() ?? '');
 
   async function submit(e: Event): Promise<void> {
     e.preventDefault();
@@ -30,7 +37,10 @@
     submitting = true;
     localError = null;
     try {
-      const v = await vaults.create({ name: n, slug: slug.trim() || undefined });
+      const v = await vaults.create(
+        { name: n, slug: slug.trim() || undefined },
+        accountKey || undefined,
+      );
       onCreated?.(v.id);
       onclose();
     } catch (e) {
@@ -63,13 +73,21 @@
     class="panel"
     role="dialog"
     aria-modal="true"
-    aria-label="Create vault"
+    aria-label="Novo livro"
     tabindex="-1"
     onclick={(e) => e.stopPropagation()}
     onkeydown={(e) => e.stopPropagation()}
   >
     <form class="form" onsubmit={submit}>
-      <h2>Create vault</h2>
+      <h2>Novo livro</h2>
+      {#if usable.length > 1}
+        <label class="hint" for="new-book-account">onde</label>
+        <select id="new-book-account" class="input" bind:value={accountKey} disabled={submitting}>
+          {#each usable as a (a.key)}
+            <option value={a.key}>{serverLabel(a.server_url)} · {a.username}</option>
+          {/each}
+        </select>
+      {/if}
       <!-- svelte-ignore a11y_autofocus -->
       <input
         class="input"

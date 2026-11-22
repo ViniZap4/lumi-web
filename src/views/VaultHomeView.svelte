@@ -2,12 +2,19 @@
   import { onMount, onDestroy, untrack } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
-  import { auth } from '../lib/auth.svelte.ts';
   import { renderMarkdown } from '../lib/markdown.ts';
   import { ApiError } from '../lib/types.ts';
-  import * as api from '../lib/api.ts';
+  import { isAuthFailure } from '../lib/api.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
+  import { books } from '../lib/books.svelte.ts';
+  import { accounts } from '../lib/accounts.svelte.ts';
+  import { sync } from '../lib/sync.svelte.ts';
+  import { serverLabel } from '../lib/serverurl.ts';
+  import { GChord, isEditableTarget } from '../lib/shortcuts.ts';
   import VaultSettingsModal from '../components/VaultSettingsModal.svelte';
+  import VaultCreateModal from '../components/VaultCreateModal.svelte';
+  import BookSwitcher from '../components/BookSwitcher.svelte';
+  import SyncStatusPopover from '../components/SyncStatusPopover.svelte';
 
   let showSettings = $state(false);
   // Editor + Yjs runtime is lazy-loaded on first edit; types stay
@@ -57,10 +64,25 @@
   });
 
   // Hydrate notes whenever the active vault changes. The notes store
-  // is idempotent on a no-op vaultID transition so this is safe.
+  // is idempotent on a no-op vaultID transition so this is safe. The
+  // full list fetched here is the book's catch-up baseline (cursor =
+  // the head known now; later heads trigger GET /changes).
   $effect(() => {
     const vid = vaults.selectedID;
-    void notes.openVault(vid);
+    untrack(() => {
+      if (editSession && editSession.vaultID !== vid) exitEdit();
+      const b = vid ? books.bookForVault(vid) : null;
+      if (b && notes.vaultID !== vid) sync.onBookOpened(b);
+      void notes.openVault(vid);
+    });
+  });
+
+  // The book was revoked (vault.revoked / gone from the list): close
+  // the editor (SPEC-LIVROS §3.3).
+  const activeRevoked = $derived(books.active ? (books.revoked[books.active.id] ?? null) : null);
+  const activeStatus = $derived(books.active ? sync.statusOf(books.active) : null);
+  $effect(() => {
+    if (activeRevoked) untrack(() => exitEdit());
   });
 
   // Clamp cursor when the list shrinks (e.g. refresh).
@@ -78,6 +100,7 @@
     // App.svelte unmounts this view while an editor is open.
     if (editSession) {
       editSession.destroy();
+      sync.setEditor(editSession.vaultID, null);
       editSession = null;
     }
     // Drop the per-vault cache so the next vault load starts clean.
@@ -85,23 +108,11 @@
   });
 
   function back(): void {
-    vaults.select(null);
+    books.openPicker();
   }
 
-  let lastG = $state(0);
-  /** Text-entry targets own their keystrokes. CodeMirror's content
-   *  node is a contenteditable <div>, not an INPUT/TEXTAREA — without
-   *  this check, Esc (vim: leave insert mode) closed the editor. */
-  function isEditableTarget(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    if (!el || typeof el !== 'object') return false;
-    const tag = el.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-    if (el.isContentEditable) return true;
-    // jsdom (and some detached nodes) lack isContentEditable.
-    return typeof el.closest === 'function' &&
-      el.closest('[contenteditable]:not([contenteditable="false"])') != null;
-  }
+  // g1–g9 / gb / gg chords + ⌃⌘1–9 on macOS (SPEC-LIVROS §5).
+  const chord = new GChord();
 
   function handleKey(e: KeyboardEvent): void {
     // Cmd/Ctrl+S: refresh after the live save, regardless of focus.
@@ -126,6 +137,16 @@
     // In edit mode, leaving is an explicit command only (Done button,
     // Mod-Enter, vim :q) — never a stray Esc.
     if (editMode) return;
+    if (uiState.accountModal || uiState.createBookOpen || showSettings) return;
+
+    const c = chord.feed(e);
+    if (c) {
+      e.preventDefault();
+      if (c.kind === 'book') books.openShortcut(c.n);
+      else if (c.kind === 'picker') books.openPicker();
+      else if (c.kind === 'top') cursor = 0;
+      return;
+    }
 
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -179,15 +200,6 @@
       e.preventDefault();
       const n = notes.list[cursor];
       if (n) void notes.select(n.id);
-    } else if (e.key === 'g') {
-      e.preventDefault();
-      const now = Date.now();
-      if (now - lastG < 500) {
-        cursor = 0;
-        lastG = 0;
-      } else {
-        lastG = now;
-      }
     } else if (e.key === 'G') {
       e.preventDefault();
       cursor = notes.list.length - 1;
@@ -234,10 +246,18 @@
   async function enterEdit(): Promise<void> {
     const vaultID = vaults.selectedID;
     const noteID = notes.selectedID;
-    const user = auth.user;
-    if (!notes.content || !user || !vaultID || !noteID) return;
-    const token = api.getToken();
-    if (!token) return;
+    // The editor uses the ACTIVE BOOK's account: its server, token and
+    // identity — never another account's.
+    const book = vaultID ? books.bookForVault(vaultID) : null;
+    const key = book ? books.accountKeyOf(book) : null;
+    const acct = key ? accounts.get(key) : null;
+    const user = key ? accounts.user(key) : null;
+    if (!notes.content || !user || !vaultID || !noteID || !key || !acct) return;
+    const token = accounts.tokenFor(key);
+    if (!token) {
+      editError = `Entre em ${serverLabel(acct.server_url)} para editar.`;
+      return;
+    }
     if (editorLoading || editSession) return;
 
     editorLoading = true;
@@ -262,9 +282,20 @@
       // because the server's doc already holds that text under a
       // different clientID. Until the session reports `synced`, the
       // template shows a read-only preview instead of the editor.
+      const client = accounts.client(key);
       editSession = new EditorSession(vaultID, noteID, token, user, {
-        onAuthFailure: () => auth.handleSessionLost(),
+        serverUrl: acct.server_url,
+        probeAuth: async () => {
+          try {
+            await client.me();
+            return 'ok';
+          } catch (e) {
+            return isAuthFailure(e) ? 'unauthorized' : 'unknown';
+          }
+        },
+        onAuthFailure: () => accounts.markNeedsLogin(key, 'sessão expirada'),
       });
+      sync.setEditor(vaultID, editSession);
       editMode = true;
     } catch (e) {
       editError = `Failed to load editor: ${(e as Error).message}`;
@@ -283,6 +314,7 @@
         notes.applyLocalBody(sess.noteID, sess.ytext.toString());
       }
       sess.destroy();
+      sync.setEditor(sess.vaultID, null);
       editSession = null;
     }
     editMode = false;
@@ -335,12 +367,13 @@
 
 <div class="vault-home">
   <header class="topbar">
-    <button class="link-button" onclick={back} type="button">← Vaults</button>
+    <button class="link-button" onclick={back} type="button">← Livros</button>
     <div class="title">
       <span class="vault-name">{vaults.selected?.name}</span>
       <span class="vault-slug">{vaults.selected?.slug}</span>
     </div>
     <div class="topbar-right">
+      <SyncStatusPopover />
       <button class="link-button" onclick={openNewNote} type="button">+ New</button>
       <button class="link-button" onclick={() => void notes.refresh()} type="button">Refresh</button>
       <button class="link-button" onclick={() => (showSettings = true)} type="button">Settings</button>
@@ -350,7 +383,24 @@
 
   <div class="split">
     <aside class="note-list" aria-label="Notes">
-      {#if notes.loadingList}
+      <BookSwitcher />
+      {#each books.banners as b (b.id)}
+        <div class="banner" role="status">
+          {b.text}
+          <button class="link-button" type="button" onclick={() => books.dismissBanner(b.id)}>{b.kind === 'dedupe' ? 'Manter' : 'ok'}</button>
+        </div>
+      {/each}
+      {#if activeRevoked && books.active}
+        <div class="placeholder" data-testid="book-revoked">
+          Você não tem mais acesso a este livro.
+          <button class="link-button" type="button" onclick={() => books.active && books.removeFromList(books.active.id)}>Remover da lista</button>
+        </div>
+      {:else if activeStatus?.state === 'needs_login' && books.active}
+        <div class="placeholder" data-testid="book-needs-login">
+          Entre em {serverLabel(books.active.server_url)} para sincronizar.
+          <button class="link-button" type="button" onclick={() => books.active && uiState.openSignIn(books.active.server_url, books.active.account)}>Entrar</button>
+        </div>
+      {:else if notes.loadingList}
         <div class="placeholder">Loading…</div>
       {:else if notes.listErrorStatus === 403}
         <!-- The vault IS in our list (we routed here from it) but its
@@ -538,6 +588,10 @@
 
   {#if showSettings}
     <VaultSettingsModal onclose={() => (showSettings = false)} />
+  {/if}
+
+  {#if uiState.createBookOpen}
+    <VaultCreateModal onclose={() => (uiState.createBookOpen = false)} onCreated={(id) => vaults.select(id)} />
   {/if}
 </div>
 
@@ -739,6 +793,16 @@
   }
   .link-button:hover { text-decoration: underline; }
   .link-button.danger { color: var(--color-error); }
+  .banner {
+    margin: 0.4rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--color-primary);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
 
   .topbar-right {
     justify-self: end;

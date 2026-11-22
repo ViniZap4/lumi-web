@@ -18,7 +18,6 @@ vi.mock('../lib/api.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api.ts')>();
   return {
     ...actual,
-    getToken: vi.fn(() => 'tk'),
     listNotes: vi.fn(),
     getNoteContent: vi.fn(),
     applyNoteDiff: vi.fn(),
@@ -29,7 +28,8 @@ import VaultHomeView from './VaultHomeView.svelte';
 import * as api from '../lib/api.ts';
 import { vaults } from '../lib/vaults.svelte.ts';
 import { notes } from '../lib/notes.svelte.ts';
-import { auth } from '../lib/auth.svelte.ts';
+import { accounts } from '../lib/accounts.svelte.ts';
+import { books } from '../lib/books.svelte.ts';
 import { fakeServer, flushMicrotasks } from '../test/fake-provider.ts';
 
 const BODY = '# Title\n\nhello world';
@@ -83,9 +83,13 @@ beforeEach(async () => {
   vi.mocked(api.getNoteContent).mockResolvedValue({
     id: 'n1', vault_id: 'v1', path: 'n1.md', frontmatter: {}, body: BODY,
   });
-  auth.user = { id: 'u1', username: 'ana', display_name: 'Ana' };
-  vaults.list = [{ id: 'v1', name: 'Vault', slug: 'vault' } as any];
-  vaults.select('v1');
+  // The editor must use the ACTIVE BOOK's account (server + token).
+  await accounts.add(
+    { server_url: 'https://lumi.work.com', username: 'ana', user_id: 'u1', display_name: 'Ana', added_at: '2026-01-01T00:00:00Z', expires_at: null, remember: false },
+    'tk',
+  );
+  books.addCreated({ id: 'v1', name: 'Vault', slug: 'vault', created_by: 'u1', created_at: '', owner_user_id: 'u1' }, 'https://lumi.work.com#ana');
+  books.setActive('v1');
   target = document.createElement('div');
   document.body.appendChild(target);
 });
@@ -95,8 +99,9 @@ afterEach(async () => {
   cmp = null;
   target.remove();
   await notes.openVault(null);
+  books.clear();
+  for (const a of [...accounts.list]) await accounts.forget(a.key);
   vaults.clear();
-  auth.user = null;
 });
 
 describe('VaultHomeView editor', () => {
@@ -107,6 +112,8 @@ describe('VaultHomeView editor', () => {
     // Line-accurate check via CodeMirror lines.
     const lines = Array.from(target.querySelectorAll('.cm-line')).map((l) => l.textContent);
     expect(lines).toEqual(BODY.split('\n'));
+    // Connected to the book's account server with its token.
+    expect(fakeServer.providers[0].url).toBe('wss://lumi.work.com/api/vaults/v1/notes/n1/sync?token=tk');
     // Server doc (what gets mirrored to disk) is untouched.
     expect(fakeServer.text('n1/sync')).toBe(BODY);
     // Joining never pushed the text through the LWW /diff path.

@@ -72,6 +72,10 @@ docker run -d -p 3000:80 lumi-web
 
 The server URL is baked at image build time via `ARG`. Changing it requires a rebuild.
 
+## Admin panel
+
+`admin/` holds the server admin panel: a separate SvelteKit app (own lockfile, tests and Docker image) that talks to the `lumi-server` admin API from its own Node process, so the admin token never reaches the browser. See [admin/README.md](admin/README.md) (pt-BR).
+
 ## Documentation
 
 Full docs at [lumi-note.vercel.app/#/docs](https://lumi-note.vercel.app/#/docs).

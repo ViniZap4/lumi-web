@@ -4,3 +4,6 @@ dist
 *.log
 .env
 .env.local
+
+# O painel de administração (admin/) tem build e imagem próprios.
+admin

@@ -19,7 +19,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      # Vite 7 exige Node 20.19+/22.12+. Imagem com git (não-slim) para o checkout manual.
+      # Vite 7 exige Node 20.19+/22.12+; o painel (Kit 3) exige 22.17+. Imagem com git (não-slim) para o checkout manual.
       image: node:22.23.5-bookworm
     timeout-minutes: 20
     env:
@@ -68,3 +68,22 @@ jobs:
       - name: npm audit (informativo)
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
+
+      # Painel de administração (admin/): app SvelteKit separado, com lockfile próprio.
+      - name: admin — npm ci
+        working-directory: admin
+        run: npm ci --no-audit
+
+      - name: admin — check
+        working-directory: admin
+        run: npm run check -- --threshold error
+
+      - name: admin — vitest
+        working-directory: admin
+        run: npm test
+
+      - name: admin — build
+        working-directory: admin
+        env:
+          ORIGIN: https://lumi-admin.example.ts.net
+        run: npm run build

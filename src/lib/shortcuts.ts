@@ -3,6 +3,11 @@
 // ⌃⌘1–9 also switch books (no conflict with tab switching, which is
 // ⌘1–9). Only in non-editable contexts — callers check
 // `isEditableTarget` first.
+//
+// Navigation chords (wave 3, opt-in via `{ nav: true }`, mirroring the
+// TUI tree's g/z prefixes): `gh` and `zh` jump to the book root
+// ("home"), `zp` toggles the preview column. Unknown second keys cancel
+// the prefix and are NOT consumed, so `g` then `j` still moves down.
 
 export const CHORD_MS = 500;
 
@@ -10,6 +15,8 @@ export type ChordAction =
   | { kind: 'book'; n: number }
   | { kind: 'picker' }
   | { kind: 'top' }
+  | { kind: 'home' }
+  | { kind: 'preview' }
   | { kind: 'pending' }
   | null;
 
@@ -39,7 +46,14 @@ export function isMac(): boolean {
  *  view's non-editable handler; a non-null result means "handled". */
 export class GChord {
   private lastG: number | null = null;
-  constructor(private now: () => number = Date.now) {}
+  private prefix: 'g' | 'z' = 'g';
+  private readonly nav: boolean;
+  constructor(
+    private now: () => number = Date.now,
+    opts: { nav?: boolean } = {},
+  ) {
+    this.nav = opts.nav ?? false;
+  }
 
   reset(): void {
     this.lastG = null;
@@ -58,13 +72,20 @@ export class GChord {
     const armed = this.lastG !== null && this.now() - this.lastG < CHORD_MS;
     if (armed) {
       this.lastG = null;
+      if (this.prefix === 'z') {
+        if (e.key === 'h') return { kind: 'home' };
+        if (e.key === 'p') return { kind: 'preview' };
+        return null;
+      }
       if (/^[1-9]$/.test(e.key)) return { kind: 'book', n: Number(e.key) };
       if (e.key === 'b') return { kind: 'picker' };
       if (e.key === 'g') return { kind: 'top' };
+      if (this.nav && e.key === 'h') return { kind: 'home' };
       return null;
     }
-    if (e.key === 'g') {
+    if (e.key === 'g' || (this.nav && e.key === 'z')) {
       this.lastG = this.now();
+      this.prefix = e.key;
       return { kind: 'pending' };
     }
     this.lastG = null;

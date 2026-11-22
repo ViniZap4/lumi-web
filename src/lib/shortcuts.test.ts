@@ -38,4 +38,28 @@ describe('GChord', () => {
     expect(c.feed(k('3', { ctrlKey: true, metaKey: true }), false)).toBeNull();
     expect(c.feed(k('3', { metaKey: true }), true)).toBeNull();
   });
+
+  it('nav chords (opt-in): gh / zh home, zp preview; unknown second key falls through', () => {
+    const c = new GChord(() => 0, { nav: true });
+    c.feed(k('g'), false);
+    expect(c.feed(k('h'), false)).toEqual({ kind: 'home' });
+    expect(c.feed(k('z'), false)).toEqual({ kind: 'pending' });
+    expect(c.feed(k('h'), false)).toEqual({ kind: 'home' });
+    c.feed(k('z'), false);
+    expect(c.feed(k('p'), false)).toEqual({ kind: 'preview' });
+    c.feed(k('z'), false);
+    expect(c.feed(k('j'), false)).toBeNull();
+    c.feed(k('z'), false);
+    expect(c.feed(k('g'), false)).toBeNull(); // z then g is not gg
+    // Book chords still work with nav on.
+    c.feed(k('g'), false);
+    expect(c.feed(k('2'), false)).toEqual({ kind: 'book', n: 2 });
+  });
+
+  it('without nav, z and gh are not chords (book picker view unchanged)', () => {
+    const c = new GChord(() => 0);
+    expect(c.feed(k('z'), false)).toBeNull();
+    c.feed(k('g'), false);
+    expect(c.feed(k('h'), false)).toBeNull();
+  });
 });

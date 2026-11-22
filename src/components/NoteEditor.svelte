@@ -1,3 +1,22 @@
+<script lang="ts" module>
+  import { Vim } from '@replit/codemirror-vim';
+
+  // Vim ex commands are registered globally on the Vim singleton, so
+  // they dispatch to whichever editor is currently mounted.
+  let activeExit: (() => void) | null = null;
+  let vimExRegistered = false;
+  function registerVimExit(): void {
+    if (vimExRegistered) return;
+    vimExRegistered = true;
+    const exit = () => activeExit?.();
+    // Edits are already persisted live; :w / :wq / :x just exit or no-op.
+    Vim.defineEx('quit', 'q', exit);
+    Vim.defineEx('wq', 'wq', exit);
+    Vim.defineEx('xit', 'x', exit);
+    Vim.defineEx('write', 'w', () => {});
+  }
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
@@ -14,9 +33,12 @@
   type Props = {
     session: EditorSession;
     vimEnabled?: boolean;
+    /** Explicit "leave the editor" command (vim `:q`, Mod-Enter). Esc
+     *  is NOT an exit: in vim it leaves insert mode. */
+    onexit?: () => void;
   };
 
-  const { session, vimEnabled = true }: Props = $props();
+  const { session, vimEnabled = true, onexit }: Props = $props();
 
   let container: HTMLDivElement | null = $state(null);
   let view: EditorView | null = null;
@@ -31,6 +53,8 @@
 
   function mountEditor(): void {
     if (!container || view) return;
+    registerVimExit();
+    activeExit = () => onexit?.();
 
     // Order matters: vim() MUST precede yCollab() so vim's keymap
     // doesn't shadow the Yjs undo. (Documented in the stack
@@ -43,6 +67,7 @@
       // We do NOT call history() — yCollab supplies a Yjs-aware
       // UndoManager that integrates with collaborative undo.
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      keymap.of([{ key: 'Mod-Enter', run: () => { onexit?.(); return true; } }]),
       keymap.of([...defaultKeymap.filter((b) => b.key !== 'Mod-z' && b.key !== 'Mod-y' && b.key !== 'Mod-Shift-z'), ...historyKeymap.filter((b) => false), ...searchKeymap]),
       markdown({ base: markdownLanguage, codeLanguages: languages }),
       yCollab(session.ytext, session.provider?.awareness ?? null, {
@@ -77,6 +102,7 @@
   }
 
   function destroyEditor(): void {
+    activeExit = null;
     if (view) {
       try { view.destroy(); } catch {}
       view = null;

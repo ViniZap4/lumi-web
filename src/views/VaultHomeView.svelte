@@ -83,9 +83,21 @@
   }
 
   let lastG = $state(0);
-  function handleKey(e: KeyboardEvent): void {
-    const target = e.target as HTMLElement | null;
+  /** Text-entry targets own their keystrokes. CodeMirror's content
+   *  node is a contenteditable <div>, not an INPUT/TEXTAREA — without
+   *  this check, Esc (vim: leave insert mode) closed the editor. */
+  function isEditableTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el || typeof el !== 'object') return false;
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable) return true;
+    // jsdom (and some detached nodes) lack isContentEditable.
+    return typeof el.closest === 'function' &&
+      el.closest('[contenteditable]:not([contenteditable="false"])') != null;
+  }
 
+  function handleKey(e: KeyboardEvent): void {
     // Cmd/Ctrl+S to save edits, regardless of focus inside the editor.
     if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
@@ -101,27 +113,29 @@
       return; // let the input handle other keys
     }
 
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+    // A component (CodeMirror/vim, a form control) already handled it.
+    if (e.defaultPrevented) return;
+    if (isEditableTarget(e.target)) return;
+
+    // In edit mode, leaving is an explicit command only (Done button,
+    // Mod-Enter, vim :q) — never a stray Esc.
+    if (editMode) return;
 
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (editMode) {
-        cancelEdit();
-      } else if (notes.selectedID) {
+      if (notes.selectedID) {
         void notes.select(null);
       } else {
         back();
       }
       return;
     }
-    if (e.key === 'h' && !editMode) {
+    if (e.key === 'h') {
       e.preventDefault();
       if (notes.selectedID) void notes.select(null);
       else back();
       return;
     }
-    if (editMode) return; // remaining shortcuts are list-mode only
-
     // New note: 'n' on list pane.
     if (e.key === 'n') {
       e.preventDefault();
@@ -385,12 +399,12 @@
               </div>
             </div>
             {#if editError}<div class="error">{editError}</div>{/if}
-            <NoteEditor session={editSession} />
+            <NoteEditor session={editSession} onexit={cancelEdit} />
             <div class="hint">
               Edits sync live to other web peers via Yjs and to the on-disk file every
               ~500 ms.
               <kbd>Cmd/Ctrl</kbd>+<kbd>S</kbd> forces an immediate FS sync.
-              <kbd>Esc</kbd> closes the editor.
+              <kbd>Cmd/Ctrl</kbd>+<kbd>Enter</kbd>, vim <kbd>:q</kbd> or <em>Done</em> closes the editor.
             </div>
           </div>
         {:else if editorLoading}

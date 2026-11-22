@@ -36,6 +36,35 @@ export interface Vault {
   owner_user_id: string;
   // Present only on vaults forked via POST /copies.
   copied_from?: VaultCopiedFrom | null;
+  // SPEC-LIVROS §3.5 — absent on servers that predate the feed.
+  head?: number;
+  role?: string;
+  can_edit?: boolean;
+  federation?: VaultFederationInfo | null;
+}
+
+// SPEC-LIVROS §3.5: `federation` block on GET /api/vaults rows.
+export interface VaultFederationInfo {
+  role: 'home' | 'follower' | null;
+  home_url?: string | null;
+  status?: string | null;
+}
+
+// GET /api/info (public). SPEC-LIVROS §3.5.
+export interface ServerInfo {
+  name?: string;
+  version?: string;
+  protocol?: number;
+  public_key?: string;
+  registration?: string | boolean;
+}
+
+// GET /api/vaults/:vault/changes?after=N. SPEC-LIVROS §3.5.
+export interface ChangesResponse {
+  notes: Array<NoteSummary & { change_seq: number }>;
+  deleted: Array<{ id: string; seq: number }>;
+  head: number;
+  more: boolean;
 }
 
 // The server's invite-accept endpoints return a slimmer vault payload
@@ -197,6 +226,7 @@ export interface ServerError {
   detail?: string;
   message?: string;
   capability?: string; // present on capability_missing
+  head?: number; // present on 410 resync_required (changes feed)
 }
 
 // Thrown by the API client on non-2xx. Code mirrors the server's
@@ -206,9 +236,11 @@ export class ApiError extends Error {
   code: string;
   detail?: string;
   capability?: string;
+  body: ServerError;
 
   constructor(status: number, body: ServerError) {
     super(body.detail ?? body.message ?? body.error);
+    this.body = body;
     this.status = status;
     this.code = body.error;
     this.detail = body.detail ?? body.message;

@@ -7,6 +7,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as api from './api.ts';
+
+// Per-account routing: every vault-scoped helper goes to the client of
+// the account the book is bound to. Here: one test account.
+const BASE = 'https://lumi.test';
+function testResolver(): api.ClientResolver {
+  const c = api.createClient(BASE, () => 'tk-test');
+  return { forVault: () => c, active: () => c, forAccount: () => c };
+}
 import { ApiError, type Vault } from './types.ts';
 
 const fetchMock = vi.fn();
@@ -39,11 +47,11 @@ const forkVault: Vault = {
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
-  api.setToken('tk-test');
+  api.setClientResolver(testResolver());
 });
 
 afterEach(() => {
-  api.setToken(null);
+  api.setClientResolver(null);
   vi.unstubAllGlobals();
 });
 
@@ -57,7 +65,7 @@ describe('api.transferOwnership', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/transfer-ownership`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/transfer-ownership`);
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ user_id: 'u-bob' });
     expect(init.headers['X-Lumi-Token']).toBe('tk-test');
@@ -96,7 +104,7 @@ describe('api.copyVault', () => {
     expect(out.copied_from?.slug).toBe('work');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/copies`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/copies`);
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ recipient_username: 'bob' });
   });

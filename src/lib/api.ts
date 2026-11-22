@@ -1,13 +1,22 @@
-// v2 API client. Token-bearing, vault-scoped, server-error-aware.
+// v2 API client, one instance per account (SPEC-LIVROS W1).
 //
-// Token management lives in lib/auth.svelte.ts. This module is a pure
-// transport — it asks `getToken()` from the auth module on every
-// request so token rotation (logout, register, accept-invite) is
-// transparent.
+// There is no global API_URL or global token any more. Every request
+// runs through an `ApiClient` bound to exactly one account context:
+// (server URL, token getter, account-scoped callbacks). A 401 on
+// account A only notifies account A's handler — it can never drop the
+// session of account B.
 //
-// Every non-2xx response is decoded as a ServerError and thrown as
-// an ApiError. Callers `try/catch` and read `err.code` /
-// `err.capability` to drive UI.
+// The module-level helpers (`listNotes(vaultID, …)` etc.) are kept so
+// stores and tests do not change shape. They do NOT use a "current
+// token": vault-scoped calls are routed by vault id to the client of
+// the account the book is bound to (the books registry guarantees at
+// most one bound book per vault_id, §2.4). Account-level calls
+// (listVaults, createVault, me, …) use the active book's account
+// unless an explicit account key is passed. Routing is installed by
+// the session layer via `setClientResolver`.
+//
+// Every non-2xx response is decoded as a ServerError and thrown as an
+// ApiError. Callers `try/catch` and read `err.code` / `err.capability`.
 
 import {
   ApiError,
@@ -28,35 +37,14 @@ import {
   type FederationInvite,
   type FederationJoinResponse,
   type FederatedMember,
+  type ServerInfo,
+  type ChangesResponse,
 } from './types.ts';
 
-export const API_URL: string =
-  import.meta.env.VITE_LUMI_SERVER_URL || 'http://localhost:8080';
-
-// Token holder. The auth module sets/clears it; we never persist
-// here. Keeping a module-level variable lets fetch wrappers stay
-// synchronous and avoids re-resolving a store on every request.
-let token: string | null = null;
-export function setToken(t: string | null): void {
-  token = t;
-}
-export function getToken(): string | null {
-  return token;
-}
-
-// Global session-loss hook. A 401 on any token-bearing request means
-// the session is gone (expired, revoked, server restarted with a new
-// key): every store would otherwise surface its own "unauthorized"
-// error while the app keeps rendering authenticated views. The auth
-// store registers a handler that clears the session so App.svelte
-// falls back to the login screen. Anonymous requests (login,
-// register, invite accept) never trigger it — a 401 there is a
-// credentials error for the form to show.
-export type UnauthorizedHandler = (err: ApiError) => void;
-let unauthorizedHandler: UnauthorizedHandler | null = null;
-export function onUnauthorized(h: UnauthorizedHandler | null): void {
-  unauthorizedHandler = h;
-}
+/** Optional default/first server, baked at build time. Only used to
+ *  prefill the "add server" form — never as an implicit target. */
+export const DEFAULT_SERVER_URL: string | null =
+  (import.meta.env.VITE_LUMI_SERVER_URL as string | undefined) || null;
 
 /** True when an error means "the session is no longer valid". */
 export function isAuthFailure(err: unknown): boolean {
@@ -66,76 +54,40 @@ export function isAuthFailure(err: unknown): boolean {
   );
 }
 
-// ---- core request helper ---------------------------------------------------
+/** Network-level failure (DNS, offline, CORS, mixed content): fetch
+ *  rejected before any HTTP status was available. */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 0 && err.code === 'network_error';
+}
+
+/** REST health classification fed into the sync-state reducer
+ *  (restHealth, SPEC-LIVROS §4.2). */
+export type RestOutcome = 'ok' | 'network' | 'auth' | 'server' | 'parse';
+
+export interface AccountContext {
+  /** Normalised server URL (lib/serverurl.ts). */
+  serverUrl: string;
+  /** Current token for this account (null = anonymous only). */
+  getToken: () => string | null;
+  /** Called when a request that carried the account's *current* token
+   *  answered 401/token_expired. Never called for anonymous calls or
+   *  for a late 401 of a token that was already rotated away. */
+  onUnauthorized?: (err: ApiError) => void;
+  /** Outcome of every token-bearing request (restHealth). */
+  onOutcome?: (outcome: RestOutcome, err?: ApiError) => void;
+  /** Injectable fetch (tests). Defaults to globalThis.fetch. */
+  fetch?: typeof fetch;
+}
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
-interface RequestOpts {
+export interface RequestOpts {
   method?: Method;
   body?: unknown;
   signal?: AbortSignal;
-  // Skip the X-Lumi-Token header (used for public endpoints like
-  // /auth/login and /invites/:token/accept).
+  /** Skip the token header (public endpoints: login, invite accept,
+   *  /api/info). */
   anonymous?: boolean;
-}
-
-async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const sentToken = !opts.anonymous ? token : null;
-  if (sentToken) {
-    headers['X-Lumi-Token'] = sentToken;
-  }
-  const res = await fetch(`${API_URL}${path}`, {
-    method: opts.method ?? 'GET',
-    headers,
-    body: opts.body != null ? JSON.stringify(opts.body) : undefined,
-    signal: opts.signal,
-  });
-
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  // Try to parse JSON in all cases — error responses use the same
-  // envelope shape — but tolerate empty bodies.
-  let payload: unknown = null;
-  const ct = res.headers.get('content-type') ?? '';
-  if (ct.includes('application/json')) {
-    try {
-      payload = await res.json();
-    } catch {
-      // empty or malformed JSON; treat as null
-    }
-  }
-
-  if (!res.ok) {
-    const errBody: ServerError =
-      (payload as ServerError | null) ?? { error: 'unknown', detail: res.statusText };
-    const err = new ApiError(res.status, errBody);
-    // Only react to auth failures of requests that actually carried
-    // our token — and only if that token is still the active one (a
-    // late 401 for a token we already rotated away must not log the
-    // fresh session out).
-    if (!opts.anonymous && sentToken != null && sentToken === token && isAuthFailure(err)) {
-      try {
-        unauthorizedHandler?.(err);
-      } catch {
-        // handler failures must not mask the original error
-      }
-    }
-    throw err;
-  }
-  return payload as T;
-}
-
-// ---- auth ------------------------------------------------------------------
-
-export async function login(username: string, password: string): Promise<SessionResponse> {
-  return request<SessionResponse>('/api/auth/login', {
-    method: 'POST',
-    body: { username, password },
-    anonymous: true,
-  });
 }
 
 export interface RegisterInput {
@@ -149,97 +101,10 @@ export interface RegisterInput {
   };
 }
 
-export async function register(input: RegisterInput): Promise<SessionResponse> {
-  return request<SessionResponse>('/api/auth/register', {
-    method: 'POST',
-    body: input,
-    anonymous: true,
-  });
-}
-
-export async function logout(): Promise<void> {
-  await request<void>('/api/auth/logout', { method: 'POST' });
-}
-
-// ---- invites ---------------------------------------------------------------
-
-// Accept an invite as a brand-new user. The server creates the account,
-// adds them to the vault, and returns a fresh session token. The
-// response does NOT include the SessionUser — callers fetch /me to
-// populate it (see auth.signUpViaInvite).
-export async function acceptInviteWithSignup(
-  token: string,
-  signup: RegisterInput,
-): Promise<InviteAcceptSignupResponse> {
-  return request<InviteAcceptSignupResponse>(
-    `/api/invites/${encodeURIComponent(token)}/accept`,
-    { method: 'POST', body: signup, anonymous: true },
-  );
-}
-
-// Accept an invite as the currently-authenticated user. Adds them to
-// the vault; session is unchanged.
-export async function acceptInviteAsCurrentUser(
-  token: string,
-): Promise<InviteAcceptExistingResponse> {
-  return request<InviteAcceptExistingResponse>(
-    `/api/invites/${encodeURIComponent(token)}/accept`,
-    { method: 'POST' },
-  );
-}
-
-export async function me(): Promise<SessionUser> {
-  // /api/users/me returns the user payload directly.
-  return request<SessionUser>('/api/users/me');
-}
-
-// ---- vaults ----------------------------------------------------------------
-
-export async function listVaults(): Promise<Vault[]> {
-  const out = await request<{ vaults: Vault[] }>('/api/vaults');
-  return out.vaults ?? [];
-}
-
-export async function getVault(id: string): Promise<Vault> {
-  return request<Vault>(`/api/vaults/${id}`);
-}
-
 export interface CreateVaultInput {
   name: string;
   // Optional. Server auto-generates from name when omitted.
   slug?: string;
-}
-
-export async function createVault(input: CreateVaultInput): Promise<Vault> {
-  return request<Vault>('/api/vaults', { method: 'POST', body: input });
-}
-
-// v3 Phase O — hand the vault to another member. Owner-only on the
-// server (403 otherwise); 400 `validation` when the target isn't a
-// member, `user_id_required` when the id is blank. Returns the fresh
-// vault DTO with the new owner_user_id.
-export async function transferOwnership(vaultID: string, userID: string): Promise<Vault> {
-  return request<Vault>(`/api/vaults/${vaultID}/transfer-ownership`, {
-    method: 'POST',
-    body: { user_id: userID },
-  });
-}
-
-// v3 Phase O — fork the vault's current state into a brand-new vault
-// owned by `recipientUsername` (no membership, no live link). Requires
-// capability vault.export. 400 `recipient_not_found` /
-// `recipient_username_required` on bad input. Returns the fork's DTO
-// (carries `copied_from` provenance).
-export async function copyVault(vaultID: string, recipientUsername: string): Promise<Vault> {
-  return request<Vault>(`/api/vaults/${vaultID}/copies`, {
-    method: 'POST',
-    body: { recipient_username: recipientUsername },
-  });
-}
-
-export async function listVaultRoles(vaultID: string): Promise<RemoteRole[]> {
-  const out = await request<{ roles: RemoteRole[] }>(`/api/vaults/${vaultID}/roles`);
-  return out.roles ?? [];
 }
 
 export interface CreateRoleInput {
@@ -252,63 +117,6 @@ export interface UpdateRoleInput {
   capabilities?: string[];
 }
 
-export async function createRole(
-  vaultID: string,
-  input: CreateRoleInput,
-): Promise<RemoteRole> {
-  return request<RemoteRole>(`/api/vaults/${vaultID}/roles`, {
-    method: 'POST',
-    body: input,
-  });
-}
-
-export async function updateRole(
-  vaultID: string,
-  roleID: string,
-  input: UpdateRoleInput,
-): Promise<RemoteRole> {
-  return request<RemoteRole>(`/api/vaults/${vaultID}/roles/${encodeURIComponent(roleID)}`, {
-    method: 'PATCH',
-    body: input,
-  });
-}
-
-export async function deleteRole(vaultID: string, roleID: string): Promise<void> {
-  await request<void>(`/api/vaults/${vaultID}/roles/${encodeURIComponent(roleID)}`, {
-    method: 'DELETE',
-  });
-}
-
-export async function listVaultMembers(vaultID: string): Promise<RemoteMember[]> {
-  const out = await request<{ members: RemoteMember[] }>(`/api/vaults/${vaultID}/members`);
-  return out.members ?? [];
-}
-
-export async function updateMemberRole(
-  vaultID: string,
-  userID: string,
-  roleID: string,
-): Promise<void> {
-  await request<void>(`/api/vaults/${vaultID}/members/${userID}`, {
-    method: 'PATCH',
-    body: { role_id: roleID },
-  });
-}
-
-export async function removeMember(vaultID: string, userID: string): Promise<void> {
-  await request<void>(`/api/vaults/${vaultID}/members/${userID}`, { method: 'DELETE' });
-}
-
-// ---- invites (vault-scoped management surface) -----------------------------
-//
-// Separate from the top-level invite *accept* helpers — these manage
-// the lifecycle of invite links for a given vault.
-
-export async function listVaultInvites(vaultID: string): Promise<Invite[]> {
-  const out = await request<{ invites: Invite[] }>(`/api/vaults/${vaultID}/invites`);
-  return out.invites ?? [];
-}
-
 export interface CreateInviteInput {
   role_id: string;
   max_uses: number;
@@ -316,74 +124,11 @@ export interface CreateInviteInput {
   email_hint?: string;
 }
 
-export async function createInvite(
-  vaultID: string,
-  input: CreateInviteInput,
-): Promise<InviteCreated> {
-  return request<InviteCreated>(`/api/vaults/${vaultID}/invites`, {
-    method: 'POST',
-    body: input,
-  });
-}
-
-export async function revokeInvite(vaultID: string, token: string): Promise<void> {
-  await request<void>(
-    `/api/vaults/${vaultID}/invites/${encodeURIComponent(token)}`,
-    { method: 'DELETE' },
-  );
-}
-
-// ---- federation (v3 F-phases) -----------------------------------------------
-//
-// Home-server authority model: the vault's home server authors
-// membership and control; invited servers follow. Invite / federation
-// management needs capability `vault.federate` (Admin's `*` covers
-// it); the federations *list* is readable by any member — LGPD notice.
-
 export interface CreateFederationInviteInput {
   // Pin the invite to one follower server's URL (optional).
   server_url_hint?: string;
   // ISO 8601. Omitted = server default / no expiry.
   expires_at?: string;
-}
-
-export async function createFederationInvite(
-  vaultID: string,
-  input: CreateFederationInviteInput,
-): Promise<FederationInvite> {
-  return request<FederationInvite>(`/api/vaults/${vaultID}/federation-invites`, {
-    method: 'POST',
-    body: input,
-  });
-}
-
-export async function listFederationInvites(vaultID: string): Promise<FederationInvite[]> {
-  const out = await request<{ invites: FederationInvite[] }>(
-    `/api/vaults/${vaultID}/federation-invites`,
-  );
-  return out.invites ?? [];
-}
-
-export async function revokeFederationInvite(vaultID: string, token: string): Promise<void> {
-  await request<void>(
-    `/api/vaults/${vaultID}/federation-invites/${encodeURIComponent(token)}`,
-    { method: 'DELETE' },
-  );
-}
-
-export async function listFederations(vaultID: string): Promise<Federation[]> {
-  const out = await request<{ federations: Federation[] }>(`/api/vaults/${vaultID}/federations`);
-  return out.federations ?? [];
-}
-
-// Sever a federation link. 409 {"error":"conflict"} when it's already
-// revoked. NB: the peer keeps its copy of the data — it was trusted
-// with plaintext (SPEC-V3 threat model); the UI must say so.
-export async function revokeFederation(vaultID: string, federationID: string): Promise<void> {
-  await request<void>(
-    `/api/vaults/${vaultID}/federations/${encodeURIComponent(federationID)}`,
-    { method: 'DELETE' },
-  );
 }
 
 export interface JoinFederationInput {
@@ -394,96 +139,16 @@ export interface JoinFederationInput {
   jurisdiction?: string;
 }
 
-// Make THIS server a follower of a remote vault. Any authed user.
-// Returns the local replica vault + the new federation row.
-export async function joinFederation(
-  input: JoinFederationInput,
-): Promise<FederationJoinResponse> {
-  return request<FederationJoinResponse>('/api/federation/join', {
-    method: 'POST',
-    body: input,
-  });
-}
-
-export async function listFederatedMembers(vaultID: string): Promise<FederatedMember[]> {
-  const out = await request<{ federated_members: FederatedMember[] }>(
-    `/api/vaults/${vaultID}/federated-members`,
-  );
-  return out.federated_members ?? [];
-}
-
-// member_key is `username@https://server`. 400 {"error":"validation"}
-// on a malformed key or a role foreign to this vault.
-export async function addFederatedMember(
-  vaultID: string,
-  memberKey: string,
-  roleID: string,
-): Promise<FederatedMember> {
-  return request<FederatedMember>(`/api/vaults/${vaultID}/federated-members`, {
-    method: 'POST',
-    body: { member_key: memberKey, role_id: roleID },
-  });
-}
-
-export async function updateFederatedMemberRole(
-  vaultID: string,
-  memberKey: string,
-  roleID: string,
-): Promise<void> {
-  await request<void>(`/api/vaults/${vaultID}/federated-members`, {
-    method: 'PATCH',
-    body: { member_key: memberKey, role_id: roleID },
-  });
-}
-
-export async function removeFederatedMember(vaultID: string, memberKey: string): Promise<void> {
-  await request<void>(`/api/vaults/${vaultID}/federated-members`, {
-    method: 'DELETE',
-    body: { member_key: memberKey },
-  });
-}
-
-// ---- notes -----------------------------------------------------------------
-
 export interface ListNotesOpts {
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
 }
 
-export async function listNotes(
-  vaultID: string,
-  opts: ListNotesOpts = {},
-): Promise<{ notes: NoteSummary[]; limit: number; offset: number }> {
-  const qs = new URLSearchParams();
-  if (opts.limit != null) qs.set('limit', String(opts.limit));
-  if (opts.offset != null) qs.set('offset', String(opts.offset));
-  const q = qs.toString();
-  return request(`/api/vaults/${vaultID}/notes${q ? '?' + q : ''}`, { signal: opts.signal });
-}
-
-export async function getNote(vaultID: string, noteID: string): Promise<NoteSummary> {
-  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}`);
-}
-
-export async function getNoteContent(
-  vaultID: string,
-  noteID: string,
-  signal?: AbortSignal,
-): Promise<NoteContent> {
-  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}/content`, {
-    signal,
-  });
-}
-
 export interface CreateNoteInput {
   title: string;
   body?: string;
   tags?: string[];
-}
-
-export async function createNote(vaultID: string, input: CreateNoteInput): Promise<NoteSummary> {
-  return request(`/api/vaults/${vaultID}/notes`, { method: 'POST', body: input });
 }
 
 export interface UpdateNoteInput {
@@ -493,35 +158,462 @@ export interface UpdateNoteInput {
   tags?: string[];
 }
 
-export async function updateNote(
-  vaultID: string,
-  noteID: string,
-  input: UpdateNoteInput,
-): Promise<NoteSummary> {
-  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}`, {
-    method: 'PATCH',
-    body: input,
+const enc = encodeURIComponent;
+
+export class ApiClient {
+  readonly ctx: AccountContext;
+
+  constructor(ctx: AccountContext) {
+    this.ctx = ctx;
+  }
+
+  get serverUrl(): string {
+    return this.ctx.serverUrl;
+  }
+
+  async request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const sentToken = !opts.anonymous ? this.ctx.getToken() : null;
+    if (sentToken) headers['X-Lumi-Token'] = sentToken;
+    const doFetch = this.ctx.fetch ?? globalThis.fetch.bind(globalThis);
+    const report = (o: RestOutcome, e?: ApiError) => {
+      if (opts.anonymous) return;
+      try {
+        this.ctx.onOutcome?.(o, e);
+      } catch {
+        // health reporting must never mask the result
+      }
+    };
+
+    let res: Response;
+    try {
+      res = await doFetch(`${this.ctx.serverUrl}${path}`, {
+        method: opts.method ?? 'GET',
+        headers,
+        body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+        signal: opts.signal,
+        // Tokens travel in a header only; never send ambient cookies
+        // to user-added servers.
+        credentials: 'omit',
+      });
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      const err = new ApiError(0, {
+        error: 'network_error',
+        detail: e instanceof Error ? e.message : 'network error',
+      });
+      report('network', err);
+      throw err;
+    }
+
+    if (res.status === 204) {
+      report('ok');
+      return undefined as T;
+    }
+
+    // Try to parse JSON in all cases — error responses use the same
+    // envelope shape — but tolerate empty bodies.
+    let payload: unknown = null;
+    let malformed = false;
+    const ct = res.headers.get('content-type') ?? '';
+    if (ct.includes('application/json')) {
+      try {
+        payload = await res.json();
+      } catch {
+        malformed = true;
+      }
+    }
+
+    if (!res.ok) {
+      const errBody: ServerError =
+        (payload as ServerError | null) ?? { error: 'unknown', detail: res.statusText };
+      const err = new ApiError(res.status, errBody);
+      if (isAuthFailure(err)) {
+        report('auth', err);
+        // Only react to auth failures of requests that actually carried
+        // this account's token — and only if that token is still the
+        // current one (a late 401 for a rotated token must not log the
+        // fresh session out).
+        if (!opts.anonymous && sentToken != null && sentToken === this.ctx.getToken()) {
+          try {
+            this.ctx.onUnauthorized?.(err);
+          } catch {
+            // handler failures must not mask the original error
+          }
+        }
+      } else if (res.status >= 500) {
+        report('server', err);
+      } else {
+        // 4xx other than auth: a request-level problem, not ill health.
+        report('ok');
+      }
+      throw err;
+    }
+    if (malformed) {
+      const err = new ApiError(res.status, { error: 'invalid_json', detail: 'Resposta JSON inválida.' });
+      report('parse', err);
+      throw err;
+    }
+    report('ok');
+    return payload as T;
+  }
+
+  // ---- server ------------------------------------------------------------
+
+  /** Public server descriptor (SPEC-LIVROS §3.5). Old servers 404. */
+  info(signal?: AbortSignal): Promise<ServerInfo> {
+    return this.request<ServerInfo>('/api/info', { anonymous: true, signal });
+  }
+
+  // ---- auth --------------------------------------------------------------
+
+  login(username: string, password: string): Promise<SessionResponse> {
+    return this.request<SessionResponse>('/api/auth/login', {
+      method: 'POST',
+      body: { username, password },
+      anonymous: true,
+    });
+  }
+
+  register(input: RegisterInput): Promise<SessionResponse> {
+    return this.request<SessionResponse>('/api/auth/register', {
+      method: 'POST',
+      body: input,
+      anonymous: true,
+    });
+  }
+
+  async logout(): Promise<void> {
+    await this.request<void>('/api/auth/logout', { method: 'POST' });
+  }
+
+  // Accept an invite as a brand-new user. The response does NOT include
+  // the SessionUser — callers fetch /me to populate it.
+  acceptInviteWithSignup(token: string, signup: RegisterInput): Promise<InviteAcceptSignupResponse> {
+    return this.request<InviteAcceptSignupResponse>(`/api/invites/${enc(token)}/accept`, {
+      method: 'POST',
+      body: signup,
+      anonymous: true,
+    });
+  }
+
+  // Accept an invite as this account. Session is unchanged.
+  acceptInviteAsCurrentUser(token: string): Promise<InviteAcceptExistingResponse> {
+    return this.request<InviteAcceptExistingResponse>(`/api/invites/${enc(token)}/accept`, {
+      method: 'POST',
+    });
+  }
+
+  me(): Promise<SessionUser> {
+    return this.request<SessionUser>('/api/users/me');
+  }
+
+  // ---- vaults ------------------------------------------------------------
+
+  async listVaults(): Promise<Vault[]> {
+    const out = await this.request<{ vaults: Vault[] }>('/api/vaults');
+    return out?.vaults ?? [];
+  }
+
+  getVault(id: string): Promise<Vault> {
+    return this.request<Vault>(`/api/vaults/${id}`);
+  }
+
+  createVault(input: CreateVaultInput): Promise<Vault> {
+    return this.request<Vault>('/api/vaults', { method: 'POST', body: input });
+  }
+
+  /** Rename for everyone (SPEC-LIVROS §2.3, needs vault.manage). */
+  renameVault(id: string, name: string): Promise<Vault> {
+    return this.request<Vault>(`/api/vaults/${id}`, { method: 'PATCH', body: { name } });
+  }
+
+  /** Incremental note changes (SPEC-LIVROS §3.5). 410 resync_required
+   *  below the tombstone floor. */
+  getChanges(id: string, after: number, limit = 500, signal?: AbortSignal): Promise<ChangesResponse> {
+    return this.request<ChangesResponse>(
+      `/api/vaults/${id}/changes?after=${after}&limit=${limit}`,
+      { signal },
+    );
+  }
+
+  transferOwnership(vaultID: string, userID: string): Promise<Vault> {
+    return this.request<Vault>(`/api/vaults/${vaultID}/transfer-ownership`, {
+      method: 'POST',
+      body: { user_id: userID },
+    });
+  }
+
+  copyVault(vaultID: string, recipientUsername: string): Promise<Vault> {
+    return this.request<Vault>(`/api/vaults/${vaultID}/copies`, {
+      method: 'POST',
+      body: { recipient_username: recipientUsername },
+    });
+  }
+
+  async listVaultRoles(vaultID: string): Promise<RemoteRole[]> {
+    const out = await this.request<{ roles: RemoteRole[] }>(`/api/vaults/${vaultID}/roles`);
+    return out?.roles ?? [];
+  }
+
+  createRole(vaultID: string, input: CreateRoleInput): Promise<RemoteRole> {
+    return this.request<RemoteRole>(`/api/vaults/${vaultID}/roles`, { method: 'POST', body: input });
+  }
+
+  updateRole(vaultID: string, roleID: string, input: UpdateRoleInput): Promise<RemoteRole> {
+    return this.request<RemoteRole>(`/api/vaults/${vaultID}/roles/${enc(roleID)}`, {
+      method: 'PATCH',
+      body: input,
+    });
+  }
+
+  async deleteRole(vaultID: string, roleID: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/roles/${enc(roleID)}`, { method: 'DELETE' });
+  }
+
+  async listVaultMembers(vaultID: string): Promise<RemoteMember[]> {
+    const out = await this.request<{ members: RemoteMember[] }>(`/api/vaults/${vaultID}/members`);
+    return out?.members ?? [];
+  }
+
+  async updateMemberRole(vaultID: string, userID: string, roleID: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/members/${userID}`, {
+      method: 'PATCH',
+      body: { role_id: roleID },
+    });
+  }
+
+  async removeMember(vaultID: string, userID: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/members/${userID}`, { method: 'DELETE' });
+  }
+
+  // ---- invites (vault-scoped management) ----------------------------------
+
+  async listVaultInvites(vaultID: string): Promise<Invite[]> {
+    const out = await this.request<{ invites: Invite[] }>(`/api/vaults/${vaultID}/invites`);
+    return out?.invites ?? [];
+  }
+
+  createInvite(vaultID: string, input: CreateInviteInput): Promise<InviteCreated> {
+    return this.request<InviteCreated>(`/api/vaults/${vaultID}/invites`, { method: 'POST', body: input });
+  }
+
+  async revokeInvite(vaultID: string, token: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/invites/${enc(token)}`, { method: 'DELETE' });
+  }
+
+  // ---- federation ----------------------------------------------------------
+
+  createFederationInvite(vaultID: string, input: CreateFederationInviteInput): Promise<FederationInvite> {
+    return this.request<FederationInvite>(`/api/vaults/${vaultID}/federation-invites`, {
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  async listFederationInvites(vaultID: string): Promise<FederationInvite[]> {
+    const out = await this.request<{ invites: FederationInvite[] }>(
+      `/api/vaults/${vaultID}/federation-invites`,
+    );
+    return out?.invites ?? [];
+  }
+
+  async revokeFederationInvite(vaultID: string, token: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/federation-invites/${enc(token)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async listFederations(vaultID: string): Promise<Federation[]> {
+    const out = await this.request<{ federations: Federation[] }>(`/api/vaults/${vaultID}/federations`);
+    return out?.federations ?? [];
+  }
+
+  // 409 {"error":"conflict"} when already revoked. The peer keeps its
+  // copy of the data — the UI must say so.
+  async revokeFederation(vaultID: string, federationID: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/federations/${enc(federationID)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  joinFederation(input: JoinFederationInput): Promise<FederationJoinResponse> {
+    return this.request<FederationJoinResponse>('/api/federation/join', { method: 'POST', body: input });
+  }
+
+  async listFederatedMembers(vaultID: string): Promise<FederatedMember[]> {
+    const out = await this.request<{ federated_members: FederatedMember[] }>(
+      `/api/vaults/${vaultID}/federated-members`,
+    );
+    return out?.federated_members ?? [];
+  }
+
+  addFederatedMember(vaultID: string, memberKey: string, roleID: string): Promise<FederatedMember> {
+    return this.request<FederatedMember>(`/api/vaults/${vaultID}/federated-members`, {
+      method: 'POST',
+      body: { member_key: memberKey, role_id: roleID },
+    });
+  }
+
+  async updateFederatedMemberRole(vaultID: string, memberKey: string, roleID: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/federated-members`, {
+      method: 'PATCH',
+      body: { member_key: memberKey, role_id: roleID },
+    });
+  }
+
+  async removeFederatedMember(vaultID: string, memberKey: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/federated-members`, {
+      method: 'DELETE',
+      body: { member_key: memberKey },
+    });
+  }
+
+  // ---- notes -----------------------------------------------------------------
+
+  listNotes(
+    vaultID: string,
+    opts: ListNotesOpts = {},
+  ): Promise<{ notes: NoteSummary[]; limit: number; offset: number }> {
+    const qs = new URLSearchParams();
+    if (opts.limit != null) qs.set('limit', String(opts.limit));
+    if (opts.offset != null) qs.set('offset', String(opts.offset));
+    const q = qs.toString();
+    return this.request(`/api/vaults/${vaultID}/notes${q ? '?' + q : ''}`, { signal: opts.signal });
+  }
+
+  getNote(vaultID: string, noteID: string): Promise<NoteSummary> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}`);
+  }
+
+  getNoteContent(vaultID: string, noteID: string, signal?: AbortSignal): Promise<NoteContent> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/content`, { signal });
+  }
+
+  createNote(vaultID: string, input: CreateNoteInput): Promise<NoteSummary> {
+    return this.request(`/api/vaults/${vaultID}/notes`, { method: 'POST', body: input });
+  }
+
+  updateNote(vaultID: string, noteID: string, input: UpdateNoteInput): Promise<NoteSummary> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}`, { method: 'PATCH', body: input });
+  }
+
+  async deleteNote(vaultID: string, noteID: string): Promise<void> {
+    await this.request<void>(`/api/vaults/${vaultID}/notes/${enc(noteID)}`, { method: 'DELETE' });
+  }
+
+  getNoteSnapshot(vaultID: string, noteID: string): Promise<NoteSnapshot> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/snapshot`);
+  }
+
+  applyNoteDiff(vaultID: string, noteID: string, text: string, baseClock?: string): Promise<NoteSnapshot> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/diff`, {
+      method: 'POST',
+      body: { text, base_clock: baseClock, origin: 'web' },
+    });
+  }
+}
+
+/** Build a client for one account. `getToken` is read on every request
+ *  so token rotation (re-login) is transparent. */
+export function createClient(
+  serverUrl: string,
+  getToken: () => string | null = () => null,
+  extra: Omit<AccountContext, 'serverUrl' | 'getToken'> = {},
+): ApiClient {
+  return new ApiClient({ serverUrl, getToken, ...extra });
+}
+
+// ---- routing for the module-level helpers ------------------------------------
+
+export interface ClientResolver {
+  /** Client of the account the book for `vaultID` is bound to. */
+  forVault(vaultID: string): ApiClient | null;
+  /** Client of the active book's account (or the only account). */
+  active(): ApiClient | null;
+  /** Client of a specific account key (`server_url#username`). */
+  forAccount(key: string): ApiClient | null;
+}
+
+let resolver: ClientResolver | null = null;
+
+export function setClientResolver(r: ClientResolver | null): void {
+  resolver = r;
+}
+
+function noAccount(): ApiError {
+  return new ApiError(0, {
+    error: 'no_account',
+    detail: 'Nenhuma conta deste aparelho está ligada a este livro.',
   });
 }
 
-export async function deleteNote(vaultID: string, noteID: string): Promise<void> {
-  await request<void>(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}`, {
-    method: 'DELETE',
-  });
+function vc(vaultID: string): ApiClient {
+  const c = resolver?.forVault(vaultID) ?? null;
+  if (!c) throw noAccount();
+  return c;
 }
 
-export async function getNoteSnapshot(vaultID: string, noteID: string): Promise<NoteSnapshot> {
-  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}/snapshot`);
+function ac(accountKey?: string): ApiClient {
+  const c = (accountKey ? resolver?.forAccount(accountKey) : resolver?.active()) ?? null;
+  if (!c) throw noAccount();
+  return c;
 }
 
-export async function applyNoteDiff(
-  vaultID: string,
-  noteID: string,
-  text: string,
-  baseClock?: string,
-): Promise<NoteSnapshot> {
-  return request(`/api/vaults/${vaultID}/notes/${encodeURIComponent(noteID)}/diff`, {
-    method: 'POST',
-    body: { text, base_clock: baseClock, origin: 'web' },
-  });
+// Thin wrappers. `async` so routing failures surface as rejections,
+// never synchronous throws.
+
+export async function me(accountKey?: string): Promise<SessionUser> {
+  return ac(accountKey).me();
+}
+export async function acceptInviteAsCurrentUser(token: string, accountKey?: string) {
+  return ac(accountKey).acceptInviteAsCurrentUser(token);
+}
+export async function listVaults(accountKey?: string): Promise<Vault[]> {
+  return ac(accountKey).listVaults();
+}
+export async function createVault(input: CreateVaultInput, accountKey?: string): Promise<Vault> {
+  return ac(accountKey).createVault(input);
+}
+export async function joinFederation(input: JoinFederationInput, accountKey?: string) {
+  return ac(accountKey).joinFederation(input);
+}
+
+export async function getVault(id: string) { return vc(id).getVault(id); }
+export async function renameVault(id: string, name: string) { return vc(id).renameVault(id, name); }
+export async function transferOwnership(v: string, u: string) { return vc(v).transferOwnership(v, u); }
+export async function copyVault(v: string, r: string) { return vc(v).copyVault(v, r); }
+export async function listVaultRoles(v: string) { return vc(v).listVaultRoles(v); }
+export async function createRole(v: string, i: CreateRoleInput) { return vc(v).createRole(v, i); }
+export async function updateRole(v: string, r: string, i: UpdateRoleInput) { return vc(v).updateRole(v, r, i); }
+export async function deleteRole(v: string, r: string) { return vc(v).deleteRole(v, r); }
+export async function listVaultMembers(v: string) { return vc(v).listVaultMembers(v); }
+export async function updateMemberRole(v: string, u: string, r: string) { return vc(v).updateMemberRole(v, u, r); }
+export async function removeMember(v: string, u: string) { return vc(v).removeMember(v, u); }
+export async function listVaultInvites(v: string) { return vc(v).listVaultInvites(v); }
+export async function createInvite(v: string, i: CreateInviteInput) { return vc(v).createInvite(v, i); }
+export async function revokeInvite(v: string, t: string) { return vc(v).revokeInvite(v, t); }
+export async function createFederationInvite(v: string, i: CreateFederationInviteInput) { return vc(v).createFederationInvite(v, i); }
+export async function listFederationInvites(v: string) { return vc(v).listFederationInvites(v); }
+export async function revokeFederationInvite(v: string, t: string) { return vc(v).revokeFederationInvite(v, t); }
+export async function listFederations(v: string) { return vc(v).listFederations(v); }
+export async function revokeFederation(v: string, f: string) { return vc(v).revokeFederation(v, f); }
+export async function listFederatedMembers(v: string) { return vc(v).listFederatedMembers(v); }
+export async function addFederatedMember(v: string, m: string, r: string) { return vc(v).addFederatedMember(v, m, r); }
+export async function updateFederatedMemberRole(v: string, m: string, r: string) { return vc(v).updateFederatedMemberRole(v, m, r); }
+export async function removeFederatedMember(v: string, m: string) { return vc(v).removeFederatedMember(v, m); }
+export async function listNotes(v: string, o: ListNotesOpts = {}) { return vc(v).listNotes(v, o); }
+export async function getNote(v: string, n: string) { return vc(v).getNote(v, n); }
+export async function getNoteContent(v: string, n: string, s?: AbortSignal) { return vc(v).getNoteContent(v, n, s); }
+export async function createNote(v: string, i: CreateNoteInput) { return vc(v).createNote(v, i); }
+export async function updateNote(v: string, n: string, i: UpdateNoteInput) { return vc(v).updateNote(v, n, i); }
+export async function deleteNote(v: string, n: string) { return vc(v).deleteNote(v, n); }
+export async function getNoteSnapshot(v: string, n: string) { return vc(v).getNoteSnapshot(v, n); }
+export async function applyNoteDiff(v: string, n: string, t: string, b?: string) { return vc(v).applyNoteDiff(v, n, t, b); }
+
+export function isAbortError(err: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError')
+  );
 }

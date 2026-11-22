@@ -6,6 +6,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as api from './api.ts';
+
+// Per-account routing: every vault-scoped helper goes to the client of
+// the account the book is bound to. Here: one test account.
+const BASE = 'https://lumi.test';
+function testResolver(): api.ClientResolver {
+  const c = api.createClient(BASE, () => 'tk-test');
+  return { forVault: () => c, active: () => c, forAccount: () => c };
+}
 import { ApiError, type Federation, type FederationInvite } from './types.ts';
 
 const fetchMock = vi.fn();
@@ -53,11 +61,11 @@ const sampleFederation: Federation = {
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
-  api.setToken('tk-test');
+  api.setClientResolver(testResolver());
 });
 
 afterEach(() => {
-  api.setToken(null);
+  api.setClientResolver(null);
   vi.unstubAllGlobals();
 });
 
@@ -74,7 +82,7 @@ describe('api.createFederationInvite', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federation-invites`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federation-invites`);
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({
       server_url_hint: 'https://follower.example',
@@ -103,7 +111,7 @@ describe('api.listFederationInvites', () => {
     expect(out[0].token).toBe('fed-tok-1');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federation-invites`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federation-invites`);
     expect(init.method).toBe('GET');
   });
 
@@ -120,7 +128,7 @@ describe('api.revokeFederationInvite', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(
-      `${api.API_URL}/api/vaults/v1/federation-invites/${encodeURIComponent('tok/with slash')}`,
+      `${BASE}/api/vaults/v1/federation-invites/${encodeURIComponent('tok/with slash')}`,
     );
     expect(init.method).toBe('DELETE');
   });
@@ -135,7 +143,7 @@ describe('api.listFederations', () => {
     expect(out[0].last_acked_seq).toBe(41);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federations`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federations`);
     expect(init.method).toBe('GET');
   });
 });
@@ -146,7 +154,7 @@ describe('api.revokeFederation', () => {
     await api.revokeFederation('v1', 'fed-1');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federations/fed-1`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federations/fed-1`);
     expect(init.method).toBe('DELETE');
   });
 
@@ -177,7 +185,7 @@ describe('api.joinFederation', () => {
     expect(out.federation.role).toBe('follower');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/federation/join`);
+    expect(url).toBe(`${BASE}/api/federation/join`);
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({
       home_url: 'https://home.example',
@@ -219,7 +227,7 @@ describe('api federated members', () => {
     expect(out[0].member_key).toBe('alice@https://follower.example');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federated-members`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federated-members`);
     expect(init.method).toBe('GET');
   });
 
@@ -235,7 +243,7 @@ describe('api federated members', () => {
     await api.addFederatedMember('v1', 'alice@https://follower.example', 'r1');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federated-members`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federated-members`);
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({
       member_key: 'alice@https://follower.example',
@@ -248,7 +256,7 @@ describe('api federated members', () => {
     await api.updateFederatedMemberRole('v1', 'alice@https://follower.example', 'r2');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federated-members`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federated-members`);
     expect(init.method).toBe('PATCH');
     expect(JSON.parse(init.body)).toEqual({
       member_key: 'alice@https://follower.example',
@@ -261,7 +269,7 @@ describe('api federated members', () => {
     await api.removeFederatedMember('v1', 'alice@https://follower.example');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${api.API_URL}/api/vaults/v1/federated-members`);
+    expect(url).toBe(`${BASE}/api/vaults/v1/federated-members`);
     expect(init.method).toBe('DELETE');
     expect(JSON.parse(init.body)).toEqual({ member_key: 'alice@https://follower.example' });
   });

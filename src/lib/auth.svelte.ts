@@ -1,131 +1,171 @@
-// Reactive auth store. Holds the active session and exposes
-// sign-in/sign-up/sign-out/restore lifecycle helpers. Persists the
-// session token encrypted under localStorage so a reload doesn't
-// log the user out.
+// Auth facade over the multi-account registry (SPEC-LIVROS W1).
 //
-// Persistence shape:
-//   localStorage['lumi.v2.session'] = encryptToken(JSON.stringify({
-//     token, expires_at, user: { id, username, display_name }
-//   }))
-//
-// The encryption is symmetric with a derived key — protection against
-// trivial localStorage scraping by third-party JS, NOT a hard secret.
-// True security comes from the server-side session TTL + revocation.
+// Components keep talking to `auth` (sign in, sign up, invite flows,
+// current user), but there is no single global session any more:
+//   - `auth.user` is the user of the ACTIVE BOOK's account (what
+//     ownership/capability checks in vault views must compare against);
+//   - sign-in/up take the server URL and the "Lembrar neste aparelho"
+//     flag and ADD an account; other accounts are untouched;
+//   - session loss is per account (`handleSessionLost(key)`).
 
-import { encryptToken, decryptToken } from './crypto.ts';
-import {
-  ApiError,
-  type SessionResponse,
-  type SessionUser,
-} from './types.ts';
-import * as api from './api.ts';
+import { ApiError, type SessionResponse, type SessionUser } from './types.ts';
+import { createClient, type RegisterInput } from './api.ts';
+import { accounts } from './accounts.svelte.ts';
+import { books } from './books.svelte.ts';
+import { normalizeServerUrl } from './serverurl.ts';
+import type { ServerInfo } from './types.ts';
 
-const STORAGE_KEY = 'lumi.v2.session';
-
-interface PersistedSession {
-  token: string;
-  expires_at: string;
-  user: SessionUser;
+export interface SignInInput {
+  serverUrl: string;
+  username: string;
+  password: string;
+  remember: boolean;
+  publicKey?: string | null;
 }
 
+export interface SignUpInput extends RegisterInput {
+  serverUrl: string;
+  remember: boolean;
+  publicKey?: string | null;
+}
+
+export type ProbeResult =
+  | { ok: true; serverUrl: string; info: ServerInfo | null; duplicateOf: string | null; warning: string | null }
+  | { ok: false; error: string };
+
 class AuthStore {
-  // ---- reactive surface ----
-  user = $state<SessionUser | null>(null);
-  expiresAt = $state<string | null>(null);
   initialising = $state(true);
   lastError = $state<string | null>(null);
 
-  /** True once we have a validated session. */
-  authenticated = $derived(this.user != null);
+  /** User of the active book's account (null when signed out). */
+  user = $derived.by<SessionUser | null>(() => {
+    const k = books.activeAccountKey();
+    return k ? accounts.user(k) : null;
+  });
 
-  constructor() {
-    // Any token-bearing request answering 401 / token_expired means
-    // the session is dead server-side: drop it so App.svelte routes
-    // back to the login view instead of every store showing its own
-    // "unauthorized" error.
-    api.onUnauthorized(() => this.handleSessionLost());
+  /** True once at least one account exists on this device. Accounts
+   *  that need a new sign-in still count: their books stay listed with
+   *  "Precisa entrar". */
+  authenticated = $derived(accounts.list.length > 0);
+
+  /** Active book's account key. */
+  get accountKey(): string | null {
+    return books.activeAccountKey();
   }
 
-  /** Called when the server rejects our token (REST 401 or an editor
-   *  WebSocket auth failure). Idempotent. */
-  handleSessionLost(): void {
-    if (this.user == null && api.getToken() == null) return;
-    this.clearSession();
-    this.lastError = 'Your session expired. Sign in again.';
+  /** REST 401 / editor auth failure on `key` (default: active account).
+   *  Only that account is affected. */
+  handleSessionLost(key: string | null = this.accountKey): void {
+    if (!key) return;
+    accounts.markNeedsLogin(key, 'sessão expirada');
+    this.lastError = 'Sua sessão expirou. Entre novamente.';
   }
-
-  // ---- lifecycle ----
 
   /**
-   * Read the persisted session from localStorage (if any), set the
-   * API token, and validate against /api/users/me. On 401 the
-   * persisted session is dropped silently. Call once at app boot.
+   * "Adicionar servidor" step 2 (§5): normalise the URL, refuse mixed
+   * content, read GET /api/info and detect a server already registered
+   * under another URL (same public_key). Old servers without /api/info
+   * are accepted (404) — they just lack the feed.
    */
-  async restore(): Promise<void> {
-    this.initialising = true;
+  async probeServer(input: string): Promise<ProbeResult> {
+    let serverUrl: string;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const json = await decryptToken(raw);
-      const sess = JSON.parse(json) as PersistedSession;
-      api.setToken(sess.token);
-      // Validate. If invalid (401), me() throws and we fall through.
-      const u = await api.me();
-      this.user = u;
-      this.expiresAt = sess.expires_at;
+      serverUrl = normalizeServerUrl(input);
     } catch (e) {
-      // Either the storage is corrupt, the key derivation rotated,
-      // or the server doesn't recognise us. Drop everything.
-      console.warn('auth restore failed:', e);
-      this.clearSession();
-    } finally {
-      this.initialising = false;
+      return { ok: false, error: (e as Error).message };
+    }
+    const pageOrigin = typeof location !== 'undefined' ? location.origin : '';
+    if (pageOrigin.startsWith('https:') && serverUrl.startsWith('http:')) {
+      return {
+        ok: false,
+        error:
+          'Esta página é HTTPS e o navegador bloqueia acesso a servidores http:// (conteúdo misto). Use https:// no servidor.',
+      };
+    }
+    try {
+      const info = await accounts.anonymous(serverUrl).info();
+      const dup = accounts.findByPublicKey(info?.public_key, serverUrl);
+      return {
+        ok: true,
+        serverUrl: dup ? dup.server_url : serverUrl,
+        info,
+        duplicateOf: dup ? dup.server_url : null,
+        warning: dup
+          ? `Este é o mesmo servidor já cadastrado como ${dup.server_url}; vamos usar essa URL.`
+          : null,
+      };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return { ok: true, serverUrl, info: null, duplicateOf: null, warning: null };
+      }
+      if (e instanceof ApiError && e.status === 0) {
+        const origin = pageOrigin || 'esta página';
+        return {
+          ok: false,
+          error: `Não foi possível falar com o servidor. Se ele estiver no ar, ele não aceita acesso a partir de ${origin}: peça ao administrador para incluir ${origin} em LUMI_ALLOWED_ORIGINS.`,
+        };
+      }
+      return { ok: false, error: describeError(e) };
     }
   }
 
-  async signIn(username: string, password: string): Promise<void> {
+  async signIn(input: SignInInput): Promise<string> {
     this.lastError = null;
     try {
-      const sess = await api.login(username, password);
-      await this.acceptSession(sess);
+      const serverUrl = normalizeServerUrl(input.serverUrl);
+      const sess = await accounts.anonymous(serverUrl).login(input.username, input.password);
+      return await this.acceptSession(serverUrl, sess, input.remember, input.publicKey);
     } catch (e) {
       this.lastError = describeError(e);
       throw e;
     }
   }
 
-  async signUp(input: api.RegisterInput): Promise<void> {
+  async signUp(input: SignUpInput): Promise<string> {
     this.lastError = null;
     try {
-      const sess = await api.register(input);
-      await this.acceptSession(sess);
+      const { serverUrl: raw, remember, publicKey, ...body } = input;
+      const serverUrl = normalizeServerUrl(raw);
+      const sess = await accounts.anonymous(serverUrl).register(body);
+      return await this.acceptSession(serverUrl, sess, remember, publicKey);
     } catch (e) {
       this.lastError = describeError(e);
       throw e;
     }
   }
 
-  /**
-   * Anonymous-signup variant of signUp that consumes an invite token
-   * in the same request. The invite-accept response is leaner than the
-   * regular signup — no SessionUser payload — so we follow up with
-   * api.me() to populate it. Returns the joined vault summary so the
-   * caller can hop the user straight into it.
-   */
+  /** New account through an invite link; returns the joined vault id. */
   async signUpViaInvite(
     inviteToken: string,
-    input: api.RegisterInput,
-  ): Promise<{ vaultID: string }> {
+    input: SignUpInput,
+  ): Promise<{ vaultID: string; accountKey: string }> {
     this.lastError = null;
     try {
-      const resp = await api.acceptInviteWithSignup(inviteToken, input);
-      api.setToken(resp.token);
-      const user = await api.me();
-      await this.acceptSession({
-        token: resp.token,
-        expires_at: resp.expires_at,
-        user,
-      });
+      const { serverUrl: raw, remember, publicKey, ...body } = input;
+      const serverUrl = normalizeServerUrl(raw);
+      const resp = await accounts.anonymous(serverUrl).acceptInviteWithSignup(inviteToken, body);
+      // One-off call with the fresh token before the account exists.
+      const me = await fetchMe(serverUrl, resp.token);
+      const key = await this.acceptSession(
+        serverUrl,
+        { token: resp.token, expires_at: resp.expires_at, user: me },
+        remember,
+        publicKey,
+      );
+      return { vaultID: resp.vault.id, accountKey: key };
+    } catch (e) {
+      this.lastError = describeError(e);
+      throw e;
+    }
+  }
+
+  /** Accept an invite as an existing account (default: active). */
+  async acceptInvite(inviteToken: string, key: string | null = this.accountKey): Promise<{ vaultID: string }> {
+    this.lastError = null;
+    try {
+      if (!key) throw new ApiError(0, { error: 'no_account', detail: 'Entre numa conta primeiro.' });
+      const resp = await accounts.client(key).acceptInviteAsCurrentUser(inviteToken);
+      await books.refreshAccount(key);
       return { vaultID: resp.vault.id };
     } catch (e) {
       this.lastError = describeError(e);
@@ -133,99 +173,80 @@ class AuthStore {
     }
   }
 
-  /**
-   * Accept an invite for an already-signed-in user. Session is
-   * unchanged; returns the joined vault id so callers can refresh the
-   * vault list and jump straight to it.
-   */
-  async acceptInvite(inviteToken: string): Promise<{ vaultID: string }> {
-    this.lastError = null;
-    try {
-      const resp = await api.acceptInviteAsCurrentUser(inviteToken);
-      return { vaultID: resp.vault.id };
-    } catch (e) {
-      this.lastError = describeError(e);
-      throw e;
-    }
+  /** "Sair deste aparelho" for one account (default: active). Its
+   *  books leave the list too. */
+  async signOut(key: string | null = this.accountKey): Promise<void> {
+    if (!key) return;
+    await accounts.signOut(key);
   }
 
-  async signOut(): Promise<void> {
-    // Best-effort server logout. Even if it fails (network, expired
-    // token), drop local state.
-    try {
-      await api.logout();
-    } catch {
-      // ignore
+  private async acceptSession(
+    serverUrl: string,
+    sess: SessionResponse,
+    remember: boolean,
+    publicKey?: string | null,
+  ): Promise<string> {
+    const acct = await accounts.add(
+      {
+        server_url: serverUrl,
+        username: sess.user.username,
+        user_id: sess.user.id,
+        display_name: sess.user.display_name,
+        added_at: new Date().toISOString(),
+        expires_at: sess.expires_at ?? null,
+        remember,
+        public_key: publicKey ?? null,
+      },
+      sess.token,
+    );
+    await books.refreshAccount(acct.key, true);
+    if (!books.active) {
+      const first = books.ordered.find((b) => books.accountKeyOf(b) === acct.key);
+      if (first) books.setActive(first.id);
     }
-    this.clearSession();
-  }
-
-  // ---- helpers ----
-
-  private async acceptSession(sess: SessionResponse): Promise<void> {
-    api.setToken(sess.token);
-    this.user = sess.user;
-    this.expiresAt = sess.expires_at;
-    const persisted: PersistedSession = {
-      token: sess.token,
-      expires_at: sess.expires_at,
-      user: sess.user,
-    };
-    try {
-      const encrypted = await encryptToken(JSON.stringify(persisted));
-      localStorage.setItem(STORAGE_KEY, encrypted);
-    } catch (e) {
-      // Persistence failure is non-fatal — user just won't survive
-      // a reload.
-      console.warn('auth persist failed:', e);
-    }
-  }
-
-  private clearSession(): void {
-    api.setToken(null);
-    this.user = null;
-    this.expiresAt = null;
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // ignore
-    }
+    return acct.key;
   }
 }
 
-function describeError(err: unknown): string {
+function fetchMe(serverUrl: string, token: string): Promise<SessionUser> {
+  return createClient(serverUrl, () => token).me();
+}
+
+export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
       case 'invalid_credentials':
-        return 'Invalid username or password.';
+        return 'Usuário ou senha inválidos.';
       case 'registration_closed':
-        return 'This server does not accept sign-ups. Ask an admin for an invite link.';
+        return 'Este servidor não aceita cadastros. Peça um convite a um administrador.';
       case 'consent_required':
-        return 'You must accept the Terms of Service and Privacy Policy.';
+        return 'Você precisa aceitar os Termos de Uso e a Política de Privacidade.';
       case 'username_taken':
-        return 'That username is already in use.';
+        return 'Esse nome de usuário já está em uso.';
       case 'validation_failed':
-        return err.detail ?? 'The form has invalid fields.';
+        return err.detail ?? 'O formulário tem campos inválidos.';
       case 'rate_limited':
-        return 'Too many attempts. Wait a moment and try again.';
+        return 'Muitas tentativas. Aguarde um pouco e tente de novo.';
       case 'token_expired':
       case 'unauthorized':
-        return 'Your session expired. Sign in again.';
+        return 'Sua sessão expirou. Entre novamente.';
       case 'invite_expired':
-        return 'This invite has expired. Ask for a new one.';
+        return 'Este convite expirou. Peça um novo.';
       case 'invite_revoked':
-        return 'This invite was revoked.';
+        return 'Este convite foi revogado.';
       case 'invite_exhausted':
-        return 'This invite has already been used.';
+        return 'Este convite já foi usado.';
       case 'missing_token':
       case 'token_invalid':
-        return 'This invite link is malformed or invalid.';
+        return 'Este link de convite é inválido.';
+      case 'network_error':
+        return 'Não foi possível falar com o servidor.';
       default:
         return err.detail ?? err.code;
     }
   }
   if (err instanceof Error) return err.message;
-  return 'Unknown error.';
+  return 'Erro desconhecido.';
 }
 
 export const auth = new AuthStore();

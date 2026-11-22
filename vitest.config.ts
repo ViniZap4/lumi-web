@@ -23,5 +23,6 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.ts'],
     css: false,
     clearMocks: true,
+    setupFiles: ['src/test/setup.ts'],
   },
 })

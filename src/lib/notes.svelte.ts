@@ -19,11 +19,23 @@ import * as api from './api.ts';
 //   - `listSeq` orders list fetches (refresh); only the newest wins.
 //   - `contentSeq` orders content fetches (select / update refetch).
 
+/** Server page size cap (internal/notes maxLimit). */
+export const PAGE_SIZE = 200;
+/** Pages fetched concurrently after the first full page. */
+const PAGE_CONCURRENCY = 4;
+/** Hard stop (100k notes) against a server that ignores `offset`. */
+const MAX_PAGES = 500;
+
 class NotesStore {
   vaultID = $state<string | null>(null);
 
-  list = $state<NoteSummary[]>([]);
+  // `$state.raw`: the list is only ever replaced, never mutated in
+  // place, and deep-proxying 10k summaries would cost more than the
+  // whole tree derivation. Every write below is a reassignment.
+  list = $state.raw<NoteSummary[]>([]);
   loadingList = $state(false);
+  /** Initial load published the first page; later pages still loading. */
+  loadingMore = $state(false);
   listError = $state<string | null>(null);
   // HTTP status behind listError (null for non-API failures). Lets the
   // view special-case 403 — e.g. a federated replica whose home server
@@ -75,9 +87,9 @@ class NotesStore {
     this.listError = null;
     this.listErrorStatus = null;
     try {
-      const out = await api.listNotes(vaultID, { limit: 200, signal: ctrl.signal });
+      const all = await this.fetchAll(vaultID, ctrl.signal, () => seq === this.listSeq && vaultID === this.vaultID);
       if (seq !== this.listSeq || vaultID !== this.vaultID) return;
-      this.list = out.notes;
+      this.list = all;
       // Keep selectedID stable if the note still exists; drop it otherwise.
       if (this.selectedID && !this.list.some((n) => n.id === this.selectedID)) {
         this.selectedID = null;
@@ -93,9 +105,45 @@ class NotesStore {
     } finally {
       if (seq === this.listSeq) {
         this.loadingList = false;
+        this.loadingMore = false;
         this.listAbort = null;
       }
     }
+  }
+
+  /**
+   * Every note of the vault (no 200 cap): offset pages of PAGE_SIZE,
+   * the first alone, then PAGE_CONCURRENCY at a time until a short
+   * page. Duplicates (a note that moved between pages while paging —
+   * the server orders by updated_at) are dropped, first copy wins.
+   * On an initial load (empty list) the first page is published right
+   * away so the browser is usable while the rest streams in.
+   */
+  private async fetchAll(vaultID: string, signal: AbortSignal, current: () => boolean): Promise<NoteSummary[]> {
+    const first = await api.listNotes(vaultID, { limit: PAGE_SIZE, offset: 0, signal });
+    const out: NoteSummary[] = [...first.notes];
+    if (first.notes.length < PAGE_SIZE) return out;
+    if (current() && this.list.length === 0) {
+      this.list = out.slice();
+      this.loadingMore = true;
+    }
+    let page = 1;
+    let done = false;
+    while (!done && page < MAX_PAGES) {
+      const wave = [];
+      for (let i = 0; i < PAGE_CONCURRENCY && page < MAX_PAGES; i++, page++) {
+        wave.push(api.listNotes(vaultID, { limit: PAGE_SIZE, offset: page * PAGE_SIZE, signal }));
+      }
+      const results = await Promise.all(wave);
+      if (!current()) return out;
+      for (const r of results) {
+        if (done) break;
+        out.push(...r.notes);
+        if (r.notes.length < PAGE_SIZE) done = true;
+      }
+    }
+    const seen = new Set<string>();
+    return out.filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
   }
 
   async select(id: string | null): Promise<void> {

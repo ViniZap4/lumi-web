@@ -8,8 +8,23 @@ export interface AccountModalState {
   username: string | null;
 }
 
+export type SettingsSection = 'editor' | 'vim' | 'appearance' | 'keys' | 'storage' | 'account';
+
 class UIState {
   themePickerOpen = $state(false);
+  /** Full-screen settings view (null = closed). */
+  settings = $state<SettingsSection | null>(null);
+  /** `?` keymap overlay. */
+  helpOpen = $state(false);
+
+  openSettings(section: SettingsSection = 'editor'): void {
+    this.settings = section;
+  }
+
+  closeSettings(): void {
+    this.settings = null;
+  }
+
   accountModal = $state<AccountModalState | null>(null);
   createBookOpen = $state(false);
 

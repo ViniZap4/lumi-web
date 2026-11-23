@@ -10,6 +10,14 @@
   import VaultsView from './views/VaultsView.svelte';
   import VaultHomeView from './views/VaultHomeView.svelte';
   import ThemePickerModal from './components/ThemePickerModal.svelte';
+  // Settings is a full view loaded on first open (keeps the boot chunk lean).
+  type SettingsViewT = typeof import('./views/SettingsView.svelte').default;
+  let SettingsView = $state<SettingsViewT | null>(null);
+  $effect(() => {
+    if (uiState.settings && !SettingsView) {
+      void import('./views/SettingsView.svelte').then((m) => (SettingsView = m.default));
+    }
+  });
   import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
 
   onMount(async () => {
@@ -36,7 +44,7 @@
 </script>
 
 {#if auth.initialising}
-  <div class="boot">…</div>
+  <div class="boot"><span class="ui-wordmark"><span class="mark"></span>lumi</span></div>
 {:else if route === 'login'}
   <LoginView />
 {:else if route === 'vaults'}
@@ -67,6 +75,10 @@
   </div>
 {/if}
 
+{#if uiState.settings && route !== 'login' && SettingsView}
+  <SettingsView />
+{/if}
+
 {#if uiState.themePickerOpen}
   <ThemePickerModal />
 {/if}
@@ -74,13 +86,6 @@
 <OfflineRescueBanner />
 
 <style>
-  :global(:root) {
-    color-scheme: dark;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: var(--color-background);
-    color: var(--color-text);
-  }
-
   :global(body) {
     margin: 0;
     background: var(--color-background);
@@ -89,17 +94,20 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
+    backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: var(--sp-4);
     z-index: 200;
   }
   .modal-panel {
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-    max-width: 92vw;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+    width: min(420px, 100%);
     max-height: 92vh;
     overflow: auto;
     outline: none;

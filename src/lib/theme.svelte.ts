@@ -71,6 +71,9 @@ function applyToDocument(theme: Theme): void {
   r.setProperty('--color-warning', theme.warning);
   r.setProperty('--color-info', theme.info);
   theme.logoColors.forEach((c, i) => r.setProperty(`--color-logo-${i}`, c));
+  // Native controls (scrollbars, form widgets) follow the theme.
+  r.setProperty('color-scheme', theme.isDark ? 'dark' : 'light');
+  document.documentElement.dataset.theme = theme.isDark ? 'dark' : 'light';
 }
 
 class ThemeStore {

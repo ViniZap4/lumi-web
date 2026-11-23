@@ -144,50 +144,39 @@
 </div>
 
 <style>
-  .book-switcher {
-    position: relative;
-    border-bottom: 1px solid var(--color-separator, var(--color-border));
-  }
+  .book-switcher { position: relative; }
   .switcher-button {
-    width: 100%;
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.55rem 0.75rem;
+    gap: 6px;
+    max-width: 100%;
+    height: 28px;
+    padding: 0 8px;
     background: transparent;
     border: none;
+    border-radius: var(--radius-sm);
     color: var(--color-text);
-    font-family: inherit;
-    font-size: 0.9rem;
+    font-size: var(--text-sm);
     font-weight: 600;
     cursor: pointer;
     text-align: left;
   }
   .switcher-button:hover,
-  .switcher-button:focus-visible {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-  }
-  .switcher-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .caret {
-    color: var(--color-text-dim, var(--color-muted));
-  }
+  .switcher-button:focus-visible { background: var(--tint-hover); }
+  .switcher-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .caret { color: var(--color-text-dim); font-size: 10px; }
   .switcher-pop {
     position: absolute;
-    left: 0.4rem;
-    right: 0.4rem;
-    top: calc(100% + 2px);
+    left: 0;
+    top: calc(100% + 6px);
     z-index: 50;
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-    padding: 0.3rem 0;
-    min-width: 240px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-pop);
+    padding: 4px;
+    min-width: 260px;
+    animation: ui-rise 120ms var(--ease);
   }
   .switcher-list {
     list-style: none;
@@ -197,58 +186,46 @@
     overflow-y: auto;
     outline: none;
   }
-  .switcher-list:focus-visible {
-    box-shadow: inset 0 0 0 1px var(--color-secondary);
-  }
   .group {
-    padding: 0.35rem 0.75rem 0.15rem;
-    font-size: 0.72rem;
-    color: var(--color-text-dim, var(--color-muted));
-    text-transform: lowercase;
+    padding: 8px 8px 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
   }
   .opt {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.35rem 0.75rem;
+    gap: 8px;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.86rem;
+    font-size: var(--text-sm);
   }
-  .opt.cursor {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-  }
-  .opt.current .opt-name {
-    color: var(--color-primary);
-  }
-  .opt-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .opt-meta {
-    font-size: 0.72rem;
-    color: var(--color-text-dim, var(--color-muted));
-  }
+  .opt.cursor { background: var(--tint-active); }
+  .opt.current .opt-name { color: var(--color-primary); font-weight: 600; }
+  .opt-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt-meta { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-dim); }
   .switcher-actions {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 0.3rem;
-    padding: 0.45rem 0.75rem 0.3rem;
-    border-top: 1px solid var(--color-separator, var(--color-border));
-    margin-top: 0.3rem;
+    align-items: stretch;
+    gap: 1px;
+    padding: 4px 0 0;
+    border-top: 1px solid var(--hairline);
+    margin-top: 4px;
   }
   .link-button {
     background: transparent;
     border: none;
-    color: var(--color-secondary);
-    font-family: inherit;
-    font-size: 0.82rem;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
     cursor: pointer;
-    padding: 0;
+    text-align: left;
+    padding: 6px 8px;
   }
-  .link-button:hover {
-    text-decoration: underline;
-  }
+  .link-button:hover { background: var(--tint-hover); color: var(--color-text); }
 </style>

@@ -15,6 +15,9 @@
   import VaultCreateModal from '../components/VaultCreateModal.svelte';
   import FederationJoinModal from '../components/FederationJoinModal.svelte';
   import SyncDot from '../components/SyncDot.svelte';
+  import CommandLegend from '../components/CommandLegend.svelte';
+  import { legendFor } from '../lib/legend.ts';
+  import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
   import type { Account } from '../lib/accounts.svelte.ts';
   import type { RescuedText } from '../lib/offline-store.ts';
@@ -74,7 +77,7 @@
 
   function handleKey(e: KeyboardEvent): void {
     if (e.defaultPrevented || isEditableTarget(e.target)) return;
-    if (uiState.accountModal || uiState.createBookOpen || showJoinFederated) return;
+    if (uiState.accountModal || uiState.createBookOpen || showJoinFederated || uiState.settings || signOutAsk) return;
     const c = chord.feed(e);
     if (c) {
       e.preventDefault();
@@ -95,9 +98,12 @@
     } else if (e.key === 'G') {
       e.preventDefault();
       cursor = Math.max(0, n - 1);
-    } else if (e.key === 'r') {
+    } else if (e.key === 'r' || e.key === 'R') {
       e.preventDefault();
       void books.refreshAll();
+    } else if (e.key === ',' && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      uiState.openSettings('appearance');
     } else if (e.key === 'Escape' && books.active) {
       e.preventDefault();
       books.closePicker();
@@ -107,12 +113,17 @@
 
 <div class="vaults-view">
   <header class="topbar">
-    <div class="brand">lumi</div>
-    <div class="who">
+    <span class="ui-wordmark"><span class="mark"></span>lumi</span>
+    <div class="top-actions">
       {#if books.active}
-        <button class="link-button" onclick={() => books.closePicker()} type="button">voltar para {books.active.name}</button>
+        <button class="ui-btn ghost sm" onclick={() => books.closePicker()} type="button">← {books.active.name}</button>
       {/if}
-      <button class="link-button" onclick={() => uiState.openThemePicker()} type="button">Theme</button>
+      <button class="ui-btn ghost sm icon" onclick={() => uiState.openThemePicker()} type="button" title="Theme" aria-label="Theme">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor"/></svg>
+      </button>
+      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('appearance')} type="button" title="Settings (,)" aria-label="Settings">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.5" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+      </button>
     </div>
   </header>
 
@@ -122,9 +133,9 @@
         <span>{b.text}</span>
         <span class="banner-actions">
           {#if b.kind === 'dedupe'}
-            <button class="link-button" type="button" onclick={() => books.dismissBanner(b.id)}>Manter</button>
+            <button class="ui-link" type="button" onclick={() => books.dismissBanner(b.id)}>Manter</button>
             <button
-              class="link-button"
+              class="ui-link"
               type="button"
               onclick={() => {
                 const bk = b.vault_id ? books.bookForVault(b.vault_id) : null;
@@ -133,7 +144,7 @@
               }}
             >Trocar servidor…</button>
           {:else}
-            <button class="link-button" type="button" aria-label="Fechar aviso" onclick={() => books.dismissBanner(b.id)}>ok</button>
+            <button class="ui-link" type="button" aria-label="Fechar aviso" onclick={() => books.dismissBanner(b.id)}>ok</button>
           {/if}
         </span>
       </div>
@@ -145,17 +156,19 @@
           Cada livro é um espaço separado de notas. Ele pode ficar só neste aparelho ou ligado a um
           servidor, e cada livro ligado sincroniza com um único servidor.
         </p>
-        <button class="link-button" type="button" onclick={() => books.dismissOnboarding()}>entendi</button>
+        <button class="ui-btn sm" type="button" onclick={() => books.dismissOnboarding()}>entendi</button>
       </div>
     {/if}
 
     <div class="title-row">
       <h1>Livros</h1>
       <div class="title-actions">
-        <button class="link-button" onclick={() => (uiState.createBookOpen = true)} type="button">Novo livro…</button>
-        <button class="link-button" onclick={() => uiState.openAddServer()} type="button">Adicionar servidor…</button>
-        <button class="link-button" onclick={() => (showJoinFederated = true)} type="button">Join federated vault</button>
-        <button class="link-button" onclick={() => sync.retryAll()} type="button">Refresh</button>
+        <button class="ui-btn primary sm" onclick={() => (uiState.createBookOpen = true)} type="button">Novo livro</button>
+        <button class="ui-btn sm" onclick={() => uiState.openAddServer()} type="button">Adicionar servidor</button>
+        <button class="ui-btn ghost sm" onclick={() => (showJoinFederated = true)} type="button">Join federated vault</button>
+        <button class="ui-btn ghost sm icon" onclick={() => sync.retryAll()} type="button" title="Refresh (R)" aria-label="Refresh">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
     </div>
 
@@ -168,15 +181,17 @@
         <div class="placeholder">Loading…</div>
       {:else}
         <div class="placeholder" data-testid="empty-books">
-          <p>Nenhum livro ainda</p>
-          <button class="link-button" type="button" onclick={() => (uiState.createBookOpen = true)}>Novo livro</button>
-          ·
-          <button class="link-button" type="button" onclick={() => uiState.openAddServer()}>Adicionar servidor</button>
+          <p class="empty-title">Nenhum livro ainda</p>
+          <p class="empty-sub">Crie um livro neste aparelho ou conecte um servidor lumi.</p>
+          <div class="empty-actions">
+            <button class="ui-btn primary sm" type="button" onclick={() => (uiState.createBookOpen = true)}>Novo livro</button>
+            <button class="ui-btn sm" type="button" onclick={() => uiState.openAddServer()}>Adicionar servidor</button>
+          </div>
         </div>
       {/if}
     {:else}
       {#each books.groups as g (g.server_url)}
-        <h2 class="group">{serverLabel(g.server_url)}</h2>
+        <h2 class="ui-eyebrow group">{serverLabel(g.server_url)}</h2>
         <ul class="vault-list" role="listbox" aria-label={`Livros em ${serverLabel(g.server_url)}`}>
           {#each g.books as b (b.id)}
             {@const i = order.findIndex((x) => x.id === b.id)}
@@ -184,6 +199,7 @@
             <li
               class="vault-row"
               class:active={cursor === i}
+              class:current={b.id === books.activeID}
               role="option"
               aria-selected={b.id === books.activeID}
               tabindex="0"
@@ -191,15 +207,16 @@
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); books.setActive(b.id); } }}
               onmouseenter={() => (cursor = i)}
             >
+              <span class="glyph" aria-hidden="true">{b.name.slice(0, 1).toUpperCase()}</span>
               <div class="vault-main">
-                <span class="vault-name"><SyncDot state={st.state} pending={st.pending} /> {b.name}</span>
+                <span class="vault-name">{b.name} <SyncDot state={st.state} pending={st.pending} /></span>
                 <span class="vault-slug">{b.account}{st.reason ? ` · ${st.reason}` : ''}</span>
               </div>
               <div class="vault-meta">
                 {#if books.revoked[b.id]}
-                  <button class="link-button" type="button" onclick={(e) => { e.stopPropagation(); books.removeFromList(b.id); }}>Remover da lista</button>
+                  <button class="ui-btn sm" type="button" onclick={(e) => { e.stopPropagation(); books.removeFromList(b.id); }}>Remover da lista</button>
                 {:else if st.state === 'needs_login'}
-                  <button class="link-button" type="button" onclick={(e) => { e.stopPropagation(); uiState.openSignIn(b.server_url, b.account); }}>Entrar</button>
+                  <button class="ui-btn sm" type="button" onclick={(e) => { e.stopPropagation(); uiState.openSignIn(b.server_url, b.account); }}>Entrar</button>
                 {/if}
                 {#if i < 9}<kbd>g{i + 1}</kbd>{/if}
               </div>
@@ -207,29 +224,31 @@
           {/each}
         </ul>
       {/each}
-      <div class="hint">
-        <kbd>j</kbd>/<kbd>k</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>g1</kbd>–<kbd>g9</kbd> livro &middot; <kbd>r</kbd> refresh
-      </div>
     {/if}
 
-    <h2 class="group accounts-title">contas neste aparelho</h2>
+    <h2 class="ui-eyebrow group accounts-title">contas neste aparelho</h2>
     <ul class="accounts">
       {#each accounts.list as a (a.key)}
         <li class="account-row">
-          <span>
-            {a.display_name || a.username} <span class="vault-slug">{a.username} @ {serverLabel(a.server_url)}{a.remember ? '' : ' · só nesta aba'}</span>
+          <span class="avatar" aria-hidden="true">{(a.display_name || a.username).slice(0, 1).toUpperCase()}</span>
+          <span class="account-main">
+            <span class="account-name">{a.display_name || a.username}</span>
+            <span class="vault-slug">{a.username} @ {serverLabel(a.server_url)}{a.remember ? '' : ' · só nesta aba'}</span>
           </span>
           <span class="banner-actions">
             {#if a.status === 'needs_login'}
               <span class="needs">precisa entrar</span>
-              <button class="link-button" type="button" onclick={() => uiState.openSignIn(a.server_url, a.username)}>Entrar</button>
+              <button class="ui-btn sm" type="button" onclick={() => uiState.openSignIn(a.server_url, a.username)}>Entrar</button>
             {/if}
-            <button class="link-button" type="button" onclick={() => void requestSignOut(a)}>Sair deste aparelho</button>
+            <button class="ui-btn ghost sm" type="button" onclick={() => void requestSignOut(a)}>Sair deste aparelho</button>
           </span>
         </li>
       {/each}
     </ul>
   </main>
+  {#if editorSettings.value.legend}
+    <CommandLegend items={legendFor('books')} mode="books" />
+  {/if}
 </div>
 
 {#if uiState.createBookOpen}
@@ -256,9 +275,9 @@
         {/each}
       </ul>
       <div class="modal-actions">
-        <button class="primary-button" type="button" disabled={signingOut} onclick={() => void confirmSignOut(true)}>Baixar e sair</button>
-        <button class="link-button danger" type="button" disabled={signingOut} onclick={() => void confirmSignOut(false)}>Sair sem baixar</button>
-        <button class="link-button" type="button" onclick={() => (signOutAsk = null)}>Cancelar</button>
+        <button class="ui-btn ghost" type="button" onclick={() => (signOutAsk = null)}>Cancelar</button>
+        <button class="ui-btn danger" type="button" disabled={signingOut} onclick={() => void confirmSignOut(false)}>Sair sem baixar</button>
+        <button class="ui-btn primary" type="button" disabled={signingOut} onclick={() => void confirmSignOut(true)}>Baixar e sair</button>
       </div>
     </div>
   </div>
@@ -275,228 +294,190 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
+    backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: var(--sp-4);
     z-index: 200;
   }
   .modal-panel {
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-    max-width: min(32rem, 92vw);
-    padding: 1rem 1.25rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+    width: min(30rem, 100%);
+    padding: var(--sp-5);
     outline: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
   }
-  .modal-panel h2 { margin: 0 0 0.5rem; font-size: 1rem; }
-  .modal-body { font-size: 0.85rem; color: var(--color-text-dim, var(--color-muted)); }
-  .pending-list { font-size: 0.85rem; max-height: 10rem; overflow: auto; }
-  .modal-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
-  .link-button.danger { color: var(--color-error); }
-  .primary-button {
-    padding: 0.4rem 0.8rem;
-    background: var(--color-primary);
-    border: none;
-    border-radius: 4px;
-    color: var(--color-background);
-    font-family: inherit;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .primary-button:disabled { opacity: 0.5; cursor: progress; }
+  .modal-panel h2 { font-size: var(--text-lg); font-weight: 600; }
+  .modal-body { font-size: var(--text-sm); color: var(--color-text-dim); }
+  .pending-list { font-size: var(--text-sm); max-height: 10rem; overflow: auto; padding-left: var(--sp-4); }
+  .modal-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+
   .vaults-view {
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
     background: var(--color-background);
     color: var(--color-text);
     display: flex;
     flex-direction: column;
   }
-
   .topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 1.25rem;
-    border-bottom: 1px solid var(--color-separator, var(--color-border));
+    height: 44px;
+    padding: 0 var(--sp-4);
+    border-bottom: 1px solid var(--hairline);
+    flex: none;
   }
-
-  .brand {
-    font-weight: 700;
-    color: var(--color-primary);
-    letter-spacing: 0.02em;
-  }
-
-  .who {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.85rem;
-  }
-
+  .top-actions { display: flex; gap: var(--sp-1); align-items: center; }
 
   .content {
-    max-width: 720px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 1.5rem 1.25rem;
-    box-sizing: border-box;
     flex: 1;
+    overflow-y: auto;
+    width: 100%;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: var(--sp-6) var(--sp-4) var(--sp-7);
   }
-
   .title-row {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 1rem;
-  }
-
-  .title-row h1 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: var(--color-text);
-    font-weight: 600;
-  }
-  .title-actions {
-    display: flex;
-    gap: 0.6rem;
     align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--sp-5);
   }
+  .title-row h1 {
+    font-size: var(--text-xl);
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .title-actions { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 
-  .placeholder,
-  .error {
-    padding: 2rem;
+  .placeholder {
+    padding: var(--sp-7) var(--sp-4);
     text-align: center;
-    color: var(--color-text-dim, var(--color-muted));
-    border: 1px dashed var(--color-border, var(--color-muted));
-    border-radius: 6px;
+    color: var(--color-text-dim);
+    border: 1px dashed var(--hairline);
+    border-radius: var(--radius-lg);
   }
-  .error {
+  .empty-title { color: var(--color-text); font-weight: 600; margin-bottom: var(--sp-1); }
+  .empty-sub { font-size: var(--text-sm); margin-bottom: var(--sp-4); }
+  .empty-actions { display: inline-flex; gap: var(--sp-2); }
+  .error.small {
+    padding: var(--sp-2) var(--sp-3);
+    margin-bottom: var(--sp-3);
+    font-size: var(--text-sm);
     color: var(--color-error);
-    border-color: var(--color-error);
+    border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+    border-radius: var(--radius);
   }
 
-  .vault-list {
+  .group { margin: var(--sp-5) 0 var(--sp-2); font-weight: 400; }
+  .group:first-of-type { margin-top: 0; }
+  .vault-list, .accounts {
     list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    overflow: hidden;
   }
-
   .vault-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0.7rem 0.9rem;
-    background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
+    gap: var(--sp-3);
+    padding: 10px var(--sp-3);
     cursor: pointer;
-    transition: border-color 80ms ease;
+    position: relative;
+    outline: none;
   }
-
-  .vault-row.active {
-    border-color: var(--color-primary);
-    background: var(--color-selected-bg, var(--color-overlay-bg));
+  .vault-row + .vault-row, .account-row + .account-row { border-top: 1px solid var(--hairline); }
+  .vault-row.active { background: var(--tint-hover); }
+  .vault-row.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-primary);
   }
-
-  .vault-main {
+  .glyph, .avatar {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    display: grid;
+    place-items: center;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-primary);
+    background: var(--tint-primary);
+  }
+  .avatar { border-radius: 50%; color: var(--color-secondary); background: color-mix(in srgb, var(--color-secondary) 12%, transparent); }
+  .vault-row.current .glyph { background: var(--color-primary); color: var(--color-background); }
+  .vault-main, .account-main {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 1px;
   }
-
-  .vault-name {
-    color: var(--color-text);
-    font-weight: 600;
+  .vault-name, .account-name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-weight: 550;
+    font-size: var(--text-md);
   }
-
   .vault-slug {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.8rem;
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+  .vault-meta { display: inline-flex; gap: var(--sp-2); align-items: center; }
 
-  .vault-meta {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.78rem;
-  }
-
-  .hint {
-    margin-top: 1.25rem;
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.8rem;
-    text-align: center;
-  }
-
-  kbd {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 3px;
-    padding: 0.05rem 0.35rem;
-    font-family: inherit;
-    font-size: 0.78rem;
-    color: var(--color-secondary);
-  }
-
-  .link-button {
-    background: transparent;
-    border: none;
-    color: var(--color-secondary);
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    padding: 0;
-  }
-  .link-button:hover {
-    text-decoration: underline;
-  }
   .banner, .onboarding {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 1rem;
-    padding: 0.6rem 0.8rem;
-    margin-bottom: 0.75rem;
-    border: 1px solid var(--color-primary);
-    border-radius: 6px;
-    font-size: 0.85rem;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    margin-bottom: var(--sp-3);
+    background: var(--tint-primary);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+    border-radius: var(--radius);
+    font-size: var(--text-sm);
   }
-  .onboarding p { margin: 0; }
   .banner-actions {
     display: inline-flex;
-    gap: 0.6rem;
+    gap: var(--sp-2);
     align-items: center;
     white-space: nowrap;
   }
-  .group {
-    font-size: 0.78rem;
-    font-weight: 400;
-    color: var(--color-text-dim, var(--color-muted));
-    margin: 1rem 0 0.4rem;
-    text-transform: lowercase;
-  }
-  .accounts-title { margin-top: 2rem; }
-  .accounts {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    font-size: 0.85rem;
-  }
+  .accounts-title { margin-top: var(--sp-6); }
   .account-row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 1rem;
+    gap: var(--sp-3);
+    padding: 10px var(--sp-3);
+    font-size: var(--text-sm);
   }
-  .needs { color: var(--color-warning, var(--color-secondary)); font-size: 0.78rem; }
-  .error.small { padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.82rem; }
-  .vault-meta { display: inline-flex; gap: 0.6rem; align-items: center; }
-  .title-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .needs { color: var(--color-warning); font-size: var(--text-xs); }
+
+  @media (max-width: 560px) {
+    .content { padding-top: var(--sp-5); }
+    .title-actions .ghost:not(.icon) { display: none; }
+    .account-row { flex-wrap: wrap; }
+    .account-row .banner-actions { width: 100%; justify-content: flex-end; }
+  }
 </style>

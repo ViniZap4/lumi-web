@@ -182,160 +182,186 @@
 </script>
 
 <div class="login-view" class:embedded>
-  {#if !embedded}
-    <div class="brand">lumi</div>
-    <div class="subtitle">collaborative markdown vaults</div>
-  {:else}
-    <h2 class="embedded-title">{presetUsername ? 'Entrar' : 'Adicionar servidor'}</h2>
-  {/if}
+  <div class="card">
+    {#if !embedded}
+      <header class="head">
+        <span class="ui-wordmark brand"><span class="mark"></span>lumi</span>
+        <p class="subtitle">Markdown notes, local-first, synced to your own server.</p>
+      </header>
+    {:else}
+      <h2 class="embedded-title">{presetUsername ? 'Entrar' : 'Adicionar servidor'}</h2>
+    {/if}
 
-  {#if inviteToken}
-    <div class="invite-banner">
-      You've been invited to a vault. Pick <strong>Create account</strong> if you're
-      new here, or <strong>Sign in</strong> if you already have an account on this
-      server — either way you'll join the vault on submit.
-    </div>
-  {/if}
-
-  <div class="mode-tabs" role="tablist">
-    <button
-      class="mode-tab"
-      class:active={mode === 'signin'}
-      onclick={() => setMode('signin')}
-      type="button"
-    >Sign in</button>
-    <button
-      class="mode-tab"
-      class:active={mode === 'signup'}
-      onclick={() => setMode('signup')}
-      type="button"
-    >Create account</button>
-  </div>
-
-  <form class="login-form" onsubmit={onSubmit}>
-    <label class="field-label" for="lumi-server-url">servidor</label>
-    <input
-      id="lumi-server-url"
-      type="url"
-      class="login-input"
-      placeholder="https://lumi.exemplo.com"
-      autocomplete="url"
-      inputmode="url"
-      bind:value={serverInput}
-      onblur={() => { if (serverInput.trim()) void runProbe(); }}
-      oninput={() => { probe = null; probedFor = null; }}
-      disabled={submitting || !!presetServer}
-      required
-    />
-    {#if probing}
-      <div class="server-note">verificando servidor…</div>
-    {:else if probe && !probe.ok}
-      <div class="login-error" role="alert">{probe.error}</div>
-    {:else if probe && probe.ok}
-      <div class="server-note" data-testid="server-info">
-        {#if probe.info?.name}{probe.info.name}{:else}{serverLabel(probe.serverUrl)}{/if}
-        {#if probe.info?.version} · v{probe.info.version}{/if}
-        {#if !probe.info} · versão sem /api/info (sem sincronização ao vivo da lista){/if}
+    {#if inviteToken}
+      <div class="invite-banner">
+        You've been invited to a vault. Pick <strong>Create account</strong> if you're
+        new here, or <strong>Sign in</strong> if you already have an account on this
+        server — either way you'll join the vault on submit.
       </div>
-      {#if probe.warning}<div class="server-warn">{probe.warning}</div>{/if}
-      {#if isInsecure(probe.serverUrl) && !httpWarningHidden}
-        <div class="server-warn" role="note">
-          Conexão sem criptografia (http://). Use só em rede local confiável.
-          <button type="button" class="link-button" onclick={hideHttpWarning}>ocultar</button>
+    {/if}
+
+    <div class="ui-seg mode-tabs" role="tablist">
+      <button
+        class:active={mode === 'signin'}
+        role="tab"
+        aria-selected={mode === 'signin'}
+        onclick={() => setMode('signin')}
+        type="button"
+      >Sign in</button>
+      <button
+        class:active={mode === 'signup'}
+        role="tab"
+        aria-selected={mode === 'signup'}
+        onclick={() => setMode('signup')}
+        type="button"
+      >Create account</button>
+    </div>
+
+    <form class="login-form" onsubmit={onSubmit}>
+      <div class="field">
+        <label class="ui-label" for="lumi-server-url">Server</label>
+        <input
+          id="lumi-server-url"
+          type="url"
+          class="ui-input mono"
+          placeholder="https://lumi.exemplo.com"
+          autocomplete="url"
+          inputmode="url"
+          bind:value={serverInput}
+          onblur={() => { if (serverInput.trim()) void runProbe(); }}
+          oninput={() => { probe = null; probedFor = null; }}
+          disabled={submitting || !!presetServer}
+          required
+        />
+        {#if probing}
+          <div class="server-note"><span class="dot pulse"></span>verificando servidor…</div>
+        {:else if probe && !probe.ok}
+          <div class="login-error" role="alert">{probe.error}</div>
+        {:else if probe && probe.ok}
+          <div class="server-note ok" data-testid="server-info">
+            <span class="dot"></span>
+            {#if probe.info?.name}{probe.info.name}{:else}{serverLabel(probe.serverUrl)}{/if}
+            {#if probe.info?.version}<span class="ver">v{probe.info.version}</span>{/if}
+            {#if !probe.info} · versão sem /api/info (sem sincronização ao vivo da lista){/if}
+          </div>
+          {#if probe.warning}<div class="server-warn">{probe.warning}</div>{/if}
+          {#if isInsecure(probe.serverUrl) && !httpWarningHidden}
+            <div class="server-warn" role="note">
+              Conexão sem criptografia (http://). Use só em rede local confiável.
+              <button type="button" class="ui-link" onclick={hideHttpWarning}>ocultar</button>
+            </div>
+          {/if}
+        {/if}
+      </div>
+
+      <div class="field">
+        <label class="ui-label" for="lumi-username">Username</label>
+        <input
+          id="lumi-username"
+          type="text"
+          class="ui-input"
+          placeholder="Username"
+          autocomplete="username"
+          bind:value={username}
+          disabled={submitting}
+          required
+        />
+      </div>
+      {#if mode === 'signup'}
+        <div class="field">
+          <label class="ui-label" for="lumi-display">Display name <span class="opt">optional</span></label>
+          <input
+            id="lumi-display"
+            type="text"
+            class="ui-input"
+            placeholder="Display name (optional)"
+            autocomplete="name"
+            bind:value={displayName}
+            disabled={submitting}
+          />
         </div>
       {/if}
-    {/if}
+      <div class="field">
+        <label class="ui-label" for="lumi-password">Password</label>
+        <input
+          id="lumi-password"
+          type="password"
+          class="ui-input"
+          placeholder="Password"
+          autocomplete={mode === 'signin' ? 'current-password' : 'new-password'}
+          bind:value={password}
+          disabled={submitting}
+          required
+        />
+      </div>
 
-    <input
-      type="text"
-      class="login-input"
-      placeholder="Username"
-      autocomplete="username"
-      bind:value={username}
-      disabled={submitting}
-      required
-    />
-    {#if mode === 'signup'}
-      <input
-        type="text"
-        class="login-input"
-        placeholder="Display name (optional)"
-        autocomplete="name"
-        bind:value={displayName}
-        disabled={submitting}
-      />
-    {/if}
-    <input
-      type="password"
-      class="login-input"
-      placeholder="Password"
-      autocomplete={mode === 'signin' ? 'current-password' : 'new-password'}
-      bind:value={password}
-      disabled={submitting}
-      required
-    />
+      {#if mode === 'signup'}
+        <button
+          type="button"
+          class="ui-link consent-toggle"
+          onclick={() => (showConsent = !showConsent)}
+        >
+          {showConsent ? 'Hide' : 'Show'} consent options
+        </button>
+        {#if showConsent}
+          <input
+            type="text"
+            class="ui-input"
+            placeholder="ToS version (from operator)"
+            bind:value={tosVersion}
+            disabled={submitting}
+          />
+          <input
+            type="text"
+            class="ui-input"
+            placeholder="Privacy version (from operator)"
+            bind:value={privacyVersion}
+            disabled={submitting}
+          />
+          <label class="consent">
+            <input type="checkbox" bind:checked={consentAccepted} disabled={submitting} />
+            I accept the Terms of Service and Privacy Policy.
+          </label>
+        {/if}
+      {/if}
 
-    {#if mode === 'signup'}
-      <button
-        type="button"
-        class="link-button"
-        onclick={() => (showConsent = !showConsent)}
-      >
-        {showConsent ? 'Hide' : 'Show'} consent options
+      <label class="remember">
+        <input type="checkbox" class="ui-switch" bind:checked={remember} disabled={submitting} />
+        <span>
+          <span class="remember-title">Lembrar neste aparelho</span>
+          <span class="remember-hint">
+            {remember
+              ? 'A sessão fica guardada neste navegador, cifrada com uma chave que não sai dele.'
+              : 'A sessão vale só nesta aba e some ao fechá-la.'}
+          </span>
+        </span>
+      </label>
+
+      {#if auth.lastError}
+        <div class="login-error" role="alert">{auth.lastError}</div>
+      {/if}
+
+      <button class="ui-btn primary submit" type="submit" disabled={submitting}>
+        {#if submitting}
+          …
+        {:else if inviteToken && mode === 'signup'}
+          Create account &amp; join vault
+        {:else if inviteToken && mode === 'signin'}
+          Sign in &amp; join vault
+        {:else if mode === 'signin'}
+          Sign in
+        {:else}
+          Create account
+        {/if}
       </button>
-      {#if showConsent}
-        <input
-          type="text"
-          class="login-input"
-          placeholder="ToS version (from operator)"
-          bind:value={tosVersion}
-          disabled={submitting}
-        />
-        <input
-          type="text"
-          class="login-input"
-          placeholder="Privacy version (from operator)"
-          bind:value={privacyVersion}
-          disabled={submitting}
-        />
-        <label class="consent">
-          <input type="checkbox" bind:checked={consentAccepted} disabled={submitting} />
-          I accept the Terms of Service and Privacy Policy.
-        </label>
+      {#if oncancel}
+        <button class="ui-btn ghost cancel" type="button" onclick={oncancel}>Cancelar</button>
       {/if}
-    {/if}
-
-    <label class="consent remember">
-      <input type="checkbox" bind:checked={remember} disabled={submitting} />
-      Lembrar neste aparelho
-    </label>
-    <div class="remember-hint">
-      {remember
-        ? 'A sessão fica guardada neste navegador, cifrada com uma chave que não sai dele.'
-        : 'A sessão vale só nesta aba e some ao fechá-la.'}
-    </div>
-
-    {#if auth.lastError}
-      <div class="login-error">{auth.lastError}</div>
-    {/if}
-
-    <button class="primary-button" type="submit" disabled={submitting}>
-      {#if submitting}
-        …
-      {:else if inviteToken && mode === 'signup'}
-        Create account &amp; join vault
-      {:else if inviteToken && mode === 'signin'}
-        Sign in &amp; join vault
-      {:else if mode === 'signin'}
-        Sign in
-      {:else}
-        Create account
-      {/if}
-    </button>
-    {#if oncancel}
-      <button class="link-button cancel" type="button" onclick={oncancel}>Cancelar</button>
-    {/if}
-  </form>
+    </form>
+  </div>
+  {#if !embedded}
+    <footer class="foot">Your notes stay plain markdown files on your server.</footer>
+  {/if}
 </div>
 
 <style>
@@ -345,160 +371,119 @@
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    background: var(--color-background);
+    min-height: 100dvh;
+    padding: var(--sp-6) var(--sp-4);
+    background:
+      radial-gradient(60rem 30rem at 50% -10%, var(--tint-primary), transparent 70%),
+      var(--color-background);
     color: var(--color-text);
-    padding: 2rem;
-    box-sizing: border-box;
+    overflow-y: auto;
   }
-
   .login-view.embedded {
     min-height: 0;
-    padding: 1.25rem;
+    padding: var(--sp-5);
+    background: none;
+  }
+  .card {
+    width: 100%;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+  .head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-2);
+  }
+  .brand { font-size: 22px; }
+  .brand :global(.mark) { width: 18px; height: 18px; border-radius: 5px; }
+  .subtitle {
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
   }
   .embedded-title {
-    margin: 0 0 1rem;
-    font-size: 1rem;
+    font-size: var(--text-lg);
     font-weight: 600;
   }
-  .field-label {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.78rem;
-    margin-bottom: -0.4rem;
-  }
-  .server-note {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.8rem;
-  }
-  .server-warn {
-    color: var(--color-warning, var(--color-secondary));
-    font-size: 0.8rem;
-  }
-  .remember-hint {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.75rem;
-    margin-top: -0.4rem;
-  }
-  .cancel {
-    align-self: center;
-  }
-
-  .brand {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--color-primary);
-    margin-bottom: 0.25rem;
-  }
-
-  .subtitle {
-    color: var(--color-text-dim, var(--color-muted));
-    margin-bottom: 2rem;
-    font-size: 0.95rem;
-  }
-
-  .mode-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .mode-tab {
-    background: transparent;
-    border: 1px solid var(--color-border, var(--color-muted));
-    color: var(--color-text-dim, var(--color-muted));
-    padding: 0.4rem 0.9rem;
-    font-family: inherit;
-    font-size: 0.9rem;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  .mode-tab:hover {
-    border-color: var(--color-secondary);
-  }
-
-  .mode-tab.active {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-    color: var(--color-text);
-    border-color: var(--color-primary);
-  }
-
+  .mode-tabs { align-self: stretch; }
+  .mode-tabs button { flex: 1; }
   .login-form {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
-    width: 100%;
-    max-width: 320px;
+    gap: var(--sp-3);
   }
-
-  .login-input {
-    padding: 0.6rem 0.8rem;
-    background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 4px;
-    color: var(--color-text);
-    font-family: inherit;
-    font-size: 0.95rem;
-    outline: none;
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
-
-  .login-input:focus {
-    border-color: var(--color-secondary);
+  .opt { font-weight: 400; opacity: 0.7; }
+  .mono { font-family: var(--font-mono); font-size: var(--text-sm); }
+  .server-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
   }
-
-  .primary-button {
-    margin-top: 0.5rem;
-    padding: 0.65rem;
-    background: var(--color-primary);
-    border: none;
-    border-radius: 4px;
-    color: var(--color-background);
-    font-family: inherit;
-    font-size: 0.95rem;
-    font-weight: 600;
+  .server-note .ver { font-family: var(--font-mono); opacity: 0.8; }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-text-dim);
+    flex: none;
+  }
+  .server-note.ok .dot { background: var(--color-primary); }
+  .pulse { animation: pulse 1s ease-in-out infinite alternate; }
+  @keyframes pulse { to { opacity: 0.3; } }
+  .server-warn {
+    color: var(--color-warning);
+    font-size: var(--text-xs);
+  }
+  .remember {
+    display: flex;
+    gap: var(--sp-3);
+    align-items: flex-start;
+    padding: var(--sp-3);
+    border-radius: var(--radius);
+    border: 1px solid var(--hairline);
     cursor: pointer;
   }
-
-  .primary-button:disabled {
-    opacity: 0.5;
-    cursor: progress;
+  .remember .ui-switch { margin-top: 2px; }
+  .remember > span { display: flex; flex-direction: column; gap: 2px; }
+  .remember-title { font-size: var(--text-sm); font-weight: 500; }
+  .remember-hint {
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
   }
-
-  .link-button {
-    background: transparent;
-    border: none;
-    color: var(--color-secondary);
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    align-self: flex-start;
-    padding: 0;
-  }
-
+  .consent-toggle { align-self: flex-start; font-size: var(--text-xs); }
   .consent {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--sp-2);
     align-items: center;
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.85rem;
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
   }
-
+  .submit { height: 36px; margin-top: var(--sp-1); font-size: var(--text-md); }
+  .cancel { align-self: center; }
   .login-error {
     color: var(--color-error);
-    font-size: 0.85rem;
-    text-align: center;
+    font-size: var(--text-sm);
   }
-
   .invite-banner {
-    max-width: 360px;
-    margin: 0 0 1rem;
-    padding: 0.75rem 0.9rem;
-    background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--color-primary);
-    border-radius: 6px;
-    color: var(--color-text);
-    font-size: 0.85rem;
-    line-height: 1.45;
-    text-align: center;
+    padding: var(--sp-3);
+    background: var(--tint-primary);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+    border-radius: var(--radius);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  .foot {
+    margin-top: var(--sp-6);
+    font-size: var(--text-xs);
+    color: var(--color-text-dim);
   }
 </style>

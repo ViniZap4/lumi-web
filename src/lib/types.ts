@@ -200,6 +200,9 @@ export interface NoteSummary {
   title: string;
   created_at: string;
   updated_at: string;
+  /** Assumed optional server field: CRDT epoch/generation of the note
+   *  (lib/lineage.ts). Absent on today's server. */
+  crdt_epoch?: string | null;
 }
 
 export interface NoteContent {
@@ -215,6 +218,10 @@ export interface NoteSnapshot {
   path: string;
   text: string;
   vector_clock: string; // base64
+  /** Full lib0-v1 state, base64 (CRDT §10 S9). */
+  state?: string;
+  /** Assumed optional server field, see NoteSummary.crdt_epoch. */
+  crdt_epoch?: string | null;
 }
 
 // Server error envelope — every 4xx / 5xx response. detail is optional

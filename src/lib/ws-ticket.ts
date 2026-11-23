@@ -26,6 +26,9 @@ import { ApiError } from './types.ts';
 export interface WsTicket {
   ticket: string;
   expires_at: string;
+  /** Optional CRDT epoch of the note (assumed future server field; see
+   *  lib/lineage.ts). Ignored when absent. */
+  crdt_epoch?: string | null;
 }
 
 export type WsAuthMode = 'unknown' | 'ticket' | 'token';
@@ -51,6 +54,8 @@ export class WsTicketAuth {
   mode: WsAuthMode = 'unknown';
   /** Number of tickets successfully fetched (diagnostics/tests). */
   issued = 0;
+  /** `crdt_epoch` of the last ticket response, when the server sends it. */
+  lastEpoch: string | null = null;
 
   constructor(
     private readonly fetchTicket: () => Promise<WsTicket>,
@@ -81,6 +86,7 @@ export class WsTicketAuth {
     }
     this.mode = 'ticket';
     this.issued++;
+    this.lastEpoch = typeof t.crdt_epoch === 'string' && t.crdt_epoch ? t.crdt_epoch : null;
     return { ticket: t.ticket };
   }
 

@@ -45,6 +45,8 @@ export type ShellAction =
   | { kind: 'prevBook' }
   | { kind: 'nextBook' }
   | { kind: 'close' }
+  | { kind: 'hints' }
+  | { kind: 'menu' }
   /** First key of a chord (`g`, `z`) or a count digit: consumed. */
   | { kind: 'pending' };
 
@@ -118,6 +120,8 @@ export class ShellKeymap {
       case 'PageUp': this.reset(); return { kind: 'page', dir: -1 };
       case 'Home': this.reset(); return { kind: 'top' };
       case 'End': this.reset(); return { kind: 'bottom' };
+      case 'ContextMenu': this.reset(); return { kind: 'menu' };
+      case 'F10': if (e.shiftKey) { this.reset(); return { kind: 'menu' }; } return null;
     }
     const ch = e.key;
     if (ch.length !== 1) return null;
@@ -172,6 +176,9 @@ export class ShellKeymap {
       case 'i':
       case 'e': this.count = null; return { kind: 'edit' };
       case 'R': this.count = null; return { kind: 'refresh' };
+      // Hint mode (Vimium): F everywhere, f in the explorer (the
+      // reader keeps f = page down, less-style).
+      case 'F': this.count = null; return { kind: 'hints' };
     }
 
     this.count = null;
@@ -186,12 +193,14 @@ export class ShellKeymap {
         case 'y': return { kind: 'yank' };
         case 'p': return { kind: 'paste' };
         case '.': return { kind: 'toggleHidden' };
+        case 'f': return { kind: 'hints' };
         case 'q': return { kind: 'clearOrBack' };
         default: return null;
       }
     }
     switch (ch) {
       case 'q': return { kind: 'close' };
+      case 'r': return { kind: 'rename' };
       case 'd': return { kind: 'halfPage', dir: 1 };
       case 'u': return { kind: 'halfPage', dir: -1 };
       case 'f': return { kind: 'page', dir: 1 };

@@ -19,6 +19,11 @@
     }
   });
   import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
+  import { editorSettings } from './lib/editor-settings.svelte.ts';
+  import { setReduceMotion } from './lib/motion.ts';
+
+  // Settings → Reduce motion (on top of prefers-reduced-motion).
+  $effect(() => setReduceMotion(editorSettings.value.reduceMotion));
 
   onMount(async () => {
     theme.init();

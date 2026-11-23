@@ -2,11 +2,11 @@
   import { onMount, onDestroy, untrack, tick } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
-  import { renderMarkdown } from '../lib/markdown.ts';
+  import { renderBlocks, taskToggle } from '../lib/markdown.ts';
   import { ApiError } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
-  import { planSession, startSession, loadEditorSession, flushPending } from '../lib/editor-boot.ts';
+  import { planSession, startSession, loadEditorSession, flushPending, toggleTaskHeadless } from '../lib/editor-boot.ts';
   import type { ConflictCopy } from '../lib/offline-store.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
@@ -17,8 +17,10 @@
   import { MillerNav } from '../lib/miller.svelte.ts';
   import { breadcrumb, parentDir, dirOf, normalizePath, type Entry } from '../lib/notetree.ts';
   import { planCreate, planRename, planFolderRename, movedPath, copyTitle, type CreatePlan, type RenamePlan, type FolderRenamePlan } from '../lib/fileops.ts';
-  import { findNoteByHref } from '../lib/links.ts';
-  import { legendFor, contextForVimMode, type LegendContext } from '../lib/legend.ts';
+  import { findNoteByHref, markdownLink } from '../lib/links.ts';
+  import { legendFor, contextForVimMode, type LegendContext, type LegendItem } from '../lib/legend.ts';
+  import { menuFor, type MenuItem } from '../lib/context-actions.ts';
+  import { withViewTransition, animate } from '../lib/motion.ts';
   import { effectiveSettings, appliedMappings, LEADER_TOKEN } from '../lib/vim-config.ts';
   import { selectorOrder } from '../lib/books-model.ts';
   import type { PaletteCommand } from '../lib/palette.ts';
@@ -30,6 +32,10 @@
   import CommandLegend from '../components/CommandLegend.svelte';
   import CommandPalette from '../components/CommandPalette.svelte';
   import HelpOverlay from '../components/HelpOverlay.svelte';
+  import MarkdownView from '../components/MarkdownView.svelte';
+  import SourceSplit from '../components/SourceSplit.svelte';
+  import ContextMenu from '../components/ContextMenu.svelte';
+  import HintOverlay from '../components/HintOverlay.svelte';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { countWords, type EditorStats } from '../lib/textstats.ts';
 
@@ -66,6 +72,10 @@
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let vimState = $state<{ mode: string; pending: string | null }>({ mode: 'normal', pending: null });
   let paletteMode = $state<null | 'all' | 'command'>(null);
+  let hintsOpen = $state(false);
+  let menu = $state<{ x: number; y: number; items: MenuItem[]; entry: Entry | null; title: string } | null>(null);
+  let homeEl = $state<HTMLElement | null>(null);
+  let noteEditorRef = $state<{ editorView(): import('@codemirror/view').EditorView | null; run(a: string): boolean } | null>(null);
 
   // ---- explorer prompt (a / r), inline delete confirm, yank -----------------
   type Prompt = { kind: 'create'; text: string } | { kind: 'rename'; text: string; entry: Entry };
@@ -306,7 +316,7 @@
   }
 
   function overlayOpen(): boolean {
-    return !!(uiState.accountModal || uiState.createBookOpen || showSettings || uiState.settings || uiState.helpOpen || uiState.themePickerOpen || paletteMode);
+    return !!(uiState.accountModal || uiState.createBookOpen || showSettings || uiState.settings || uiState.helpOpen || uiState.themePickerOpen || paletteMode || hintsOpen || menu);
   }
 
   function syncPending(): void {
@@ -508,6 +518,12 @@
       case 'nextBook':
         cycleBook(a.kind === 'nextBook' ? 1 : -1);
         return;
+      case 'hints':
+        hintsOpen = true;
+        return;
+      case 'menu':
+        openMenuAtCursor();
+        return;
     }
   }
 
@@ -531,13 +547,19 @@
     // Per-device preference: open straight into the editor.
     if (editorSettings.value.openIn === 'editing') return editNote(id);
     if (notes.selectedID !== id) void notes.select(id);
-    pane = 'note';
-    await tick();
+    await withViewTransition(async () => {
+      pane = 'note';
+      await tick();
+    });
     previewEl?.focus();
   }
 
   function leaveNote(): void {
-    pane = 'browse';
+    if (pane === 'browse') return void focusColumn();
+    void withViewTransition(async () => {
+      pane = 'browse';
+      await tick();
+    });
     void focusColumn();
   }
 
@@ -847,10 +869,9 @@
     });
   }
 
-  function onReaderClick(e: MouseEvent): void {
-    const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
-    if (!a) return;
-    const href = a.getAttribute('href') ?? '';
+  /** Link clicks inside rendered markdown (in-note `#` anchors are
+   *  handled by MarkdownView). */
+  function onMdLink(href: string, e: MouseEvent): void {
     if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) {
       // External: never navigate the app away.
       e.preventDefault();
@@ -860,6 +881,197 @@
     if (href.startsWith('#')) return;
     e.preventDefault();
     openLinkedNote(href);
+  }
+
+  // ---- tasks ---------------------------------------------------------------------
+
+  /** Reader: toggle a task without opening the editor — a headless
+   *  live session applies the single-character ranged change. The
+   *  checkbox flips immediately; a failure reverts it. */
+  async function toggleTaskFromReader(index: number): Promise<void> {
+    const vid = vaults.selectedID;
+    const id = notes.selectedID;
+    const body = notes.content?.body ?? '';
+    if (!vid || !id) return;
+    const ch = taskToggle(body, index);
+    if (!ch) return;
+    notes.applyLocalBody(id, body.slice(0, ch.from) + ch.insert + body.slice(ch.to));
+    const r = await toggleTaskHeadless(vid, id, index);
+    if ('error' in r) {
+      if (notes.selectedID === id) notes.applyLocalBody(id, body);
+      flash(r.error, 'warn');
+    } else if (notes.selectedID === id) {
+      notes.applyLocalBody(id, r.text);
+    }
+  }
+
+  /** Split preview: the editor owns the doc — dispatch the 1-char
+   *  change through CodeMirror (y-codemirror turns it into a ranged
+   *  Y.Text op). */
+  function toggleTaskInEditor(index: number): void {
+    const v = noteEditorRef?.editorView();
+    if (!v) return;
+    const ch = taskToggle(v.state.doc.toString(), index);
+    if (ch) v.dispatch({ changes: ch, userEvent: 'input.toggle-task' });
+  }
+
+  // ---- context menu, hints, drag & drop ------------------------------------------
+
+  function entryForOpenNote(): Entry | null {
+    return nav.entries.find((x) => x.kind === 'note' && x.note.id === notes.selectedID) ?? null;
+  }
+
+  function openMenu(x: number, y: number, entry: Entry | null, reader = false): void {
+    const items = menuFor(entry, { offline: structuralOffline, canPaste: !!yanked, reader });
+    const title = entry ? (entry.kind === 'note' ? (entry.note.title ?? entry.name) : entry.name + '/') : (nav.dir || (vaults.selected?.name ?? 'book'));
+    menu = { x, y, items, entry, title };
+  }
+
+  function onRowContext(i: number, e: Entry, ev: MouseEvent): void {
+    pane = 'browse';
+    nav.setCursor(i);
+    openMenu(ev.clientX, ev.clientY, e);
+  }
+
+  function onReaderContext(ev: MouseEvent): void {
+    const t = ev.target as HTMLElement | null;
+    // Keep the browser menu on links, images, selections and fields.
+    if (pane !== 'note' || editMode || t?.closest('a, img, input, textarea, [contenteditable]') || window.getSelection?.()?.toString()) return;
+    const entry = entryForOpenNote();
+    if (!entry) return;
+    ev.preventDefault();
+    openMenu(ev.clientX, ev.clientY, entry, true);
+  }
+
+  function onColumnContext(ev: MouseEvent): void {
+    // Empty space in the current column (rows handle their own).
+    if ((ev.target as HTMLElement | null)?.closest('[role="option"]')) return;
+    ev.preventDefault();
+    openMenu(ev.clientX, ev.clientY, null);
+  }
+
+  function openMenuAtCursor(): void {
+    if (pane === 'note') {
+      const entry = entryForOpenNote();
+      const r = previewEl?.getBoundingClientRect();
+      if (entry) openMenu((r?.left ?? 0) + 48, (r?.top ?? 0) + 48, entry, true);
+      return;
+    }
+    const row = currentColEl?.querySelector<HTMLElement>('.row.cursor');
+    const r = row?.getBoundingClientRect() ?? currentColEl?.getBoundingClientRect();
+    openMenu((r?.left ?? 0) + 24, (r?.bottom ?? 0) + 2, nav.current ?? null);
+  }
+
+  function runMenu(it: MenuItem): void {
+    const reader = pane === 'note';
+    switch (it.action) {
+      case 'copyLink': {
+        const e = menu?.entry ?? (reader ? entryForOpenNote() : nav.current);
+        if (e?.kind !== 'note') return;
+        const from = reader ? (notes.selected?.path ?? '') : '';
+        const link = markdownLink(e.note.title ?? e.name, from, e.note.path || e.note.id + '.md');
+        void navigator.clipboard?.writeText(link).then(() => flash('copied ' + link), () => flash('clipboard unavailable', 'warn'));
+        return;
+      }
+      case 'newFolder':
+        if (structuralOffline) return showOfflineHint();
+        void openPrompt({ kind: 'create', text: '/' }, true);
+        return;
+      default:
+        runAction({ kind: it.action } as ShellAction);
+    }
+  }
+
+  /** Drag a note onto a folder row: move it there (PATCH path). */
+  async function dropNote(noteKey: string, target: Entry): Promise<void> {
+    if (target.kind !== 'folder') return;
+    if (structuralOffline) return showOfflineHint();
+    const note = notes.list.find((n) => 'n:' + n.id === noteKey);
+    if (!note) return;
+    const file = normalizePath(note.path || note.id + '.md').split('/').pop()!;
+    const path = `${target.path}/${file}`;
+    if (normalizePath(note.path) === path) return;
+    try {
+      const updated = await notes.patch(note.id, { path });
+      if (updated) {
+        nav.removeFolder(target.path);
+        flash(`moved ${file} → ${target.path}/`);
+      }
+    } catch (e) {
+      flash(errText(e), 'error');
+    }
+  }
+
+  // Miller columns slide a little in the direction of travel.
+  let lastDir = untrack(() => nav.dir);
+  $effect(() => {
+    const d = nav.dir;
+    untrack(() => {
+      if (d === lastDir) return;
+      const deeper = d.length > lastDir.length && d.startsWith(lastDir);
+      lastDir = d;
+      animate(currentColEl, [{ transform: `translateX(${deeper ? 14 : -14}px)`, opacity: 0.55 }, { transform: 'none', opacity: 1 }], 170);
+    });
+  });
+
+  // ---- legend actions ------------------------------------------------------------
+
+  const SHELL_ALIASES: Record<string, ShellAction> = {
+    down: { kind: 'move', n: 1 },
+    halfDown: { kind: 'halfPage', dir: 1 },
+  };
+
+  function onLegendAction(it: LegendItem): void {
+    const d = it.do;
+    if (!d) return;
+    const i = d.indexOf(':');
+    const ns = d.slice(0, i);
+    const arg = d.slice(i + 1);
+    if (ns === 'shell') {
+      runAction(SHELL_ALIASES[arg] ?? ({ kind: arg } as ShellAction));
+      return;
+    }
+    if (ns === 'vim' || ns === 'ex') {
+      noteEditorRef?.run(d);
+      return;
+    }
+    switch (arg) {
+      case 'hints': hintsOpen = true; return;
+      case 'menu': openMenuAtCursor(); return;
+      case 'reading': exitEditAnimated(); return;
+      case 'toggleMode': editorSettings.toggleEditMode(); return;
+      case 'confirm': void confirmDelete(); return;
+      case 'submit':
+        if (prompt) void submitPrompt();
+        else if (filterOpen) { filterOpen = nav.filter !== ''; void focusColumn(true); }
+        return;
+      case 'cancel':
+        if (pendingDelete) pendingDelete = null;
+        else if (prompt) cancelPrompt();
+        else if (filterOpen) { nav.setFilter(''); filterOpen = false; void focusColumn(true); }
+        return;
+    }
+  }
+
+  // ---- split preview -------------------------------------------------------------
+
+  const splitOn = $derived(editorSettings.value.editMode === 'source' && editorSettings.value.previewSplit);
+
+  function toggleSplit(): void {
+    const s = editorSettings.value;
+    if (s.editMode !== 'source') {
+      editorSettings.update({ editMode: 'source', previewSplit: true });
+      flash('Source mode + preview');
+      return;
+    }
+    editorSettings.update({ previewSplit: !s.previewSplit });
+  }
+
+  function exitEditAnimated(): void {
+    void withViewTransition(async () => {
+      exitEdit();
+      await tick();
+    });
   }
 
   // ---- modals + editor ----------------------------------------------------
@@ -965,7 +1177,7 @@
   // Pre-compute the sanitised preview HTML on every content change.
   // marked is fast enough that we don't bother debouncing here; large
   // notes (10k+ lines) are the slice 4.4 / 4.6 perf concern.
-  let previewHtml = $derived(notes.content ? renderMarkdown(notes.content.body) : '');
+  const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
   const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
   const noteFolder = $derived(notes.selected ? dirOf(notes.selected.path) : '');
   const noteCrumbs = $derived(noteFolder ? noteFolder.split('/') : []);
@@ -990,6 +1202,8 @@
     legendFor(legendCtx, legendPending, {
       leader: eff.leader,
       escapeSequences: eff.escapeSequences,
+      source: editMode && editorSettings.value.editMode === 'source',
+      split: editMode && splitOn,
       leaderMaps: editMode
         ? appliedMappings()
             .filter((m) => m.lhs.startsWith(LEADER_TOKEN))
@@ -1012,6 +1226,9 @@
     { id: 'paste', title: 'Paste copy here', keys: 'p', group: 'file duplicate', run: () => void paste() },
     { id: 'edit', title: editMode ? 'Reading view' : 'Edit note', keys: '⌘E', group: 'editor', run: () => { if (editMode) exitEdit(); else { const t = noteUnderFocus(); if (t) void editNote(t); } } },
     { id: 'live', title: editorSettings.value.editMode === 'live' ? 'Switch to Source mode' : 'Switch to Live Preview', keys: '⌘⇧E', group: 'editor', run: () => editorSettings.toggleEditMode() },
+    { id: 'split', title: splitOn ? 'Hide preview beside source' : 'Show preview beside source', keys: '\\p ⌘⌥P', group: 'editor split side by side render', run: toggleSplit },
+    { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (hintsOpen = true) },
+    { id: 'motion', title: editorSettings.value.reduceMotion ? 'Allow motion' : 'Reduce motion', group: 'view animation accessibility', run: () => editorSettings.update({ reduceMotion: !editorSettings.value.reduceMotion }) },
     { id: 'filter', title: 'Filter this folder', keys: '/', group: 'search', run: () => void openFilter() },
     { id: 'preview', title: showPreview ? 'Hide preview column' : 'Show preview column', keys: 'zp', group: 'view', run: () => (showPreview = !showPreview) },
     { id: 'hidden', title: nav.showHidden ? 'Hide dot-files' : 'Show hidden files', keys: '.', group: 'view', run: () => nav.toggleHidden() },
@@ -1041,7 +1258,7 @@
   }
 </script>
 
-<div class="vault-home">
+<div class="vault-home" bind:this={homeEl}>
   <header class="topbar">
     <div class="top-left">
       <button class="home-mark" type="button" onclick={back} title="All books (gb)" aria-label="All books">
@@ -1150,6 +1367,7 @@
           label="Parent folder {nav.parent === '' ? (vaults.selected?.name ?? 'root') : nav.parent}"
           idPrefix="parent"
           onpick={pickParent}
+          ondropnote={(k, t) => void dropNote(k, t)}
         />
       {:else}
         <div class="col-empty">
@@ -1160,7 +1378,8 @@
       {/if}
     </section>
 
-    <section class="col col-current" aria-label="Current folder">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <section class="col col-current" aria-label="Current folder" oncontextmenu={onColumnContext}>
       {#if filterOpen || nav.filter}
         <div class="filter-row">
           <span class="filter-slash" aria-hidden="true">/</span>
@@ -1192,13 +1411,14 @@
         emptyText={nav.filter ? 'No matches' : 'Empty folder — a to create'}
         onpick={pickCurrent}
         onopen={openCurrent}
+        oncontext={onRowContext}
+        ondropnote={(k, t) => void dropNote(k, t)}
       />
     </section>
 
-    <!-- Link clicks inside the rendered note are routed in-app; the
-         keyboard path to the same links is the browser's own. -->
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <main class="col col-preview preview" bind:this={previewEl} tabindex="-1" aria-label="Preview" onclick={onReaderClick}>
+    <!-- Right-click on the open note: the same menu as its row. -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <main class="col col-preview preview" class:split-host={editMode && splitOn} bind:this={previewEl} tabindex="-1" aria-label="Preview" oncontextmenu={onReaderContext}>
       {#if pane === 'browse' && nav.current?.kind === 'folder' && nav.previewEntries}
         <MillerColumn
           entries={nav.previewEntries}
@@ -1207,6 +1427,7 @@
           idPrefix="preview"
           emptyText={nav.current.virtual ? 'New folder — a to create a note in it' : 'Empty folder'}
           onpick={pickPreview}
+          ondropnote={(k, t) => void dropNote(k, t)}
         />
       {:else if !notes.selectedID}
         <div class="placeholder hints">
@@ -1238,7 +1459,7 @@
           </div>
         {/each}
         {#if editMode && editSession && NoteEditor}
-          <div class="editor-frame" class:readable={editorSettings.value.readableWidth}>
+          <div class="editor-frame" class:readable={editorSettings.value.readableWidth && !splitOn} class:split={splitOn}>
             <div class="editor-bar">
               <div class="editor-meta">
                 <span class="conn-dot conn-{editSession.status}" data-testid="conn-status" title="Live sync: {editSession.status}">{editSession.status}</span>
@@ -1253,7 +1474,7 @@
               </div>
               <div class="editor-actions">
                 <div class="ui-seg view-seg" role="group" aria-label="View mode" data-testid="view-mode">
-                  <button type="button" onclick={exitEdit} title="Reading view (Cmd/Ctrl+E)">Reading</button>
+                  <button type="button" onclick={exitEditAnimated} title="Reading view (Cmd/Ctrl+E)">Reading</button>
                   <button type="button" class:active={editorSettings.value.editMode === 'live'}
                     aria-pressed={editorSettings.value.editMode === 'live'}
                     onclick={() => setEditMode('live')} title="Live Preview (Cmd/Ctrl+Shift+E)">Live</button>
@@ -1261,8 +1482,13 @@
                     aria-pressed={editorSettings.value.editMode === 'source'}
                     onclick={() => setEditMode('source')} title="Source mode (Cmd/Ctrl+Shift+E)">Source</button>
                 </div>
+                <button class="ui-btn ghost sm icon split-btn" type="button" onclick={toggleSplit}
+                  aria-pressed={splitOn} aria-label="Preview beside source"
+                  title="Preview beside source ({eff.leader}p · ⌘⌥P · :preview split)">
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.3"/><path d="M10 6h2.5M10 8.5h2.5M10 11h1.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" opacity=".7"/></svg>
+                </button>
                 <button class="ui-btn ghost sm" onclick={saveEdit} disabled={saving || !editSession.editable} type="button" title="Sync now (⌘S)">{saving ? 'Saving…' : 'Save'}</button>
-                <button class="ui-btn sm" onclick={exitEdit} type="button">Done</button>
+                <button class="ui-btn sm" onclick={exitEditAnimated} type="button" title="Done (:q, ⌘E)">Done</button>
               </div>
             </div>
             {#if editError}<div class="error">{editError}</div>{/if}
@@ -1274,7 +1500,7 @@
                 {editSession.stopped ? 'Live editing unavailable.' : 'Connecting to live editor… (read-only until synced)'}
               </div>
               <article class="rendered readonly-preview" data-prose={editorSettings.value.proseFont}>
-                {@html previewHtml}
+                <MarkdownView blocks={previewBlocks} onlink={onMdLink} />
               </article>
             {:else if editSession.emptyAtSync && (notes.content.body ?? '') !== ''}
               <!-- Legacy note: server CRDT never initialised. Editing an
@@ -1286,21 +1512,33 @@
                 <button class="ui-btn sm" onclick={initialiseFromFile} type="button">Load file contents</button>
               </div>
               <article class="rendered readonly-preview" data-prose={editorSettings.value.proseFont}>
-                {@html previewHtml}
+                <MarkdownView blocks={previewBlocks} onlink={onMdLink} />
               </article>
             {:else}
-              <NoteEditor
-                session={editSession}
-                settings={editorSettings.value}
-                onexit={exitEdit}
-                onopensettings={() => uiState.openSettings('vim')}
-                ontogglemode={() => editorSettings.toggleEditMode()}
-                onstats={(st) => (editorStats = st)}
-                notes={() => notes.list}
-                notePath={() => notes.selected?.path ?? notes.content?.path ?? ''}
-                onopennote={openLinkedNote}
-                onvimstate={(st) => (vimState = st)}
-              />
+              <SourceSplit
+                enabled={splitOn}
+                ytext={editSession.ytext}
+                editorView={() => noteEditorRef?.editorView() ?? null}
+                ratio={editorSettings.value.previewRatio}
+                onratio={(r) => editorSettings.update({ previewRatio: r })}
+                ontoggletask={toggleTaskInEditor}
+                onlink={onMdLink}
+              >
+                <NoteEditor
+                  bind:this={noteEditorRef}
+                  session={editSession}
+                  settings={editorSettings.value}
+                  onexit={exitEditAnimated}
+                  onopensettings={() => uiState.openSettings('vim')}
+                  ontogglemode={() => editorSettings.toggleEditMode()}
+                  ontogglesplit={toggleSplit}
+                  onstats={(st) => (editorStats = st)}
+                  notes={() => notes.list}
+                  notePath={() => notes.selected?.path ?? notes.content?.path ?? ''}
+                  onopennote={openLinkedNote}
+                  onvimstate={(st) => (vimState = st)}
+                />
+              </SourceSplit>
             {/if}
           </div>
         {:else if editorLoading}
@@ -1324,8 +1562,8 @@
               </div>
             </div>
             <h1 class="rendered-title">{notes.selected?.title}</h1>
-            <!-- DOMPurify-sanitised HTML, see lib/markdown.ts. -->
-            {@html previewHtml}
+            <!-- DOMPurify-sanitised blocks, see lib/markdown.ts. -->
+            <MarkdownView blocks={previewBlocks} onlink={onMdLink} ontoggletask={(i) => void toggleTaskFromReader(i)} />
           </article>
         {/if}
       {/if}
@@ -1363,7 +1601,7 @@
   {/if}
 
   {#if editorSettings.value.legend}
-    <CommandLegend items={legendItems} pending={legendPending} mode={legendMode} />
+    <CommandLegend items={legendItems} pending={legendPending} mode={legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
   {/if}
 
   <footer class="statusbar" data-testid="editor-status">
@@ -1409,6 +1647,14 @@
       onnote={openFromPalette}
       onclose={() => { paletteMode = null; void focusColumn(true); }}
     />
+  {/if}
+
+  {#if menu}
+    <ContextMenu x={menu.x} y={menu.y} items={menu.items} title={menu.title} onrun={runMenu} onclose={() => (menu = null)} />
+  {/if}
+
+  {#if hintsOpen}
+    <HintOverlay root={() => homeEl} onclose={() => (hintsOpen = false)} />
   {/if}
 
   {#if uiState.helpOpen}
@@ -1567,6 +1813,8 @@
     .miller.note-mode .col-current { display: none; }
     .miller.note-mode .col-preview { display: block; }
     .preview { padding: var(--sp-4); }
+    .preview.split-host { padding: var(--sp-3) var(--sp-3) 0; }
+    .editor-frame.split .editor-bar { margin-right: 0; }
     .sb-item:not(.sync):not(.stale) { display: none; }
   }
 
@@ -1579,15 +1827,22 @@
 
   /* ── reading view ──────────────────────────────────────── */
   .rendered {
-    max-width: 44rem;
+    /* ~68ch measure for the prose (the title row shares it). */
+    max-width: calc(68ch + 2px);
     margin: 0 auto;
     font-family: var(--font-sans);
-    font-size: 15.5px;
-    line-height: 1.7;
+    font-size: 16px;
+    line-height: 1.68;
     color: var(--color-text);
   }
-  .rendered[data-prose='serif'] { font-family: var(--font-serif); font-size: 17px; }
-  .rendered[data-prose='mono'] { font-family: var(--font-mono); font-size: 14px; }
+  .rendered[data-prose='serif'] { font-family: var(--font-serif); font-size: 18px; line-height: 1.62; }
+  .rendered[data-prose='mono'] { font-family: var(--font-mono); font-size: 14px; line-height: 1.7; }
+  /* The pane that changes between explorer / reader / editor. */
+  .col-preview { view-transition-name: lumi-pane; }
+  .preview.split-host { overflow: hidden; padding-left: var(--sp-4); padding-right: 0; }
+  .editor-frame.split { max-width: none; }
+  .editor-frame.split .editor-bar { margin-right: var(--sp-4); }
+  .split-btn[aria-pressed='true'] { color: var(--color-primary); background: var(--tint-active); }
   .reading-head {
     display: flex;
     align-items: center;
@@ -1612,91 +1867,17 @@
   .rendered-actions { display: flex; gap: var(--sp-2); align-items: center; margin-left: auto; }
   .reading-meta { color: var(--color-text-dim); font-size: var(--text-xs); font-family: var(--font-mono); }
   .rendered-title {
-    margin: 0 0 var(--sp-4);
-    font-size: 2rem;
-    line-height: 1.2;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    margin: 0 0 var(--sp-5);
+    font-size: 2.1em;
+    line-height: 1.15;
+    font-weight: 720;
+    letter-spacing: -0.025em;
     color: var(--color-text);
+    text-wrap: balance;
   }
+  .rendered :global(.md-body) { animation: reader-in 200ms var(--ease); }
+  @keyframes reader-in { from { opacity: 0; transform: translateY(4px); } }
   .danger-hover:hover { color: var(--color-error); }
-
-  /* Inline markdown styling, scoped to the rendered article so it
-     doesn't leak. CSS variables let theming work without re-render. */
-  :global(.rendered h1),
-  :global(.rendered h2),
-  :global(.rendered h3),
-  :global(.rendered h4) {
-    color: var(--color-text);
-    line-height: 1.3;
-    letter-spacing: -0.01em;
-  }
-  :global(.rendered h1) { font-size: 1.6rem; margin: 2rem 0 0.6rem; }
-  :global(.rendered h2) { font-size: 1.3rem; margin: 1.8rem 0 0.5rem; }
-  :global(.rendered h3) { font-size: 1.1rem; margin: 1.4rem 0 0.4rem; }
-  :global(.rendered p)  { margin: 0.7rem 0; }
-  :global(.rendered ul), :global(.rendered ol) { padding-left: 1.4rem; margin: 0.6rem 0; }
-  :global(.rendered li) { margin: 0.2rem 0; }
-  :global(.rendered li::marker) { color: var(--color-text-dim); }
-  :global(.rendered a)  {
-    color: var(--color-primary);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
-    text-underline-offset: 3px;
-  }
-  :global(.rendered a:hover) { text-decoration-color: currentColor; }
-  :global(.rendered a:not([href*=':'])) { text-decoration-style: dotted; }
-  :global(.rendered code) {
-    font-family: var(--font-mono);
-    background: var(--tint-hover);
-    color: var(--color-accent);
-    padding: 0.1rem 0.35rem;
-    border-radius: 4px;
-    font-size: 0.86em;
-  }
-  :global(.rendered pre) {
-    background: color-mix(in srgb, var(--color-overlay-bg) 70%, var(--color-background));
-    padding: 0.9rem 1rem;
-    overflow-x: auto;
-    border-radius: var(--radius);
-    border: 1px solid var(--hairline);
-    line-height: 1.55;
-  }
-  :global(.rendered pre code) {
-    background: transparent;
-    color: var(--color-text);
-    padding: 0;
-  }
-  :global(.rendered blockquote) {
-    border-left: 2px solid var(--color-primary);
-    padding-left: 1rem;
-    color: var(--color-text-dim);
-    margin: 1rem 0;
-  }
-  :global(.rendered img),
-  :global(.rendered iframe),
-  :global(.rendered video) {
-    max-width: 100%;
-    border-radius: var(--radius);
-  }
-  :global(.rendered table) {
-    border-collapse: collapse;
-    margin: 1rem 0;
-    font-size: 0.92em;
-  }
-  :global(.rendered th),
-  :global(.rendered td) {
-    border-bottom: 1px solid var(--hairline);
-    padding: 0.4rem 0.8rem;
-    text-align: left;
-  }
-  :global(.rendered th) { color: var(--color-text-dim); font-weight: 600; }
-  :global(.rendered hr) {
-    border: none;
-    border-top: 1px solid var(--hairline);
-    margin: 2rem 0;
-  }
-  :global(.rendered input[type='checkbox']) { accent-color: var(--color-primary); margin-right: 0.4rem; }
 
   /* ── states ────────────────────────────────────────────── */
   .placeholder,
@@ -1749,7 +1930,7 @@
     background: color-mix(in srgb, var(--color-warning) 10%, transparent);
     border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
   }
-  .preview .banner { margin: 0 auto var(--sp-3); max-width: 44rem; }
+  .preview .banner { margin: 0 auto var(--sp-3); max-width: calc(68ch + 2px); }
   .banner-actions { display: inline-flex; gap: var(--sp-1); flex-wrap: wrap; }
 
   /* ── editor ────────────────────────────────────────────── */

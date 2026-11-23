@@ -61,7 +61,7 @@ describe('ShellKeymap', () => {
     ]);
   });
 
-  it('reader keys: d/u half page, f/b page, q closes, a/r unbound', () => {
+  it('reader keys: d/u half page, f/b page, q closes, r renames, a unbound', () => {
     const { feed } = keymap();
     expect(feed('d', 'reader')).toEqual({ kind: 'halfPage', dir: 1 });
     expect(feed('u', 'reader')).toEqual({ kind: 'halfPage', dir: -1 });
@@ -69,7 +69,7 @@ describe('ShellKeymap', () => {
     expect(feed('b', 'reader')).toEqual({ kind: 'page', dir: -1 });
     expect(feed('q', 'reader')).toEqual({ kind: 'close' });
     expect(feed('a', 'reader')).toBeNull();
-    expect(feed('r', 'reader')).toBeNull();
+    expect(feed('r', 'reader')).toEqual({ kind: 'rename' });
   });
 
   it('ctrl keys, special keys, and modifiers', () => {

@@ -134,3 +134,90 @@ describe('renderMarkdown — happy path', () => {
     expect(renderMarkdown('')).toBe('');
   });
 });
+
+import { renderBlocks, taskMarkers, taskToggle, slugify, renderStats } from './markdown.ts';
+
+describe('renderBlocks — source lines + incremental cache', () => {
+  const md = '# Title\n\nFirst para\nstill first\n\n- a\n- b\n\n```ts\nconst x = 1\n```\n';
+  it('tags each top-level block with the line it starts at', () => {
+    const b = renderBlocks(md);
+    expect(b.map((x) => x.line)).toEqual([0, 2, 5, 8]);
+    expect(b[1].endLine).toBe(4);
+    expect(b[0].html).toContain('<h1');
+  });
+  it('re-parses only the changed block', () => {
+    renderBlocks(md);
+    const before = renderStats().parsed;
+    renderBlocks(md.replace('First para', 'First paragraph'));
+    expect(renderStats().parsed - before).toBe(1);
+  });
+  it('wraps blocks with data-line in the joined HTML', () => {
+    expect(renderMarkdown(md)).toContain('<div class="md-b" data-line="5">');
+  });
+});
+
+describe('renderMarkdown — rich blocks', () => {
+  it('renders task items as disabled checkboxes (inputs otherwise stripped)', () => {
+    const out = renderMarkdown('- [x] done\n- [ ] todo\n\n<input type="text" value="x"><input type="checkbox" onclick="alert(1)" name="n">');
+    expect(out.match(/type="checkbox"/g)?.length).toBe(3);
+    expect(out).not.toContain('type="text"');
+    expect(out).not.toContain('onclick');
+    expect(out).not.toContain('name=');
+    for (const m of out.match(/<input[^>]*>/g) ?? []) expect(m).toContain('disabled');
+  });
+  it('renders Obsidian callouts, foldable with +/-', () => {
+    const out = renderMarkdown('> [!warning] Careful\n> body **text**');
+    expect(out).toContain('data-callout="warning"');
+    expect(out).toContain('Careful');
+    expect(out).toContain('<strong>text</strong>');
+    expect(renderMarkdown('> [!tip]- Hidden\n> x')).toContain('<details');
+    expect(renderMarkdown('> plain quote')).toContain('<blockquote');
+  });
+  it('adds heading ids + anchor links', () => {
+    const out = renderMarkdown('## Hello World!');
+    expect(out).toContain('id="h-hello-world"');
+    expect(out).toContain('href="#h-hello-world"');
+    expect(slugify('Ação rápida')).toBe('h-acao-rapida');
+  });
+  it('labels code blocks with their language and wraps tables', () => {
+    const out = renderMarkdown('```TypeScript\nlet a\n```\n\n| a |\n|---|\n| 1 |');
+    expect(out).toContain('data-lang="typescript"');
+    expect(out).toContain('class="language-typescript"');
+    expect(out).toContain('<div class="md-table"><table');
+  });
+  it('captions titled images and lazy-loads them', () => {
+    const out = renderMarkdown('![a cat](cat.png "Our cat")');
+    expect(out).toContain('loading="lazy"');
+    expect(out).toContain('class="md-caption"');
+  });
+  it('renders footnotes with back links, ignoring definitions in code', () => {
+    const out = renderMarkdown('Claim[^1] and more[^n].\n\n[^1]: Source one.\n[^n]: *Second*.\n\n```\n[^x]: not a note\n```');
+    expect(out).toContain('href="#fn-1"');
+    expect(out).toContain('class="md-footnotes"');
+    expect(out).toContain('<em>Second</em>');
+    expect(out).toContain('[^x]: not a note');
+  });
+});
+
+describe('task toggling — single-character ranged change', () => {
+  const src = '# T\n- [ ] one\n  - [x] nested\n```\n- [ ] in code\n```\n1. [X] ordered\n> - [ ] quoted';
+  it('finds markers in document order, skipping fenced code', () => {
+    const m = taskMarkers(src);
+    expect(m.map((p) => src[p])).toEqual([' ', 'x', 'X', ' ']);
+    expect(m.length).toBe(4);
+  });
+  it('toggles exactly one character', () => {
+    const c = taskToggle(src, 0)!;
+    expect(c.to - c.from).toBe(1);
+    expect(c.insert).toBe('x');
+    const next = src.slice(0, c.from) + c.insert + src.slice(c.to);
+    expect(next.length).toBe(src.length);
+    expect(next).toContain('- [x] one');
+    expect(taskToggle(src, 2)!.insert).toBe(' ');
+    expect(taskToggle(src, 9)).toBeNull();
+  });
+  it('matches the number of rendered checkboxes', () => {
+    const out = renderMarkdown(src);
+    expect(out.match(/<input/g)?.length).toBe(taskMarkers(src).length);
+  });
+});

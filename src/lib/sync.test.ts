@@ -2,7 +2,7 @@
 // (SPEC-LIVROS §2.4.4, §3.3, §3.5, §4). Real FeedConnection + ApiClient
 // against two in-process fake servers.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AccountRegistry } from './accounts.svelte.ts';
 import { BooksStore } from './books.svelte.ts';
 import { SyncCoordinator } from './sync.svelte.ts';
@@ -208,10 +208,61 @@ describe('degradation without the feed endpoint', () => {
     await flush();
     expect(sync.feeds[`${A}#ana`].state).toBe('disabled');
     const st = sync.statusOf(bookOf('va'));
-    expect(st).toEqual({ state: 'offline', reason: 'feed indisponível neste servidor' });
+    expect(st).toEqual({ state: 'offline', reason: 'feed indisponível neste servidor', pending: false });
     const before = sa.requests.length;
     timers.advance(60_000);
     await flush();
     expect(sa.requests.length).toBe(before);
+  });
+});
+
+describe('offline data follows the account (LGPD wipes)', () => {
+  function withOffline() {
+    sync.stop();
+    const off = {
+      wipeAccount: vi.fn(async () => []),
+      wipeVault: vi.fn(async () => []),
+      onNotesDeleted: vi.fn(async () => {}),
+      allowAccount: vi.fn(),
+      pendingNotes: (vid: string) => (vid === 'va' ? ['n9'] : []),
+    };
+    sync = new SyncCoordinator({
+      accounts, books, notes: { get vaultID() { return notesState.vaultID; }, async refresh() {}, applyChanges: () => true },
+      headless: true, offline: off as any,
+      feedFactory: (o) => new FeedConnection({ ...o, fetch: router as typeof fetch, timers, random: () => 0.5 }),
+    });
+    sync.start();
+    return off;
+  }
+
+  it('session.ended wipes that account only, keeping the unsent text for export', async () => {
+    const off = withOffline();
+    await flush();
+    sa.last.send('session.ended', { reason: 'revoked' });
+    await flush();
+    expect(off.wipeAccount).toHaveBeenCalledTimes(1);
+    expect(off.wipeAccount).toHaveBeenCalledWith(expect.objectContaining({ server_url: A, user_id: 'u-ana' }), 'session_ended');
+  });
+
+  it('vault.revoked wipes that book of that account', async () => {
+    const off = withOffline();
+    await flush();
+    sa.last.send('hello', HELLO_A);
+    await flush();
+    sa.last.send('vault.revoked', { vault_id: 'va', reason: 'removed' });
+    await flush();
+    expect(off.wipeVault).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'u-ana' }), 'va');
+  });
+
+  it('sign-out ("Sair deste aparelho") wipes the account', async () => {
+    const off = withOffline();
+    await accounts.signOut(`${B}#bia`);
+    expect(off.wipeAccount).toHaveBeenCalledWith(expect.objectContaining({ server_url: B, user_id: 'u-bia' }), 'signed_out');
+  });
+
+  it('persisted replicas with unsent edits make the book "pendente"', () => {
+    withOffline();
+    expect(sync.statusOf(bookOf('va')).pending).toBe(true);
+    expect(sync.statusOf(bookOf('vb')).pending).toBe(false);
   });
 });

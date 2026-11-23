@@ -6,6 +6,8 @@ import { accounts } from './accounts.svelte.ts';
 import { books } from './books.svelte.ts';
 import { sync } from './sync.svelte.ts';
 import { auth } from './auth.svelte.ts';
+import { notes } from './notes.svelte.ts';
+import { offline } from './offline.svelte.ts';
 
 let booted: Promise<void> | null = null;
 
@@ -15,6 +17,10 @@ export function boot(): Promise<void> {
       try {
         await accounts.init();
         await books.init();
+        // Offline (web): list caches + replica bookkeeping. The sweep
+        // drops data of accounts that are no longer on this device.
+        notes.offlineHooks = offline;
+        void offline.sweep();
         sync.start();
         // Validate sessions + discover books without blocking first
         // paint: a 401 here marks only that account "Precisa entrar".

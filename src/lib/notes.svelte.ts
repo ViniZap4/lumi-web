@@ -5,6 +5,16 @@
 
 import { ApiError, type NoteSummary, type NoteContent } from './types.ts';
 import * as api from './api.ts';
+import { isNetworkError } from './api.ts';
+
+/** Offline hooks (lib/offline.svelte.ts). Injected so this store keeps
+ *  no dependency on the books/accounts graph. */
+export interface NotesOfflineHooks {
+  loadNotesCache(vaultID: string): Promise<{ at: number; list: NoteSummary[] } | null>;
+  saveNotesCache(vaultID: string, list: NoteSummary[]): Promise<void>;
+  onFullList(vaultID: string, list: NoteSummary[]): Promise<void>;
+  replicaText(vaultID: string, noteID: string): Promise<string | null>;
+}
 
 // Request sequencing
 // -------------------
@@ -41,6 +51,15 @@ class NotesStore {
   // view special-case 403 — e.g. a federated replica whose home server
   // hasn't granted this account access yet — without string-matching.
   listErrorStatus = $state<number | null>(null);
+  /** The list shown is the last-known cache (offline / not refreshed
+   *  yet); `staleAt` is when it was fetched. */
+  stale = $state(false);
+  staleAt = $state<number | null>(null);
+  /** The content shown comes from the local replica, not the server. */
+  contentStale = $state(false);
+  offlineHooks: NotesOfflineHooks | null = null;
+  /** A network list arrived for the current vault. */
+  private fresh = false;
 
   selectedID = $state<string | null>(null);
   selected = $derived<NoteSummary | null>(
@@ -72,8 +91,37 @@ class NotesStore {
     this.contentError = null;
     this.loadingList = false;
     this.loadingContent = false;
+    this.stale = false;
+    this.staleAt = null;
+    this.contentStale = false;
+    this.fresh = false;
     if (vaultID == null) return;
-    await this.refresh();
+    const epoch = this.vaultEpoch;
+    const r = this.refresh();
+    // Show the last-known list right away (marked stale) while the
+    // network answers — or instead of it, when offline.
+    void this.loadCached(vaultID, epoch);
+    await r;
+  }
+
+  private async loadCached(vaultID: string, epoch: number): Promise<void> {
+    let c: { at: number; list: NoteSummary[] } | null = null;
+    try {
+      c = (await this.offlineHooks?.loadNotesCache(vaultID)) ?? null;
+    } catch {
+      return;
+    }
+    if (!c || epoch !== this.vaultEpoch || vaultID !== this.vaultID) return;
+    // A fresh list (or one already published by a running refresh) wins.
+    if (this.fresh || (this.list.length > 0 && !this.stale)) return;
+    if (this.listError && !this.stale && this.listErrorStatus !== 0) return;
+    this.list = c.list;
+    this.stale = true;
+    this.staleAt = c.at;
+    if (this.listErrorStatus === 0) {
+      this.listError = null;
+      this.listErrorStatus = null;
+    }
   }
 
   async refresh(): Promise<void> {
@@ -90,6 +138,11 @@ class NotesStore {
       const all = await this.fetchAll(vaultID, ctrl.signal, () => seq === this.listSeq && vaultID === this.vaultID);
       if (seq !== this.listSeq || vaultID !== this.vaultID) return;
       this.list = all;
+      this.fresh = true;
+      this.stale = false;
+      this.staleAt = null;
+      void this.offlineHooks?.saveNotesCache(vaultID, all).catch(() => {});
+      void this.offlineHooks?.onFullList(vaultID, all).catch(() => {});
       // Keep selectedID stable if the note still exists; drop it otherwise.
       if (this.selectedID && !this.list.some((n) => n.id === this.selectedID)) {
         this.selectedID = null;
@@ -100,6 +153,12 @@ class NotesStore {
       }
     } catch (e) {
       if (seq !== this.listSeq || vaultID !== this.vaultID || isAbort(e)) return;
+      if (isNetworkError(e) && this.list.length > 0) {
+        // Offline: keep what we have (cache or the previous fetch).
+        this.stale = true;
+        this.staleAt ??= Date.now();
+        return;
+      }
       this.listError = describeError(e);
       this.listErrorStatus = e instanceof ApiError ? e.status : null;
     } finally {
@@ -154,6 +213,7 @@ class NotesStore {
     this.selectedID = id;
     this.content = null;
     this.contentError = null;
+    this.contentStale = false;
     if (id == null || vaultID == null) {
       this.loadingContent = false;
       return;
@@ -167,6 +227,21 @@ class NotesStore {
       this.content = content;
     } catch (e) {
       if (seq !== this.contentSeq || vaultID !== this.vaultID || isAbort(e)) return;
+      if (isNetworkError(e)) {
+        // Offline: the note's persisted replica (if any) is the best
+        // local copy. Read-only preview here; editing restores the
+        // replica into a live session.
+        const text = await this.offlineHooks?.replicaText(vaultID, id).catch(() => null);
+        if (seq !== this.contentSeq || vaultID !== this.vaultID) return;
+        if (text != null) {
+          const meta = this.list.find((n) => n.id === id);
+          this.content = { id, vault_id: vaultID, path: meta?.path ?? `${id}.md`, frontmatter: {}, body: text };
+          this.contentStale = true;
+          return;
+        }
+        this.contentError = 'Offline — esta nota ainda não foi aberta para edição neste aparelho, então não há cópia local.';
+        return;
+      }
       this.contentError = describeError(e);
     } finally {
       if (seq === this.contentSeq) {
@@ -279,6 +354,7 @@ class NotesStore {
     const fresh = changed.filter((n) => !known.has(n.id) && !gone.has(n.id));
     if (fresh.length) list = [...fresh, ...list];
     this.list = list;
+    void this.offlineHooks?.saveNotesCache(vaultID, list).catch(() => {});
     if (this.selectedID && gone.has(this.selectedID)) {
       this.contentSeq++;
       this.abortContent();

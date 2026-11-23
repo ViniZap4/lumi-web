@@ -92,7 +92,7 @@
     data-testid="book-switcher"
     onclick={() => void toggle()}
   >
-    {#if activeStatus}<SyncDot state={activeStatus.state} />{/if}
+    {#if activeStatus}<SyncDot state={activeStatus.state} pending={activeStatus.pending} />{/if}
     <span class="switcher-name">{books.active?.name ?? 'Livros'}</span>
     <span class="caret" aria-hidden="true">▾</span>
   </button>
@@ -124,7 +124,7 @@
               onkeydown={() => {}}
               onmouseenter={() => (cursor = idx)}
             >
-              <SyncDot state={sync.statusOf(b).state} />
+              <SyncDot state={sync.statusOf(b).state} pending={sync.statusOf(b).pending} />
               <span class="opt-name">{b.name}</span>
               <span class="opt-meta">{b.account}{idx < 9 ? ` · g${idx + 1}` : ''}</span>
             </li>

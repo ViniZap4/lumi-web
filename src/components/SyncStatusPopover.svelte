@@ -114,7 +114,7 @@
       data-testid="sync-indicator"
       onclick={() => void toggle()}
     >
-      <SyncDot state={status.state} label />
+      <SyncDot state={status.state} pending={status.pending} label />
     </button>
     {#if open}
       <div
@@ -128,6 +128,10 @@
         <dl>
           <dt>estado</dt>
           <dd data-testid="sync-state">{STATE_LABEL[status.state].pt}{#if status.reason} — {status.reason}{/if}</dd>
+          {#if status.pending}
+            <dt>pendente</dt>
+            <dd data-testid="sync-pending">alterações locais ainda não confirmadas pelo servidor{#if sync.pendingCount(book) > 0} ({sync.pendingCount(book)} {sync.pendingCount(book) === 1 ? 'nota' : 'notas'}){/if}</dd>
+          {/if}
           <dt>servidor</dt>
           <dd>{serverLabel(book.server_url)}{#if isInsecure(book.server_url)}&nbsp;<span class="warn">(sem criptografia)</span>{/if}</dd>
           <dt>conta</dt>
@@ -179,13 +183,15 @@
               class="input"
               type="text"
               bind:value={renameValue}
-              disabled={!canManage || renaming}
+              disabled={!canManage || renaming || sync.isOffline(book)}
               onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void rename(); } }}
             />
-            <button type="button" class="link-button" disabled={!canManage || renaming} onclick={() => void rename()}>renomear</button>
+            <button type="button" class="link-button" disabled={!canManage || renaming || sync.isOffline(book)} onclick={() => void rename()}>renomear</button>
           </div>
           {#if !canManage}
             <p class="note">Renomear muda o nome para todos e exige a permissão “Manage vault”.</p>
+          {:else if sync.isOffline(book)}
+            <p class="note">Indisponível offline.</p>
           {/if}
           {#if renameErr}<p class="err">{renameErr}</p>{/if}
         </div>

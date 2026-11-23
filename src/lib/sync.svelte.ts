@@ -34,6 +34,7 @@ import type { Book } from './books-model.ts';
 import type { RestOutcome } from './api.ts';
 import { ApiError } from './types.ts';
 import type { EditorSession } from './editor-session.svelte.ts';
+import { offline as defaultOffline, type OfflineCoordinator } from './offline.svelte.ts';
 
 export const POLL_MS = 60_000;
 const MAX_ERRORS = 5;
@@ -61,6 +62,7 @@ export interface SyncDeps {
   notes?: NotesLike;
   fetch?: typeof fetch;
   feedFactory?: (opts: ConstructorParameters<typeof FeedConnection>[0]) => FeedConnection;
+  offline?: OfflineCoordinator;
   now?: () => number;
   /** Disable timers/window listeners (tests). */
   headless?: boolean;
@@ -82,6 +84,7 @@ export class SyncCoordinator {
   private accounts: AccountRegistry;
   private books: BooksStore;
   private notes: NotesLike;
+  private offline: OfflineCoordinator;
   private deps: SyncDeps;
   private now: () => number;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -96,6 +99,7 @@ export class SyncCoordinator {
     this.accounts = deps.accounts ?? defaultAccounts;
     this.books = deps.books ?? defaultBooks;
     this.notes = deps.notes ?? defaultNotes;
+    this.offline = deps.offline ?? defaultOffline;
     this.now = deps.now ?? Date.now;
   }
 
@@ -103,12 +107,19 @@ export class SyncCoordinator {
 
   start(): void {
     this.accounts.setHooks({
-      onAdded: (k) => this.restartFeed(k),
+      onAdded: (k) => {
+        const a = this.accounts.get(k);
+        if (a?.user_id) this.offline.allowAccount(a);
+        this.restartFeed(k);
+      },
       onNeedsLogin: (k) => this.stopFeed(k, 'auth_dead', 'precisa entrar'),
-      onRemoved: (k) => {
+      onRemoved: (k, acct) => {
         this.stopFeed(k);
         this.forgetAccount(k);
         this.books.removeAccount(k);
+        // LGPD: the account's replicas, caches and conflict copies leave
+        // the device with it (the sign-out UI offered the export first).
+        if (acct?.user_id) void this.offline.wipeAccount(acct, 'signed_out');
       },
       onOutcome: (k, o, e) => this.setHealth(k, o, e),
     });
@@ -229,8 +240,27 @@ export class SyncCoordinator {
 
   editorInput(vaultID: string): EditorInput {
     const e = this.editor;
-    if (!e || e.vaultID !== vaultID || e.session.isDestroyed) return { state: 'closed', pending: false };
-    return { state: e.session.protocolState, pending: e.session.pending };
+    const open = e && e.vaultID === vaultID && !e.session.isDestroyed ? e.session : null;
+    // Persisted replicas of OTHER notes of this book with unsent edits
+    // also make the book "pendente"; the open note is represented by
+    // its live session (a live, streaming editor is not pending).
+    const others = this.offline.pendingNotes(vaultID, open?.noteID ?? null).length > 0;
+    if (!open) return { state: 'closed', pending: others };
+    return { state: open.protocolState, pending: open.pending || others };
+  }
+
+  /** Notes of the book with unsent edits (popover detail). */
+  pendingCount(book: Book): number {
+    const open = this.editor?.vaultID === book.vault_id && !this.editor.session.isDestroyed ? this.editor.session : null;
+    return this.offline.pendingNotes(book.vault_id, open?.noteID ?? null).length + (open?.pending ? 1 : 0);
+  }
+
+  /** The browser or the account's REST says the network is down:
+   *  structural edits (create/rename/delete) are disabled. */
+  isOffline(book: Book | null): boolean {
+    if (!this.offline.browserOnline) return true;
+    if (!book) return false;
+    return this.health[this.books.accountKeyOf(book)]?.last === 'network';
   }
 
   private cu(bookID: string): CatchUpInput {
@@ -357,11 +387,16 @@ export class SyncCoordinator {
         if (!b) return;
         this.books.markRevoked(ev.vault_id, key, ev.reason);
         this.logError(b.id, `acesso revogado (${ev.reason})`);
+        const acct = this.accounts.get(key);
+        if (acct?.user_id) await this.offline.wipeVault(acct, ev.vault_id);
         return;
       }
-      case 'session.ended':
+      case 'session.ended': {
+        const acct = this.accounts.get(key);
         this.accounts.markNeedsLogin(key, `sessão encerrada (${ev.reason})`);
+        if (acct?.user_id) await this.offline.wipeAccount(acct, 'session_ended');
         return;
+      }
       case 'reconnect':
         return; // handled by FeedConnection
     }
@@ -396,6 +431,7 @@ export class SyncCoordinator {
         const r = await client.getChanges(b.vault_id, cursor);
         if (!this.boundBook(key, b.vault_id)) return; // rebound meanwhile
         this.notes.applyChanges(b.vault_id, r.notes ?? [], r.deleted ?? []);
+        if (r.deleted?.length) await this.offline.onNotesDeleted(b.vault_id, r.deleted.map((d) => d.id));
         const last = Math.max(
           cursor,
           ...(r.notes ?? []).map((n) => n.change_seq ?? 0),

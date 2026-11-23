@@ -10,6 +10,7 @@
   import VaultsView from './views/VaultsView.svelte';
   import VaultHomeView from './views/VaultHomeView.svelte';
   import ThemePickerModal from './components/ThemePickerModal.svelte';
+  import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
 
   onMount(async () => {
     theme.init();
@@ -69,6 +70,8 @@
 {#if uiState.themePickerOpen}
   <ThemePickerModal />
 {/if}
+
+<OfflineRescueBanner />
 
 <style>
   :global(:root) {

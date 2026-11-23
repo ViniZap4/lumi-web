@@ -63,7 +63,8 @@ export const TAB_ACCOUNTS_KEY = 'lumi.tab.accounts.v1';
 export interface AccountHooks {
   onNeedsLogin?: (key: string) => void;
   onOutcome?: (key: string, outcome: RestOutcome, err?: ApiError) => void;
-  onRemoved?: (key: string) => void;
+  /** `account` = the row as it was right before removal. */
+  onRemoved?: (key: string, account?: Account) => void;
   onAdded?: (key: string) => void;
 }
 
@@ -283,6 +284,7 @@ export class AccountRegistry {
   }
 
   async forget(key: string): Promise<void> {
+    const removed = this.get(key) ?? undefined;
     this.tokens.delete(key);
     this.clients.delete(key);
     this.list = this.list.filter((a) => a.key !== key);
@@ -292,7 +294,7 @@ export class AccountRegistry {
       // ignore
     }
     this.writeTab();
-    this.hooks.onRemoved?.(key);
+    this.hooks.onRemoved?.(key, removed);
   }
 
   // ---- persistence -------------------------------------------------------------

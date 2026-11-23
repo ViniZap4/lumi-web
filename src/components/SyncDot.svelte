@@ -2,17 +2,19 @@
   // Sync state dot (SPEC-LIVROS §4.1 "Indicador"). Shape differs per
   // state, not only colour, so it is legible without colour vision; the
   // pt-BR label is always available to assistive tech.
-  import { STATE_LABEL, type BookSyncState } from '../lib/bookstatus.ts';
+  import { STATE_LABEL, PENDING_LABEL, type BookSyncState } from '../lib/bookstatus.ts';
 
   interface Props {
     state: BookSyncState;
     label?: boolean;
+    /** Unsent local edits (BookStatus.pending) — shown as a qualifier. */
+    pending?: boolean;
   }
-  const { state, label = false }: Props = $props();
-  const text = $derived(STATE_LABEL[state].pt);
+  const { state, label = false, pending = false }: Props = $props();
+  const text = $derived(STATE_LABEL[state].pt + (pending ? ` · ${PENDING_LABEL.pt}` : ''));
 </script>
 
-<span class="sync-dot-wrap" data-state={state} title={text}>
+<span class="sync-dot-wrap" data-state={state} data-pending={pending ? 'true' : undefined} title={text}>
   {#if state === 'not_bound'}
     <span class="glyph" aria-hidden="true">▭</span>
   {:else if state === 'read_only'}

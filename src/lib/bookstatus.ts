@@ -43,7 +43,9 @@ export type EditorState = 'closed' | 'CONNECTING' | 'SYNCING' | 'LIVE' | 'OFFLIN
 
 export interface EditorInput {
   state: EditorState;
-  /** Local edits made while OFFLINE, no SyncStep2 since reconnecting. */
+  /** Local edits the server has not confirmed: the open editor's
+   *  unsent edits, or persisted replicas of this book with unsent edits
+   *  (web offline). */
   pending: boolean;
 }
 
@@ -58,6 +60,13 @@ export interface RestHealthInput {
 export interface BookStatus {
   state: BookSyncState;
   reason: string | null;
+  /** "Pendente" (SPEC-LIVROS §4.2): local edits not yet confirmed by
+   *  the server. NOT an extra state — the §4.1 table has seven states
+   *  and pending is an input to "Sincronizando". It is surfaced as a
+   *  qualifier so a book that is Offline (which wins precedence) can
+   *  still say that it holds unsent edits ("Offline · pendente").
+   *  Always false for local books and when the user must sign in. */
+  pending: boolean;
 }
 
 /** Failures in a row before a book shows "Erro" (§4.1). */
@@ -76,6 +85,18 @@ export function bookStatus(
   editor: EditorInput,
   restHealth: RestHealthInput,
 ): BookStatus {
+  const r = bookState(book, accountFeed, catchUp, editor, restHealth);
+  const pending = editor.pending && r.state !== 'not_bound' && r.state !== 'needs_login';
+  return { ...r, pending };
+}
+
+function bookState(
+  book: BookInput,
+  accountFeed: AccountFeedInput,
+  catchUp: CatchUpInput,
+  editor: EditorInput,
+  restHealth: RestHealthInput,
+): Omit<BookStatus, 'pending'> {
   // 1. Não ligado
   if (book.kind === 'local') return { state: 'not_bound', reason: null };
 
@@ -122,6 +143,9 @@ export function bookStatus(
   if (!book.can_edit) return { state: 'read_only', reason: null };
   return { state: 'up_to_date', reason: null };
 }
+
+/** Qualifier label for `pending` (pt-BR / en). */
+export const PENDING_LABEL = { pt: 'Pendente', en: 'Pending' };
 
 /** UI labels (pt-BR / en), §4.1. */
 export const STATE_LABEL: Record<BookSyncState, { pt: string; en: string }> = {

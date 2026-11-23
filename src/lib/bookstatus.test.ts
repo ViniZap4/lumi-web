@@ -54,3 +54,40 @@ describe('bookStatus — spec table', () => {
     expect(out.reason).toMatch(/removido/);
   });
 });
+
+// Web-only: the "Pendente" qualifier. It is NOT a state (the shared
+// fixture keeps its seven states and 31 cases untouched); it rides on
+// BookStatus.pending so Offline — which wins precedence — can still
+// say that local edits are waiting.
+describe('bookStatus — pending qualifier (web)', () => {
+  const run = (over: AnyObj) =>
+    bookStatus(
+      { ...d.book, ...(over.book ?? {}) },
+      'accountFeed' in over ? over.accountFeed : d.accountFeed,
+      { ...d.catchUp, ...(over.catchUp ?? {}) },
+      { ...d.editor, ...(over.editor ?? {}) },
+      { ...d.restHealth, ...(over.restHealth ?? {}) },
+    );
+
+  it('the shared fixture still has its 31 cases', () => {
+    expect(cases.cases).toHaveLength(31);
+  });
+
+  it('offline with unsent edits → state offline, pending true', () => {
+    const out = run({ restHealth: { last: 'network', nonTransientFailures: 0 }, editor: { state: 'OFFLINE', pending: true } });
+    expect(out).toMatchObject({ state: 'offline', pending: true });
+  });
+
+  it('feed open with unsent edits → syncing, pending true', () => {
+    expect(run({ editor: { state: 'closed', pending: true } })).toMatchObject({ state: 'syncing', pending: true });
+  });
+
+  it('never pending for local books or when the user must sign in', () => {
+    expect(run({ book: { kind: 'local', vault_id: null }, accountFeed: null, editor: { state: 'OFFLINE', pending: true } }).pending).toBe(false);
+    expect(run({ accountFeed: { state: 'auth_dead' }, editor: { state: 'OFFLINE', pending: true } }).pending).toBe(false);
+  });
+
+  it('nothing pending → pending false', () => {
+    expect(run({})).toMatchObject({ state: 'up_to_date', pending: false });
+  });
+});

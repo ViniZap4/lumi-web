@@ -4,7 +4,9 @@
   import { notes } from '../lib/notes.svelte.ts';
   import { renderMarkdown } from '../lib/markdown.ts';
   import { ApiError } from '../lib/types.ts';
-  import { isAuthFailure, createNoteWsTicket } from '../lib/api.ts';
+  import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
+  import { planSession, startSession, loadEditorSession, flushPending } from '../lib/editor-boot.ts';
+  import type { ConflictCopy } from '../lib/offline-store.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
   import { accounts } from '../lib/accounts.svelte.ts';
@@ -29,7 +31,6 @@
   import type { EditorSession as EditorSessionT } from '../lib/editor-session.svelte.ts';
 
   type NoteEditorComp = typeof import('../components/NoteEditor.svelte').default;
-  type EditorSessionCtor = typeof import('../lib/editor-session.svelte.ts').EditorSession;
 
   // Yazi/miller browser (wave 3): parent | current | preview columns
   // derived from note paths. Grammar mirrors tui-client/ui/keys_tree.go.
@@ -67,7 +68,68 @@
   let editorLoading = $state(false);
   let NoteEditor = $state<NoteEditorComp | null>(null);
   let editorStats = $state<EditorStats | null>(null);
-  let EditorSession = $state<EditorSessionCtor | null>(null);
+  /** Transient hint for actions that need the network. */
+  let offlineHint = $state<string | null>(null);
+  let hintTimer: ReturnType<typeof setTimeout> | null = null;
+  const OFFLINE_HINT = 'Indisponível offline: criar, renomear e apagar notas precisam do servidor.';
+  const structuralOffline = $derived(sync.isOffline(books.active));
+
+  function showOfflineHint(): void {
+    offlineHint = OFFLINE_HINT;
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => (offlineHint = null), 4000);
+  }
+
+  // Conflict copies (lineage mismatch / deleted note) of this book.
+  $effect(() => {
+    const vid = vaults.selectedID;
+    untrack(() => void offline.watchConflicts(vid));
+  });
+  const noteConflicts = $derived(offline.conflicts.filter((c) => c.noteID === notes.selectedID));
+  // Copies of notes that no longer exist cannot be reached through a
+  // note: list them at the book level.
+  const orphanConflicts = $derived(
+    notes.stale || notes.loadingList ? [] : offline.conflicts.filter((c) => !notes.list.some((n) => n.id === c.noteID)),
+  );
+
+  // Lineage mismatch: the session refused to merge its replica (now a
+  // conflict copy) and stopped. Rebuild a fresh session — the replica
+  // is gone, so it joins empty and adopts the server's history.
+  $effect(() => {
+    const c = editSession?.lineageConflict;
+    if (!c) return;
+    untrack(() => {
+      exitEdit();
+      void enterEdit();
+    });
+  });
+
+  // Push replicas of this book that still hold unsent edits (closed
+  // notes edited offline) once the network is back.
+  $effect(() => {
+    const vid = vaults.selectedID;
+    if (!vid || structuralOffline) return;
+    const open = editSession?.noteID ?? null;
+    if (offline.pendingNotes(vid, open).length === 0) return;
+    untrack(() => void flushPending(vid, open));
+  });
+
+  function exportConflict(c: ConflictCopy): void {
+    downloadText(exportFilename([{ vaultID: c.vaultID, noteID: c.noteID, title: c.title, text: c.text }]), c.text);
+  }
+
+  async function copyConflict(c: ConflictCopy): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(c.text);
+    } catch {
+      exportConflict(c);
+    }
+  }
+
+  function exportAllConflicts(list: ConflictCopy[]): void {
+    const items = list.map((c) => ({ vaultID: c.vaultID, noteID: c.noteID, title: c.title, text: c.text }));
+    if (items.length) downloadText(exportFilename(items), bundleMarkdown(items));
+  }
 
   let lastDelete = $state(0); // 'dd' double-tap timestamp
   let creating = false;
@@ -173,6 +235,8 @@
 
   onDestroy(() => {
     if (selTimer) clearTimeout(selTimer);
+    if (hintTimer) clearTimeout(hintTimer);
+    void offline.watchConflicts(null);
     // Tear the editor session down (socket + Y.Doc) — e.g. on logout
     // App.svelte unmounts this view while an editor is open.
     if (editSession) {
@@ -280,6 +344,10 @@
       const target = noteUnderFocus();
       if (!target) return;
       e.preventDefault();
+      if (structuralOffline) {
+        showOfflineHint();
+        return;
+      }
       const now = Date.now();
       if (now - lastDelete < 500) {
         lastDelete = 0;
@@ -465,6 +533,10 @@
   }
 
   function openNewNote(): void {
+    if (structuralOffline) {
+      showOfflineHint();
+      return;
+    }
     modal = 'new-note';
     modalErr = null;
     newNoteTitle = '';
@@ -503,18 +575,7 @@
   async function enterEdit(): Promise<void> {
     const vaultID = vaults.selectedID;
     const noteID = notes.selectedID;
-    // The editor uses the ACTIVE BOOK's account: its server, token and
-    // identity — never another account's.
-    const book = vaultID ? books.bookForVault(vaultID) : null;
-    const key = book ? books.accountKeyOf(book) : null;
-    const acct = key ? accounts.get(key) : null;
-    const user = key ? accounts.user(key) : null;
-    if (!notes.content || !user || !vaultID || !noteID || !key || !acct) return;
-    const token = accounts.tokenFor(key);
-    if (!token) {
-      editError = `Entre em ${serverLabel(acct.server_url)} para editar.`;
-      return;
-    }
+    if (!notes.content || !vaultID || !noteID) return;
     if (editorLoading || editSession) return;
 
     editorLoading = true;
@@ -522,39 +583,30 @@
     try {
       // First edit per session pulls the CM6 + vim + y-codemirror.next
       // + yjs + y-websocket chunks, in parallel.
-      if (!NoteEditor || !EditorSession) {
-        const [editorMod, sessionMod] = await Promise.all([
-          import('../components/NoteEditor.svelte'),
-          import('../lib/editor-session.svelte.ts'),
-        ]);
-        NoteEditor = editorMod.default;
-        EditorSession = sessionMod.EditorSession;
-      }
-      // The user may have moved on while the chunk loaded.
+      const [editorMod, Ctor] = await Promise.all([
+        NoteEditor ? Promise.resolve(null) : import('../components/NoteEditor.svelte'),
+        loadEditorSession(),
+      ]);
+      if (editorMod) NoteEditor = editorMod.default;
+      // The editor uses the ACTIVE BOOK's account: its server, token and
+      // identity — never another account's. It also loads this note's
+      // offline replica, when one exists for that account.
+      const plan = await planSession(vaultID, noteID);
+      // The user may have moved on while the chunks loaded.
       if (notes.selectedID !== noteID || vaults.selectedID !== vaultID || editSession) return;
+      if (typeof plan === 'string') {
+        editError = plan;
+        return;
+      }
 
       // Join rule (CRDT client protocol §2): start from an EMPTY doc
       // and let the server's SyncStep2 deliver the text. Seeding the
       // Y.Text with the REST body here duplicated the whole note,
       // because the server's doc already holds that text under a
-      // different clientID. Until the session reports `synced`, the
-      // template shows a read-only preview instead of the editor.
-      const client = accounts.client(key);
-      editSession = new EditorSession(vaultID, noteID, token, user, {
-        serverUrl: acct.server_url,
-        probeAuth: async () => {
-          try {
-            await client.me();
-            return 'ok';
-          } catch (e) {
-            return isAuthFailure(e) ? 'unauthorized' : 'unknown';
-          }
-        },
-        onAuthFailure: () => accounts.markNeedsLogin(key, 'sessão expirada'),
-        // Fresh single-use ticket per (re)connect; 404 → ?token= fallback.
-        fetchTicket: () => createNoteWsTicket(vaultID, noteID),
-        getToken: () => accounts.tokenFor(key),
-      });
+      // different clientID. Until the session is `editable` (first
+      // SyncStep2, or a replica of THIS note persisted after an earlier
+      // SyncStep2 was restored) the template shows a read-only preview.
+      editSession = startSession(Ctor, plan);
       sync.setEditor(vaultID, editSession);
       editMode = true;
       pane = 'note'; // the editor gets the wide pane
@@ -571,7 +623,7 @@
     if (sess) {
       // Show the latest collaborative text in the preview right away;
       // the server mirrors it to disk ~500 ms later.
-      if (sess.synced && !sess.isDestroyed) {
+      if (sess.editable && !sess.isDestroyed && !sess.lineageConflict) {
         notes.applyLocalBody(sess.noteID, sess.ytext.toString());
       }
       sess.destroy();
@@ -598,7 +650,7 @@
   async function saveEdit(): Promise<void> {
     const sess = editSession;
     if (saving || !sess) return;
-    if (!sess.synced || sess.status !== 'connected') {
+    if (!sess.editable || !sess.liveSynced) {
       editError = 'Offline — your edits are kept locally and will sync when the connection returns.';
       return;
     }
@@ -643,7 +695,8 @@
     </div>
     <div class="topbar-right">
       <SyncStatusPopover />
-      <button class="link-button" onclick={openNewNote} type="button">+ New</button>
+      <button class="link-button" onclick={openNewNote} type="button" disabled={structuralOffline}
+        title={structuralOffline ? OFFLINE_HINT : 'New note (n)'}>+ New</button>
       <button class="link-button" onclick={() => void notes.refresh()} type="button">Refresh</button>
       <button class="link-button" onclick={() => (showSettings = true)} type="button">Settings</button>
       <button class="link-button" onclick={() => uiState.openThemePicker()} type="button">Theme</button>
@@ -672,8 +725,22 @@
     </nav>
     <span class="note-count" aria-live="off">
       {notes.list.length} notes{notes.loadingMore ? '…' : ''}
+      {#if notes.stale}<span class="stale" data-testid="list-stale" title="Última lista conhecida; atualiza quando a conexão voltar.">· lista offline{notes.staleAt ? ` de ${new Date(notes.staleAt).toLocaleString()}` : ''}</span>{/if}
     </span>
   </div>
+  {#if offlineHint}
+    <div class="banner" role="status" data-testid="offline-hint">{offlineHint}</div>
+  {/if}
+  {#if orphanConflicts.length > 0}
+    <div class="banner conflict" role="status" data-testid="orphan-conflicts">
+      {orphanConflicts.length} {orphanConflicts.length === 1 ? 'cópia local' : 'cópias locais'} de notas apagadas no servidor
+      ({orphanConflicts.map((c) => c.title || c.noteID).join(', ')}) não {orphanConflicts.length === 1 ? 'foi mesclada' : 'foram mescladas'}.
+      <span class="banner-actions">
+        <button class="link-button" type="button" onclick={() => exportAllConflicts(orphanConflicts)}>Baixar</button>
+        <button class="link-button" type="button" onclick={() => { for (const c of orphanConflicts) void offline.discardConflict(c.id); }}>Descartar</button>
+      </span>
+    </div>
+  {/if}
   {#each books.banners as b (b.id)}
     <div class="banner" role="status">
       {b.text}
@@ -779,6 +846,17 @@
       {:else if notes.contentError}
         <div class="error">{notes.contentError}</div>
       {:else if notes.content}
+        {#each noteConflicts as c (c.id)}
+          <div class="banner conflict" role="status" data-testid="conflict-copy">
+            Cópia local em conflito ({c.reason === 'deleted' ? 'a nota foi apagada no servidor' : c.reason === 'lineage' ? 'outra versão da nota' : 'acesso revogado'}),
+            salva em {new Date(c.at).toLocaleString()}. Ela não foi mesclada.
+            <span class="banner-actions">
+              <button class="link-button" type="button" onclick={() => exportConflict(c)}>Baixar</button>
+              <button class="link-button" type="button" onclick={() => void copyConflict(c)}>Copiar</button>
+              <button class="link-button" type="button" onclick={() => void offline.discardConflict(c.id)}>Descartar</button>
+            </span>
+          </div>
+        {/each}
         {#if editMode && editSession && NoteEditor}
           <div class="editor-frame" class:readable={editorSettings.value.readableWidth}>
             <div class="editor-bar">
@@ -810,7 +888,7 @@
                 </div>
                 <button class="icon-button" type="button" aria-label="Editor settings" title="Editor settings (Cmd/Ctrl+Shift+,)"
                   onclick={() => (editorSettings.open = true)}>⚙</button>
-                <button class="primary-button" onclick={saveEdit} disabled={saving || !editSession.synced} type="button">
+                <button class="primary-button" onclick={saveEdit} disabled={saving || !editSession.editable} type="button">
                   {saving ? 'Saving…' : 'Save'}
                 </button>
                 <button class="link-button" onclick={exitEdit} type="button">Done</button>
@@ -818,7 +896,7 @@
             </div>
             {#if editError}<div class="error">{editError}</div>{/if}
             {#if editSession.lastError}<div class="error" data-testid="session-error">{editSession.lastError}</div>{/if}
-            {#if !editSession.synced}
+            {#if !editSession.editable}
               <!-- Join rule: read-only preview until the server's
                    SyncStep2 has arrived. Never a local seed. -->
               <div class="placeholder" data-testid="editor-syncing">
@@ -857,8 +935,16 @@
               {/if}
               <span>{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}{editorSettings.value.vim ? ' · vim' : ''}</span>
               <span class="status-spacer"></span>
-              <span title="Edits sync live; the file on disk follows within ~500 ms.">
-                {editSession.pending ? 'Pending sync…' : editSession.liveSynced ? 'Saved live' : 'Offline — kept locally'}
+              <span data-testid="editor-sync-state" title={editSession.persistence
+                ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
+                : 'Edits sync live; the file on disk follows within ~500 ms.'}>
+                {editSession.pending
+                  ? 'Pending sync…'
+                  : editSession.liveSynced
+                    ? 'Saved live'
+                    : editSession.persistence
+                      ? 'Offline — kept on this device'
+                      : 'Offline — kept in this tab'}
               </span>
             </div>
           </div>
@@ -878,7 +964,9 @@
                 {editorLoading ? 'Loading…' : 'Edit'}
               </button>
               <button class="link-button" onclick={() => (editorSettings.open = true)} type="button" title="Editor settings (Cmd/Ctrl+Shift+,)">Editor settings</button>
-              <button class="link-button danger" onclick={() => (modal = 'delete-confirm')} type="button">Delete</button>
+              <button class="link-button danger" onclick={() => (modal = 'delete-confirm')} type="button"
+                disabled={structuralOffline} title={structuralOffline ? OFFLINE_HINT : 'Delete (dd)'}>Delete</button>
+              {#if notes.contentStale}<span class="stale" data-testid="content-stale">cópia local (offline)</span>{/if}
               <span class="reading-meta">{readingWords} {readingWords === 1 ? 'word' : 'words'}</span>
             </div>
             <!-- DOMPurify-sanitised HTML, see lib/markdown.ts. -->
@@ -1240,6 +1328,10 @@
   }
   .link-button:hover { text-decoration: underline; }
   .link-button.danger { color: var(--color-error); }
+  .link-button:disabled { opacity: 0.45; cursor: not-allowed; text-decoration: none; }
+  .stale { color: var(--color-warning, var(--color-text-dim, var(--color-muted))); margin-left: 0.35rem; font-size: 0.75rem; }
+  .banner.conflict { border-color: var(--color-warning, var(--color-error)); }
+  .banner-actions { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; }
   .banner {
     margin: 0.4rem;
     padding: 0.45rem 0.6rem;

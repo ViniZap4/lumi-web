@@ -15,8 +15,44 @@
   import VaultCreateModal from '../components/VaultCreateModal.svelte';
   import FederationJoinModal from '../components/FederationJoinModal.svelte';
   import SyncDot from '../components/SyncDot.svelte';
+  import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
+  import type { Account } from '../lib/accounts.svelte.ts';
+  import type { RescuedText } from '../lib/offline-store.ts';
 
   let showJoinFederated = $state(false);
+
+  // "Sair deste aparelho" wipes the account's offline replicas, list
+  // caches and conflict copies (LGPD). Unsent text is offered for
+  // export first; nothing leaves silently.
+  let signOutAsk = $state<{ account: Account; items: RescuedText[] } | null>(null);
+  let signingOut = $state(false);
+
+  async function requestSignOut(a: Account): Promise<void> {
+    let items: RescuedText[] = [];
+    try {
+      if (a.user_id) items = await offline.pendingForAccount(a);
+    } catch {
+      items = [];
+    }
+    if (items.length === 0) {
+      await accounts.signOut(a.key);
+      return;
+    }
+    signOutAsk = { account: a, items };
+  }
+
+  async function confirmSignOut(download: boolean): Promise<void> {
+    const ask = signOutAsk;
+    if (!ask || signingOut) return;
+    signingOut = true;
+    try {
+      if (download) downloadText(exportFilename(ask.items), bundleMarkdown(ask.items));
+      await accounts.signOut(ask.account.key);
+      signOutAsk = null;
+    } finally {
+      signingOut = false;
+    }
+  }
 
   // Joining a federation materialises a local replica vault — refresh
   // the list so it appears, then jump straight into it.
@@ -156,7 +192,7 @@
               onmouseenter={() => (cursor = i)}
             >
               <div class="vault-main">
-                <span class="vault-name"><SyncDot state={st.state} /> {b.name}</span>
+                <span class="vault-name"><SyncDot state={st.state} pending={st.pending} /> {b.name}</span>
                 <span class="vault-slug">{b.account}{st.reason ? ` · ${st.reason}` : ''}</span>
               </div>
               <div class="vault-meta">
@@ -188,7 +224,7 @@
               <span class="needs">precisa entrar</span>
               <button class="link-button" type="button" onclick={() => uiState.openSignIn(a.server_url, a.username)}>Entrar</button>
             {/if}
-            <button class="link-button" type="button" onclick={() => void accounts.signOut(a.key)}>Sair deste aparelho</button>
+            <button class="link-button" type="button" onclick={() => void requestSignOut(a)}>Sair deste aparelho</button>
           </span>
         </li>
       {/each}
@@ -203,6 +239,31 @@
   />
 {/if}
 
+{#if signOutAsk}
+  <div class="modal-overlay" role="presentation" onclick={() => (signOutAsk = null)} onkeydown={(e) => { if (e.key === 'Escape') signOutAsk = null; }}>
+    <div class="modal-panel" role="dialog" aria-modal="true" tabindex="-1" aria-label="Alterações não enviadas"
+      data-testid="signout-pending"
+      onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+      <h2>Alterações ainda não enviadas</h2>
+      <p class="modal-body">
+        {signOutAsk.items.length} {signOutAsk.items.length === 1 ? 'nota tem' : 'notas têm'} texto que não chegou a
+        {serverLabel(signOutAsk.account.server_url)}. Sair apaga deste navegador as cópias offline, as listas guardadas
+        e as cópias em conflito desta conta.
+      </p>
+      <ul class="pending-list">
+        {#each signOutAsk.items as it (it.vaultID + '/' + it.noteID)}
+          <li>{it.title || it.noteID}</li>
+        {/each}
+      </ul>
+      <div class="modal-actions">
+        <button class="primary-button" type="button" disabled={signingOut} onclick={() => void confirmSignOut(true)}>Baixar e sair</button>
+        <button class="link-button danger" type="button" disabled={signingOut} onclick={() => void confirmSignOut(false)}>Sair sem baixar</button>
+        <button class="link-button" type="button" onclick={() => (signOutAsk = null)}>Cancelar</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if showJoinFederated}
   <FederationJoinModal
     onclose={() => (showJoinFederated = false)}
@@ -211,6 +272,40 @@
 {/if}
 
 <style>
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  .modal-panel {
+    background: var(--color-background);
+    border: 1px solid var(--color-border, var(--color-muted));
+    border-radius: 6px;
+    max-width: min(32rem, 92vw);
+    padding: 1rem 1.25rem;
+    outline: none;
+  }
+  .modal-panel h2 { margin: 0 0 0.5rem; font-size: 1rem; }
+  .modal-body { font-size: 0.85rem; color: var(--color-text-dim, var(--color-muted)); }
+  .pending-list { font-size: 0.85rem; max-height: 10rem; overflow: auto; }
+  .modal-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+  .link-button.danger { color: var(--color-error); }
+  .primary-button {
+    padding: 0.4rem 0.8rem;
+    background: var(--color-primary);
+    border: none;
+    border-radius: 4px;
+    color: var(--color-background);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .primary-button:disabled { opacity: 0.5; cursor: progress; }
   .vaults-view {
     min-height: 100vh;
     background: var(--color-background);

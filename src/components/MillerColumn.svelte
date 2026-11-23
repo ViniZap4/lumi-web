@@ -30,6 +30,10 @@
     emptyText?: string;
     onpick?: (index: number, entry: Entry) => void;
     onopen?: (index: number, entry: Entry) => void;
+    /** Right-click on a row (context menu). */
+    oncontext?: (index: number, entry: Entry, ev: MouseEvent) => void;
+    /** A note row (by key) was dropped onto a folder row. */
+    ondropnote?: (noteKey: string, target: Entry) => void;
     element?: HTMLElement | null;
   }
 
@@ -44,6 +48,8 @@
     emptyText = 'Empty folder',
     onpick,
     onopen,
+    oncontext,
+    ondropnote,
     element = $bindable(null),
   }: Props = $props();
 
@@ -94,6 +100,32 @@
     }
   });
 
+  const DRAG_TYPE = 'text/x-lumi-key';
+  let dropKey = $state<string | null>(null);
+
+  function hasLumiKey(ev: DragEvent): boolean {
+    return !!ev.dataTransfer && [...ev.dataTransfer.types].includes(DRAG_TYPE);
+  }
+  function onDragStart(ev: DragEvent, e: Entry): void {
+    if (e.kind !== 'note' || !ev.dataTransfer) return;
+    ev.dataTransfer.setData(DRAG_TYPE, e.key);
+    ev.dataTransfer.effectAllowed = 'move';
+  }
+  function onDragOver(ev: DragEvent, e: Entry): void {
+    if (e.kind !== 'folder' || !ondropnote || !hasLumiKey(ev)) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+    dropKey = e.key;
+  }
+  function onDrop(ev: DragEvent, e: Entry): void {
+    dropKey = null;
+    if (e.kind !== 'folder' || !ondropnote) return;
+    const k = ev.dataTransfer?.getData(DRAG_TYPE);
+    if (!k) return;
+    ev.preventDefault();
+    ondropnote(k, e);
+  }
+
   function onscroll(): void {
     if (element) scrollTop = element.scrollTop;
   }
@@ -128,6 +160,7 @@
           class:folder={e.kind === 'folder'}
           class:virtual={e.kind === 'folder' && e.virtual}
           class:yanked={yankedKey != null && e.key === yankedKey}
+          class:drop-target={dropKey === e.key}
           role="option"
           tabindex="-1"
           aria-selected={i === cursor}
@@ -135,8 +168,16 @@
           aria-posinset={i + 1}
           style="top: {i * ROW_HEIGHT}px; height: {ROW_HEIGHT}px"
           data-key={e.key}
+          data-hint-target
+          draggable={e.kind === 'note' && !!ondropnote ? 'true' : undefined}
           onclick={() => onpick?.(i, e)}
           ondblclick={() => onopen?.(i, e)}
+          oncontextmenu={(ev) => { if (oncontext) { ev.preventDefault(); oncontext(i, e, ev); } }}
+          ondragstart={(ev) => onDragStart(ev, e)}
+          ondragover={(ev) => onDragOver(ev, e)}
+          ondragleave={() => { if (dropKey === e.key) dropKey = null; }}
+          ondrop={(ev) => onDrop(ev, e)}
+          ondragend={() => (dropKey = null)}
         >
           <span class="icon" aria-hidden="true">
             {#if e.kind === 'folder'}
@@ -196,6 +237,11 @@
   .row.open .name { color: var(--color-primary); font-weight: 550; }
   .row.yanked .name { text-decoration: underline dashed var(--color-warning); text-underline-offset: 3px; }
   .row.virtual { opacity: 0.75; }
+  .row.drop-target {
+    background: var(--tint-active);
+    outline: 1px dashed var(--color-primary);
+    outline-offset: -1px;
+  }
   .row.virtual .icon { color: var(--color-warning); }
   .icon {
     width: 14px;

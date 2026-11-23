@@ -3,7 +3,7 @@
   // servidor"). Used full-screen when there is no account on this
   // device, and embedded in a modal for "Adicionar servidor…" and for
   // re-entering an account that "Precisa entrar".
-  import { onMount, untrack } from 'svelte';
+  import { onMount, untrack, tick } from 'svelte';
   import { auth, type ProbeResult } from '../lib/auth.svelte.ts';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { DEFAULT_SERVER_URL } from '../lib/api.ts';
@@ -67,7 +67,28 @@
     } catch {
       // ignore — non-browser env or weird URL
     }
+    // Keyboard first: land on the first field that still needs input.
+    void tick().then(() => {
+      const ids = ['lumi-server-url', 'lumi-username', 'lumi-password'];
+      for (const id of ids) {
+        const el = document.getElementById(id) as HTMLInputElement | null;
+        if (el && !el.disabled && !el.value) {
+          el.focus();
+          return;
+        }
+      }
+    });
   });
+
+  /** ←/→ (and h/l) switch the Sign in / Create account tabs. */
+  function onTabsKey(e: KeyboardEvent): void {
+    const next = e.key === 'ArrowRight' || e.key === 'l';
+    const prev = e.key === 'ArrowLeft' || e.key === 'h';
+    if (!next && !prev) return;
+    e.preventDefault();
+    setMode(mode === 'signin' ? 'signup' : 'signin');
+    void tick().then(() => document.getElementById(`login-tab-${mode}`)?.focus());
+  }
 
   function clearInviteFromURL(): void {
     try {
@@ -200,10 +221,13 @@
       </div>
     {/if}
 
-    <div class="ui-seg mode-tabs" role="tablist">
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="ui-seg mode-tabs" role="tablist" aria-label="Account" onkeydown={onTabsKey}>
       <button
         class:active={mode === 'signin'}
         role="tab"
+        id="login-tab-signin"
+        tabindex={mode === 'signin' ? 0 : -1}
         aria-selected={mode === 'signin'}
         onclick={() => setMode('signin')}
         type="button"
@@ -211,6 +235,8 @@
       <button
         class:active={mode === 'signup'}
         role="tab"
+        id="login-tab-signup"
+        tabindex={mode === 'signup' ? 0 : -1}
         aria-selected={mode === 'signup'}
         onclick={() => setMode('signup')}
         type="button"
@@ -299,6 +325,7 @@
         <button
           type="button"
           class="ui-link consent-toggle"
+          aria-expanded={showConsent}
           onclick={() => (showConsent = !showConsent)}
         >
           {showConsent ? 'Hide' : 'Show'} consent options
@@ -308,6 +335,7 @@
             type="text"
             class="ui-input"
             placeholder="ToS version (from operator)"
+            aria-label="Terms of Service version"
             bind:value={tosVersion}
             disabled={submitting}
           />
@@ -315,6 +343,7 @@
             type="text"
             class="ui-input"
             placeholder="Privacy version (from operator)"
+            aria-label="Privacy policy version"
             bind:value={privacyVersion}
             disabled={submitting}
           />

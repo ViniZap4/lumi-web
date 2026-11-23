@@ -14,6 +14,7 @@
   import { ApiError } from '../lib/types.ts';
   import type { Alternate } from '../lib/books-model.ts';
   import SyncDot from './SyncDot.svelte';
+  import { isTextTarget, newChord, rovingKey, trapTab } from '../lib/list-keys.ts';
 
   let open = $state(false);
   let showAlts = $state(false);
@@ -22,6 +23,8 @@
   let renameErr = $state<string | null>(null);
   let renaming = $state(false);
   let panelEl = $state<HTMLElement | null>(null);
+  let triggerEl = $state<HTMLButtonElement | null>(null);
+  const chord = newChord();
   let now = $state(Date.now());
 
   const book = $derived(books.active);
@@ -62,13 +65,38 @@
     panelEl?.focus();
   }
 
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      open = false;
-    }
-    e.stopPropagation();
+  /** Close and hand focus back to the indicator. */
+  function close(): void {
+    open = false;
+    void tick().then(() => triggerEl?.focus());
   }
+
+  // Keyboard: j/k (↓/↑) walk the actions, gg/G jump, Enter runs the
+  // focused one, Esc / q (outside the rename field) closes and returns
+  // focus to the indicator; Tab cycles inside.
+  function onKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (trapTab(e, panelEl)) return;
+    if (e.key === 'Escape' || (e.key === 'q' && !e.ctrlKey && !e.metaKey && !isTextTarget(e.target))) {
+      e.preventDefault();
+      close();
+      return;
+    }
+    rovingKey(e, panelEl, 'button:not([disabled])', null, { chord });
+  }
+
+  /** Click outside closes (without stealing focus from the target). */
+  function onDocPointer(e: PointerEvent): void {
+    if (!open) return;
+    const t = e.target as Node | null;
+    if (t && (panelEl?.contains(t) || triggerEl?.contains(t))) return;
+    open = false;
+  }
+  $effect(() => {
+    if (!open) return;
+    document.addEventListener('pointerdown', onDocPointer, true);
+    return () => document.removeEventListener('pointerdown', onDocPointer, true);
+  });
 
   async function rename(): Promise<void> {
     if (!book || !renameValue.trim() || renameValue.trim() === book.name) return;
@@ -112,6 +140,10 @@
       aria-haspopup="dialog"
       aria-expanded={open}
       data-testid="sync-indicator"
+      aria-controls="sync-status-panel"
+      title="Estado de sincronização"
+      bind:this={triggerEl}
+      onkeydown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); void toggle(); } }}
       onclick={() => void toggle()}
     >
       <SyncDot state={status.state} pending={status.pending} label />
@@ -120,8 +152,10 @@
       <div
         bind:this={panelEl}
         class="panel"
+        id="sync-status-panel"
         role="dialog"
         aria-label="Estado de sincronização"
+        data-testid="sync-panel"
         tabindex="-1"
         onkeydown={onKey}
       >
@@ -207,9 +241,9 @@
           {#if confirmUnlink}
             <span class="note">Remove só deste aparelho; o livro continua no servidor.</span>
             <button type="button" class="link-button danger" onclick={unlink}>Remover da lista</button>
-            <button type="button" class="link-button" onclick={() => (confirmUnlink = false)}>Cancelar</button>
+            <button type="button" class="link-button" data-unlink-cancel onclick={() => { confirmUnlink = false; void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-unlink]')?.focus()); }}>Cancelar</button>
           {:else}
-            <button type="button" class="link-button" onclick={() => (confirmUnlink = true)}>Desligar</button>
+            <button type="button" class="link-button" data-unlink onclick={() => { confirmUnlink = true; void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-unlink-cancel]')?.focus()); }}>Desligar</button>
           {/if}
         </div>
       </div>
@@ -241,9 +275,10 @@
     z-index: 60;
     width: min(360px, 90vw);
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-pop);
+    animation: ui-rise 120ms var(--ease);
     padding: 0.8rem 0.9rem;
     font-size: 0.82rem;
     color: var(--color-text);
@@ -330,4 +365,6 @@
   .link-button.danger {
     color: var(--color-error);
   }
+  .link-button:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+  .link-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
 </style>

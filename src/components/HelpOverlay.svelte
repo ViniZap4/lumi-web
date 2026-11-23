@@ -1,6 +1,9 @@
 <script lang="ts">
-  // `?` overlay: the whole keymap on one sheet. Any key closes it.
-  import { onMount, onDestroy } from 'svelte';
+  // `?` overlay: the whole keymap on one sheet. j/k (↓/↑) scroll,
+  // d/u (⌃d/⌃u) half a page, gg/G top/bottom; Esc, q, ? or any other
+  // key closes it and focus returns to where it was.
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { captureFocus } from '../lib/list-keys.ts';
   import { KEYMAP } from '../lib/keymap-help.ts';
 
   interface Props {
@@ -9,23 +12,60 @@
   }
   const { onclose, leader = '\\' }: Props = $props();
 
+  let gridEl = $state<HTMLElement | null>(null);
+  let sheetEl = $state<HTMLElement | null>(null);
+  const restoreFocus = captureFocus();
+  let lastG = 0;
+
+  function scrollBy(dy: number | 'top' | 'bottom'): void {
+    const el = gridEl;
+    if (!el) return;
+    if (dy === 'top') el.scrollTop = 0;
+    else if (dy === 'bottom') el.scrollTop = el.scrollHeight;
+    else el.scrollTop += dy;
+  }
+
   function onKey(e: KeyboardEvent): void {
-    if (e.metaKey || e.ctrlKey || e.key === 'Shift' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') return;
+    if (e.metaKey || e.key === 'Shift' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') return;
+    const half = Math.max(80, (gridEl?.clientHeight ?? 400) / 2);
+    const k = e.key;
+    let scrolled = true;
+    if (e.ctrlKey) {
+      if (k === 'd') scrollBy(half);
+      else if (k === 'u') scrollBy(-half);
+      else return;
+    } else if (k === 'j' || k === 'ArrowDown') scrollBy(48);
+    else if (k === 'k' || k === 'ArrowUp') scrollBy(-48);
+    else if (k === 'd' || k === 'PageDown' || k === ' ') scrollBy(half);
+    else if (k === 'u' || k === 'PageUp') scrollBy(-half);
+    else if (k === 'G' || k === 'End') scrollBy('bottom');
+    else if (k === 'Home') scrollBy('top');
+    else if (k === 'g') {
+      const now = Date.now();
+      if (now - lastG < 800) { scrollBy('top'); lastG = 0; } else lastG = now;
+    } else scrolled = false;
     e.preventDefault();
     e.stopPropagation();
-    onclose();
+    if (!scrolled) onclose();
   }
-  onMount(() => window.addEventListener('keydown', onKey, true));
-  onDestroy(() => window.removeEventListener('keydown', onKey, true));
+  onMount(() => {
+    window.addEventListener('keydown', onKey, true);
+    void tick().then(() => sheetEl?.focus({ preventScroll: true }));
+  });
+  onDestroy(() => {
+    window.removeEventListener('keydown', onKey, true);
+    restoreFocus();
+  });
 </script>
 
 <div class="ui-scrim" role="presentation" onclick={onclose}>
-  <div class="ui-sheet help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabindex="-1" data-testid="help">
+  <div class="ui-sheet help" role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1" data-testid="help" bind:this={sheetEl}>
     <header class="head">
-      <span class="title">Keys</span>
-      <span class="hint">leader <kbd>{leader === '<Space>' ? 'space' : leader}</kbd> · any key to close</span>
+      <span class="title" id="help-title">Keys</span>
+      <span class="hint">leader <kbd>{leader === '<Space>' ? 'space' : leader}</kbd> · <kbd>j</kbd><kbd>k</kbd> scroll · any other key closes</span>
+      <button class="ui-btn ghost sm icon" type="button" aria-label="Close" onclick={onclose}>×</button>
     </header>
-    <div class="grid">
+    <div class="grid" bind:this={gridEl}>
       {#each KEYMAP as sec (sec.title)}
         <section>
           <h3 class="ui-eyebrow">{sec.title}</h3>
@@ -50,6 +90,7 @@
     padding: var(--sp-4) var(--sp-5) var(--sp-2);
   }
   .title { font-weight: 650; font-size: var(--text-lg); }
+  .head .hint { margin-left: auto; margin-right: var(--sp-2); }
   .hint { font-size: var(--text-xs); color: var(--color-text-dim); display: inline-flex; gap: 6px; align-items: center; }
   .grid {
     display: grid;

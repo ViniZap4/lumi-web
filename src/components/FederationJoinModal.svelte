@@ -8,6 +8,7 @@
   // Keyboard: Esc closes; Enter submits the form natively.
 
   import { onMount, onDestroy } from 'svelte';
+  import { captureFocus, isTextTarget, trapTab } from '../lib/list-keys.ts';
   import { federation } from '../lib/federation.svelte.ts';
   import { ApiError } from '../lib/types.ts';
 
@@ -60,15 +61,27 @@
     }
   }
 
+  let panelEl = $state<HTMLElement | null>(null);
+  const restoreFocus = captureFocus();
+
   function handleKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' || (e.key === 'q' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTextTarget(e.target))) {
       e.preventDefault();
       onclose();
     }
   }
 
+  function onPanelKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (trapTab(e, panelEl)) return;
+    handleKey(e);
+  }
+
   onMount(() => window.addEventListener('keydown', handleKey));
-  onDestroy(() => window.removeEventListener('keydown', handleKey));
+  onDestroy(() => {
+    window.removeEventListener('keydown', handleKey);
+    restoreFocus();
+  });
 </script>
 
 <div
@@ -81,13 +94,14 @@
     class="panel"
     role="dialog"
     aria-modal="true"
-    aria-label="Join federated vault"
+    aria-labelledby="fed-join-title"
     tabindex="-1"
+    bind:this={panelEl}
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onPanelKey}
   >
     <form class="form" onsubmit={submit}>
-      <h2>Join federated vault</h2>
+      <h2 id="fed-join-title">Join federated vault</h2>
       <p class="hint">
         Link this server to a vault hosted elsewhere. You need a
         federation-invite token from the home vault’s operator; this
@@ -137,7 +151,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
     display: flex;
     align-items: center;
     justify-content: center;

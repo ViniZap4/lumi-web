@@ -10,7 +10,8 @@
   // the OS, so users routinely want to set both halves at once. Dim
   // the inactive list so it's clear which one applies right now.
 
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { captureFocus, newChord, rovingKey, trapTab } from '../lib/list-keys.ts';
   import { themes, themeOrder, type Theme } from '../lib/themes.ts';
   import { theme } from '../lib/theme.svelte.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
@@ -25,7 +26,16 @@
     uiState.closeThemePicker();
   }
 
+  // Keyboard: j/k (↓/↑) walk the mode buttons + both theme lists,
+  // gg/G jump, Enter/l/space picks, Esc/q closes, Tab stays inside.
+  // Focus returns to whatever opened the picker.
+  let panelEl = $state<HTMLElement | null>(null);
+  const chord = newChord();
+  const restoreFocus = captureFocus();
+
   function handleKey(e: KeyboardEvent): void {
+    if (trapTab(e, panelEl)) return;
+    if (rovingKey(e, panelEl, '.mode-btn, .theme-row', close, { chord, halfPage: 6 })) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
@@ -34,10 +44,16 @@
 
   onMount(() => {
     window.addEventListener('keydown', handleKey);
+    // Start on the theme that is live right now.
+    void tick().then(() => {
+      const sel = panelEl?.querySelector<HTMLElement>('.theme-row.current') ?? panelEl?.querySelector<HTMLElement>('.theme-row');
+      (sel ?? panelEl)?.focus();
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKey);
+    restoreFocus();
   });
 
   // The "currently active" theme — used to mark the right row in the
@@ -73,21 +89,20 @@
   class="overlay"
   role="presentation"
   onclick={close}
-  onkeydown={(e) => {
-    if (e.key === 'Escape') close();
-  }}
 >
   <div
     class="panel"
     role="dialog"
     aria-modal="true"
-    aria-label="Theme picker"
+    aria-labelledby="theme-picker-title"
     tabindex="-1"
+    bind:this={panelEl}
+    data-testid="theme-picker"
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={(e) => { e.stopPropagation(); handleKey(e); }}
   >
     <header class="panel-head">
-      <h2>Themes</h2>
+      <h2 id="theme-picker-title">Themes</h2>
       <button class="close" type="button" aria-label="Close" onclick={close}>×</button>
     </header>
 
@@ -169,7 +184,7 @@
     </section>
 
     <footer class="panel-foot">
-      <span class="hint"><kbd>Esc</kbd> closes — changes apply instantly</span>
+      <span class="hint"><kbd>j</kbd><kbd>k</kbd> move · <kbd>⏎</kbd> apply · <kbd>Esc</kbd> closes — changes apply instantly</span>
     </footer>
   </div>
 </div>
@@ -188,7 +203,9 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
+    backdrop-filter: blur(2px);
+    animation: ui-fade 120ms var(--ease);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -197,8 +214,10 @@
   }
   .panel {
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 8px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+    animation: ui-rise 140ms var(--ease);
     width: min(560px, 100%);
     max-height: 88vh;
     overflow-y: auto;
@@ -307,7 +326,7 @@
     padding: 0.55rem 0.7rem;
     background: var(--color-overlay-bg, var(--color-background));
     border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
+    border-radius: var(--radius);
     color: var(--color-text);
     font-family: inherit;
     font-size: 0.88rem;
@@ -316,6 +335,13 @@
   }
   .theme-row:hover {
     border-color: var(--color-secondary);
+    background: var(--tint-hover);
+  }
+  .theme-row:focus-visible,
+  .mode-btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+    background: var(--tint-active);
   }
   .theme-row.active {
     border-color: var(--color-primary);
@@ -347,13 +373,5 @@
     font-size: 0.78rem;
     text-align: center;
   }
-  kbd {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 3px;
-    padding: 0.05rem 0.35rem;
-    font-family: inherit;
-    font-size: 0.76rem;
-    color: var(--color-secondary);
-  }
+  kbd { margin: 0 1px; }
 </style>

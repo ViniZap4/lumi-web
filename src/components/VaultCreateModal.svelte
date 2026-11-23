@@ -4,9 +4,12 @@
   // store has prepended the new vault to the live list, so the
   // parent just closes the modal (and optionally jumps into it).
   //
-  // Keyboard: Esc closes; Enter submits the form natively.
+  // Keyboard: Esc (or q outside a text field) closes from anywhere in
+  // the dialog; Enter submits the form natively; Tab cycles inside.
+  // Focus returns to whatever opened the modal.
 
   import { onMount, onDestroy } from 'svelte';
+  import { captureFocus, isTextTarget, trapTab } from '../lib/list-keys.ts';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { ApiError } from '../lib/types.ts';
   import { accounts } from '../lib/accounts.svelte.ts';
@@ -52,34 +55,48 @@
     }
   }
 
+  let panelEl = $state<HTMLElement | null>(null);
+  const restoreFocus = captureFocus();
+
   function handleKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' || (e.key === 'q' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTextTarget(e.target))) {
       e.preventDefault();
       onclose();
     }
   }
 
+  /** Keys inside the dialog never reach the view underneath. */
+  function onPanelKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (trapTab(e, panelEl)) return;
+    handleKey(e);
+  }
+
   onMount(() => window.addEventListener('keydown', handleKey));
-  onDestroy(() => window.removeEventListener('keydown', handleKey));
+  onDestroy(() => {
+    window.removeEventListener('keydown', handleKey);
+    restoreFocus();
+  });
 </script>
 
 <div
   class="overlay"
   role="presentation"
   onclick={onclose}
-  onkeydown={(e) => { if (e.key === 'Escape') onclose(); }}
 >
   <div
     class="panel"
     role="dialog"
     aria-modal="true"
-    aria-label="Novo livro"
+    aria-labelledby="new-book-title"
     tabindex="-1"
+    bind:this={panelEl}
+    data-testid="vault-create"
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onPanelKey}
   >
     <form class="form" onsubmit={submit}>
-      <h2>Novo livro</h2>
+      <h2 id="new-book-title">Novo livro</h2>
       {#if usable.length > 1}
         <label class="hint" for="new-book-account">onde</label>
         <select id="new-book-account" class="input" bind:value={accountKey} disabled={submitting}>
@@ -93,6 +110,7 @@
         class="input"
         type="text"
         placeholder="Name (e.g. Personal notes)"
+        aria-label="Name"
         bind:value={name}
         disabled={submitting}
         autofocus
@@ -102,6 +120,7 @@
         class="input"
         type="text"
         placeholder="Slug (optional — auto-generated)"
+        aria-label="Slug"
         bind:value={slug}
         disabled={submitting}
         pattern="[a-z0-9-]*"
@@ -126,7 +145,9 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
+    backdrop-filter: blur(2px);
+    animation: ui-fade 120ms var(--ease);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -135,8 +156,10 @@
   }
   .panel {
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+    animation: ui-rise 140ms var(--ease);
     width: min(420px, 100%);
     padding: 1.25rem;
     outline: none;
@@ -156,13 +179,13 @@
     padding: 0.5rem 0.7rem;
     background: var(--color-overlay-bg, var(--color-background));
     border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     color: var(--color-text);
     font-family: inherit;
     font-size: 0.95rem;
     outline: none;
   }
-  .input:focus { border-color: var(--color-secondary); }
+  .input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--tint-primary); }
   .hint {
     margin: 0;
     color: var(--color-text-dim, var(--color-muted));
@@ -200,4 +223,5 @@
     padding: 0 0.4rem;
   }
   .link:hover { text-decoration: underline; }
+  .primary:focus-visible, .link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 </style>

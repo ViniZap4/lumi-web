@@ -10,7 +10,8 @@
   // is the source of truth either way (it will reject without the
   // capability), so this is purely UX.
 
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { captureFocus, focusables, isTextTarget, newChord, rovingKey, trapTab } from '../lib/list-keys.ts';
   import { auth } from '../lib/auth.svelte.ts';
   import { vaults } from '../lib/vaults.svelte.ts';
   import {
@@ -152,12 +153,69 @@
     void vaultMembers.openVault(vaults.selectedID);
     void federation.openVault(vaults.selectedID);
     window.addEventListener('keydown', handleKey);
+    void tick().then(() => panelEl?.querySelector<HTMLElement>('.tab.active')?.focus());
   });
   onDestroy(() => {
     window.removeEventListener('keydown', handleKey);
+    restoreFocus();
     // Don't clear() here — other consumers may still render off this
     // store. Refreshes are explicit.
   });
+
+  // ---- keyboard ---------------------------------------------------------
+  // Esc / q (outside text fields) closes the topmost layer (a confirm,
+  // an inline form, then the modal). ←/→ or [ ] or 1–5 switch tabs;
+  // j/k/gg/G walk the rows of the current tab, Enter/l enters a row
+  // (focuses its first control); Tab cycles inside the dialog.
+  const TABS: Tab[] = ['members', 'invites', 'roles', 'sharing', 'federation'];
+  let panelEl = $state<HTMLElement | null>(null);
+  const restoreFocus = captureFocus();
+  const chord = newChord();
+
+  async function selectTab(t: Tab): Promise<void> {
+    tab = t;
+    await tick();
+    panelEl?.querySelector<HTMLElement>(`#vs-tab-${t}`)?.focus();
+  }
+
+  function onPanelKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    const root = e.currentTarget as HTMLElement;
+    if (trapTab(e, root)) return;
+    const text = isTextTarget(e.target);
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (e.key === 'Escape' || (e.key === 'q' && plain && !text)) {
+      handleKey(new KeyboardEvent('keydown', { key: 'Escape' }));
+      e.preventDefault();
+      return;
+    }
+    if (root !== panelEl || text || !plain) return;
+    const onTab = (e.target as HTMLElement | null)?.getAttribute?.('role') === 'tab';
+    const i = TABS.indexOf(tab);
+    if (e.key === ']' || (onTab && e.key === 'ArrowRight') || (onTab && e.key === 'l')) {
+      e.preventDefault();
+      void selectTab(TABS[(i + 1) % TABS.length]);
+      return;
+    }
+    if (e.key === '[' || (onTab && e.key === 'ArrowLeft') || (onTab && e.key === 'h')) {
+      e.preventDefault();
+      void selectTab(TABS[(i - 1 + TABS.length) % TABS.length]);
+      return;
+    }
+    if (/^[1-5]$/.test(e.key)) {
+      e.preventDefault();
+      void selectTab(TABS[Number(e.key) - 1]);
+      return;
+    }
+    const row = (e.target as HTMLElement | null)?.closest?.('li.row') as HTMLElement | null;
+    if (row && row === e.target && (e.key === 'Enter' || e.key === 'l')) {
+      e.preventDefault();
+      focusables(row)[0]?.focus();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'l') return; // native button activation
+    rovingKey(e, panelEl?.querySelector<HTMLElement>('[role="tabpanel"]') ?? null, 'li.row', null, { chord, halfPage: 5 });
+  }
 
   function handleKey(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
@@ -645,32 +703,36 @@
   class="overlay"
   role="presentation"
   onclick={onclose}
-  onkeydown={(e) => { if (e.key === 'Escape') onclose(); }}
 >
   <div
     class="panel"
     role="dialog"
     aria-modal="true"
-    aria-label="Vault settings"
+    aria-labelledby="vs-title"
     tabindex="-1"
+    bind:this={panelEl}
+    data-testid="vault-settings"
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onPanelKey}
   >
     <header class="panel-head">
       <div class="title">
-        <h2>{vaults.selected?.name ?? 'Vault'}</h2>
+        <h2 id="vs-title">{vaults.selected?.name ?? 'Vault'}</h2>
         <span class="slug">{vaults.selected?.slug ?? ''}</span>
       </div>
       <button class="close" type="button" aria-label="Close" onclick={onclose}>×</button>
     </header>
 
-    <div class="tabs" role="tablist">
+    <div class="tabs" role="tablist" aria-label="Vault settings sections">
       <button
         type="button"
         class="tab"
         class:active={tab === 'members'}
         role="tab"
+        id="vs-tab-members"
+        aria-controls="vs-panel-members"
         aria-selected={tab === 'members'}
+        tabindex={tab === 'members' ? 0 : -1}
         onclick={() => (tab = 'members')}
       >Members ({vaultMembers.members.length})</button>
       <button
@@ -678,7 +740,10 @@
         class="tab"
         class:active={tab === 'invites'}
         role="tab"
+        id="vs-tab-invites"
+        aria-controls="vs-panel-invites"
         aria-selected={tab === 'invites'}
+        tabindex={tab === 'invites' ? 0 : -1}
         onclick={() => (tab = 'invites')}
       >Invites ({vaultMembers.invites.filter(isInviteActive).length})</button>
       <button
@@ -686,7 +751,10 @@
         class="tab"
         class:active={tab === 'roles'}
         role="tab"
+        id="vs-tab-roles"
+        aria-controls="vs-panel-roles"
         aria-selected={tab === 'roles'}
+        tabindex={tab === 'roles' ? 0 : -1}
         onclick={() => (tab = 'roles')}
       >Roles ({vaultMembers.roles.length})</button>
       <button
@@ -694,7 +762,10 @@
         class="tab"
         class:active={tab === 'sharing'}
         role="tab"
+        id="vs-tab-sharing"
+        aria-controls="vs-panel-sharing"
         aria-selected={tab === 'sharing'}
+        tabindex={tab === 'sharing' ? 0 : -1}
         onclick={() => (tab = 'sharing')}
       >Sharing</button>
       <button
@@ -702,7 +773,10 @@
         class="tab"
         class:active={tab === 'federation'}
         role="tab"
+        id="vs-tab-federation"
+        aria-controls="vs-panel-federation"
         aria-selected={tab === 'federation'}
+        tabindex={tab === 'federation' ? 0 : -1}
         onclick={() => (tab = 'federation')}
       >Federation ({federation.federations.length})</button>
     </div>
@@ -714,14 +788,14 @@
     {/if}
 
     {#if tab === 'members'}
-      <section class="body">
+      <div class="body" role="tabpanel" id="vs-panel-members" aria-labelledby="vs-tab-members">
         {#if rowError}<div class="error">{rowError}</div>{/if}
         {#if vaultMembers.members.length === 0 && !vaultMembers.loading}
           <div class="placeholder">No members yet.</div>
         {:else}
           <ul class="rows">
             {#each vaultMembers.members as m (m.user_id)}
-              <li class="row" class:self={m.user_id === auth.user?.id}>
+              <li tabindex="-1" class="row" class:self={m.user_id === auth.user?.id}>
                 <div class="row-main">
                   <div class="name">
                     {m.display_name || m.username}
@@ -801,11 +875,11 @@
             {#if transferError}<div class="error">{transferError}</div>{/if}
           </div>
         {/if}
-      </section>
+      </div>
     {/if}
 
     {#if tab === 'invites'}
-      <section class="body">
+      <div class="body" role="tabpanel" id="vs-panel-invites" aria-labelledby="vs-tab-invites">
         {#if !canInvite}
           <div class="placeholder">
             You don’t have permission to manage invites for this vault.
@@ -884,7 +958,7 @@
           {:else}
             <ul class="rows">
               {#each vaultMembers.invites as inv (inv.token)}
-                <li class="row" class:inactive={!isInviteActive(inv)}>
+                <li tabindex="-1" class="row" class:inactive={!isInviteActive(inv)}>
                   <div class="row-main">
                     <div class="name">
                       <span class="badge state-{inviteStateLabel(inv)}">{inviteStateLabel(inv)}</span>
@@ -904,11 +978,11 @@
             </ul>
           {/if}
         {/if}
-      </section>
+      </div>
     {/if}
 
     {#if tab === 'roles'}
-      <section class="body">
+      <div class="body" role="tabpanel" id="vs-panel-roles" aria-labelledby="vs-tab-roles">
         {#if canManageRoles}
           <div class="invite-bar">
             <button class="primary" type="button" onclick={openCreateRole}>+ New role</button>
@@ -974,7 +1048,7 @@
         {:else}
           <ul class="rows">
             {#each vaultMembers.roles as r (r.id)}
-              <li class="row">
+              <li tabindex="-1" class="row">
                 <div class="row-main">
                   <div class="name">
                     {r.name}
@@ -998,11 +1072,11 @@
             You don’t have permission to create or edit roles.
           </p>
         {/if}
-      </section>
+      </div>
     {/if}
 
     {#if tab === 'sharing'}
-      <section class="body">
+      <div class="body" role="tabpanel" id="vs-panel-sharing" aria-labelledby="vs-tab-sharing">
         {#if vaults.selected?.copied_from}
           <p class="hint provenance">
             This vault is a copy of “{vaults.selected.copied_from.slug}”,
@@ -1049,11 +1123,11 @@
             </div>
           {/if}
         {/if}
-      </section>
+      </div>
     {/if}
 
     {#if tab === 'federation'}
-      <section class="body">
+      <div class="body" role="tabpanel" id="vs-panel-federation" aria-labelledby="vs-tab-federation">
         {#if federation.loading}
           <div class="placeholder">Loading…</div>
         {:else}
@@ -1070,7 +1144,7 @@
           {:else}
             <ul class="rows">
               {#each federation.federations as f (f.id)}
-                <li class="row" class:inactive={f.status !== 'active'}>
+                <li tabindex="-1" class="row" class:inactive={f.status !== 'active'}>
                   <div class="row-main">
                     <div class="name">
                       <span class="badge fed-{f.role}">{f.role}</span>
@@ -1168,7 +1242,7 @@
             {:else}
               <ul class="rows">
                 {#each federation.invites as inv (inv.token)}
-                  <li class="row" class:inactive={!isFedInviteActive(inv)}>
+                  <li tabindex="-1" class="row" class:inactive={!isFedInviteActive(inv)}>
                     <div class="row-main">
                       <div class="name">
                         <span class="badge state-{fedInviteStateLabel(inv)}">{fedInviteStateLabel(inv)}</span>
@@ -1231,7 +1305,7 @@
           {:else}
             <ul class="rows">
               {#each federation.members as m (m.member_key)}
-                <li class="row">
+                <li tabindex="-1" class="row">
                   <div class="row-main">
                     <div class="name">{m.member_key}</div>
                     <div class="meta">joined {fmtDate(m.joined_at)}</div>
@@ -1262,7 +1336,7 @@
             </ul>
           {/if}
         {/if}
-      </section>
+      </div>
     {/if}
 
     {#if pendingDeleteRole}
@@ -1278,7 +1352,7 @@
           aria-modal="true"
           tabindex="-1"
           onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
+          onkeydown={onPanelKey}
         >
           <h2>Delete role “{pendingDeleteRole.name}”?</h2>
           <p class="hint">
@@ -1307,7 +1381,7 @@
           aria-modal="true"
           tabindex="-1"
           onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
+          onkeydown={onPanelKey}
         >
           <h2>Transfer ownership to {pendingTransfer.display_name || pendingTransfer.username}?</h2>
           <p class="hint">
@@ -1346,7 +1420,7 @@
           aria-modal="true"
           tabindex="-1"
           onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
+          onkeydown={onPanelKey}
         >
           <h2>Revoke federation with {pendingRevokeFederation.peer_url}?</h2>
           <p class="hint">
@@ -1387,7 +1461,7 @@
           aria-modal="true"
           tabindex="-1"
           onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
+          onkeydown={onPanelKey}
         >
           <h2>Remove {pendingRemoveFedMember.member_key}?</h2>
           <p class="hint">
@@ -1415,7 +1489,7 @@
           aria-modal="true"
           tabindex="-1"
           onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
+          onkeydown={onPanelKey}
         >
           <h2>Remove {pendingRemove.display_name || pendingRemove.username}?</h2>
           <p class="hint">
@@ -1436,7 +1510,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1449,8 +1523,10 @@
   }
   .panel {
     background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 8px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+    animation: ui-rise 140ms var(--ease);
     width: min(640px, 100%);
     max-height: 86vh;
     display: flex;
@@ -1508,10 +1584,14 @@
     font-size: 0.88rem;
     cursor: pointer;
   }
+  .tab:hover { color: var(--color-text); }
   .tab.active {
     color: var(--color-text);
     border-bottom-color: var(--color-primary);
   }
+  .tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+  .row:focus { outline: none; }
+  .row:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; background: var(--tint-active); }
 
   .body {
     padding: 0.85rem 1.1rem 1.1rem;
@@ -1533,8 +1613,8 @@
     gap: 0.6rem;
     padding: 0.55rem 0.7rem;
     background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
   }
   .row.self {
     border-color: var(--color-primary);

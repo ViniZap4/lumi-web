@@ -56,6 +56,16 @@
     void tick().then(() => inputEl?.focus());
   });
 
+  // A pointer that merely rests while the list scrolls under it must
+  // not steal the keyboard cursor: only real movement selects.
+  let lastPointer = '';
+  function hover(i: number, e: MouseEvent): void {
+    const p = `${e.clientX},${e.clientY}`;
+    if (p === lastPointer) return;
+    lastPointer = p;
+    cursor = i;
+  }
+
   function run(i: number): void {
     const it = items[i];
     if (!it) return;
@@ -75,6 +85,16 @@
     } else if (e.key === 'ArrowUp' || (e.ctrlKey && (e.key === 'p' || e.key === 'k'))) {
       e.preventDefault();
       if (n) cursor = (cursor - 1 + n) % n;
+    } else if (e.key === 'Tab') {
+      // Tab / ⇧Tab walk the results (focus stays in the input).
+      e.preventDefault();
+      if (n) cursor = (cursor + (e.shiftKey ? -1 : 1) + n) % n;
+    } else if (e.ctrlKey && (e.key === 'd' || e.key === 'u')) {
+      e.preventDefault();
+      if (n) cursor = Math.max(0, Math.min(n - 1, cursor + (e.key === 'd' ? 5 : -5)));
+    } else if (e.key === 'PageDown' || e.key === 'PageUp') {
+      e.preventDefault();
+      if (n) cursor = Math.max(0, Math.min(n - 1, cursor + (e.key === 'PageDown' ? 8 : -8)));
     } else if (e.key === 'Enter') {
       e.preventDefault();
       run(cursor);
@@ -128,7 +148,7 @@
           role="option"
           aria-selected={i === cursor}
           onclick={() => run(i)}
-          onmousemove={() => (cursor = i)}
+          onmousemove={(e) => hover(i, e)}
         >
           <span class="icon" aria-hidden="true">
             {#if it.kind === 'note'}

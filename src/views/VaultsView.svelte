@@ -3,7 +3,8 @@
   // opens. Same j/k/Enter navigation as before; rows grouped by server
   // with their sync dot; accounts section with "Entrar" / "Sair deste
   // aparelho"; first-time explanation and empty states.
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import { captureFocus, trapTab } from '../lib/list-keys.ts';
   import { books } from '../lib/books.svelte.ts';
   import { sync } from '../lib/sync.svelte.ts';
   import { accounts } from '../lib/accounts.svelte.ts';
@@ -75,6 +76,45 @@
     return () => window.removeEventListener('keydown', handleKey);
   });
 
+  // Roving focus: when a row has focus, keyboard moves carry it along
+  // (one tab stop for the list; the cursor row is the focusable one).
+  let listRoot = $state<HTMLElement | null>(null);
+  async function followFocus(): Promise<void> {
+    const a = document.activeElement as HTMLElement | null;
+    if (!a?.classList?.contains('vault-row')) return;
+    await tick();
+    const row = listRoot?.querySelector<HTMLElement>(`.vault-row[data-i="${cursor}"]`);
+    row?.focus();
+    if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+  }
+  $effect(() => {
+    void cursor;
+    void followFocus();
+  });
+
+  // Sign-out confirmation: Esc closes from anywhere inside; Tab stays
+  // in; focus returns to the button that asked.
+  let signOutPanel = $state<HTMLElement | null>(null);
+  let restoreSignOutFocus: (() => void) | null = null;
+  $effect(() => {
+    if (!signOutAsk) return;
+    restoreSignOutFocus = captureFocus();
+    void tick().then(() => signOutPanel?.querySelector<HTMLElement>('.modal-actions button')?.focus());
+    return () => {
+      const r = restoreSignOutFocus;
+      restoreSignOutFocus = null;
+      void tick().then(() => r?.());
+    };
+  });
+  function onSignOutKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (trapTab(e, signOutPanel)) return;
+    if (e.key === 'Escape' || e.key === 'q') {
+      e.preventDefault();
+      signOutAsk = null;
+    }
+  }
+
   function handleKey(e: KeyboardEvent): void {
     if (e.defaultPrevented || isEditableTarget(e.target)) return;
     if (uiState.accountModal || uiState.createBookOpen || showJoinFederated || uiState.settings || signOutAsk) return;
@@ -127,7 +167,7 @@
     </div>
   </header>
 
-  <main class="content">
+  <main class="content" bind:this={listRoot}>
     {#each books.banners as b (b.id)}
       <div class="banner" role="status">
         <span>{b.text}</span>
@@ -202,8 +242,10 @@
               class:current={b.id === books.activeID}
               role="option"
               aria-selected={b.id === books.activeID}
-              tabindex="0"
+              tabindex={cursor === i ? 0 : -1}
+              data-i={i}
               onclick={() => books.setActive(b.id)}
+              onfocus={() => (cursor = i)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); books.setActive(b.id); } }}
               onmouseenter={() => (cursor = i)}
             >
@@ -227,7 +269,7 @@
     {/if}
 
     <h2 class="ui-eyebrow group accounts-title">contas neste aparelho</h2>
-    <ul class="accounts">
+    <ul class="accounts" aria-label="Contas neste aparelho">
       {#each accounts.list as a (a.key)}
         <li class="account-row">
           <span class="avatar" aria-hidden="true">{(a.display_name || a.username).slice(0, 1).toUpperCase()}</span>

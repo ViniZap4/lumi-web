@@ -211,6 +211,19 @@ markedInstance.use({
         const safe = escapeHTML(id);
         return `<sup class="md-fn-ref"><a href="#fn-${safe}" id="fnref-${safe}" aria-label="Footnote ${n}">${n}</a></sup>`;
       },
+    },    {
+      // ==highlight== (Obsidian / iA Writer) → <mark>.
+      name: 'highlight',
+      level: 'inline',
+      start: (src: string) => src.indexOf('=='),
+      tokenizer(this: { lexer: { inlineTokens(s: string): Token[] } }, src: string) {
+        const m = /^==(?=\S)([^=\n]*?\S)==(?!=)/.exec(src);
+        if (!m) return undefined;
+        return { type: 'highlight', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+      renderer(this: { parser: { parseInline(t: Token[]): string } }, tok) {
+        return `<mark>${this.parser.parseInline((tok as unknown as { tokens: Token[] }).tokens)}</mark>`;
+      },
     },
   ],
   renderer: {
@@ -435,4 +448,22 @@ function resolveRelativeURLs(html: string, base: string): string {
       return `${p}${ref}"`;
     }
   });
+}
+
+/**
+ * Whether the note body opens with a level-1 heading equal to `title`
+ * (ignoring case, surrounding space, inline emphasis marks and closing
+ * `#`s). The reader then skips its own title so it is not printed
+ * twice.
+ */
+export function startsWithTitle(src: string, title: string): boolean {
+  const want = normTitle(title);
+  if (!want) return false;
+  const first = src.replace(/^﻿/, '').split('\n').find((l) => l.trim() !== '');
+  const m = first ? /^ {0,3}#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(first) : null;
+  return !!m && normTitle(m[1]) === want;
+}
+
+function normTitle(s: string): string {
+  return s.replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }

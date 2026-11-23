@@ -22,6 +22,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { renderMarkdown } from './markdown.ts';
+import { modName } from './platform.ts';
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -359,7 +360,7 @@ class TableWidget extends WidgetType {
   eq(o: TableWidget) { return o.source === this.source; }
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('div');
-    wrap.className = 'cm-lp-table';
+    wrap.className = 'cm-lp-table md-body';
     // Same marked -> DOMPurify path as the reading view.
     wrap.innerHTML = renderMarkdown(this.source);
     wrap.addEventListener('mousedown', (e) => {
@@ -396,10 +397,10 @@ export function specsToDecorations(specs: LPSpec[]): DecorationSet {
         if (s.to <= s.from) break;
         const attributes: Record<string, string> = {};
         if (s.href) attributes['data-lp-href'] = s.href;
-        if (s.href) attributes.title = `${s.href} (Ctrl/Cmd+click to open)`;
+        if (s.href) attributes.title = `${s.href} (${modName()}-click to open)`;
         if (s.note) {
           attributes['data-lp-note'] = s.note;
-          attributes.title = `${s.note} (Ctrl/Cmd+click to open the note)`;
+          attributes.title = `${s.note} (${modName()}-click to open the note)`;
         }
         ranges.push(Decoration.mark({ class: s.cls, attributes }).range(s.from, s.to));
         break;
@@ -469,68 +470,10 @@ const linkClicks = EditorView.domEventHandlers({
   },
 });
 
-const livePreviewTheme = EditorView.baseTheme({
-  '.cm-lp-h': { fontWeight: '700', color: 'var(--color-primary)', lineHeight: '1.35' },
-  '.cm-lp-h1': { fontSize: '1.75em', paddingTop: '0.4em' },
-  '.cm-lp-h2': { fontSize: '1.45em', paddingTop: '0.3em' },
-  '.cm-lp-h3': { fontSize: '1.25em', paddingTop: '0.2em' },
-  '.cm-lp-h4': { fontSize: '1.1em' },
-  '.cm-lp-h5': { fontSize: '1em' },
-  '.cm-lp-h6': { fontSize: '0.95em', color: 'var(--color-text-dim, var(--color-muted))' },
-  '.cm-lp-em': { fontStyle: 'italic' },
-  '.cm-lp-strong': { fontWeight: '700' },
-  '.cm-lp-strike': { textDecoration: 'line-through', opacity: '0.75' },
-  '.cm-lp-inline-code': {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: '0.9em',
-    background: 'var(--color-selected-bg, rgba(127,127,127,0.15))',
-    borderRadius: '3px',
-    padding: '0 0.2em',
-  },
-  '.cm-lp-link': { color: 'var(--color-accent, var(--color-primary))', textDecoration: 'underline', textUnderlineOffset: '2px' },
-  '.cm-lp-link[data-lp-href], .cm-lp-link[data-lp-note]': { cursor: 'pointer' },
-  '.cm-lp-note-link': { textDecorationStyle: 'dotted' },
-  '.cm-lp-quote': {
-    borderLeft: '3px solid var(--color-secondary, var(--color-primary))',
-    paddingLeft: '0.9em !important',
-    color: 'var(--color-text-dim, var(--color-muted))',
-    fontStyle: 'italic',
-  },
-  '.cm-lp-hr': {
-    backgroundImage: 'linear-gradient(var(--color-border, var(--color-muted)), var(--color-border, var(--color-muted)))',
-    backgroundSize: '100% 1px',
-    backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'center',
-  },
-  '.cm-lp-codeblock': {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: '0.9em',
-    background: 'var(--color-selected-bg, rgba(127,127,127,0.12))',
-  },
-  '.cm-lp-fence': { color: 'var(--color-text-dim, var(--color-muted))', fontSize: '0.8em' },
-  '.cm-lp-fence-open': { borderTopLeftRadius: '4px', borderTopRightRadius: '4px' },
-  '.cm-lp-fence-close': { borderBottomLeftRadius: '4px', borderBottomRightRadius: '4px' },
-  '.cm-lp-table-src': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.9em' },
-  '.cm-lp-task-done': { color: 'var(--color-text-dim, var(--color-muted))' },
-  '.cm-lp-checkbox': {
-    margin: '0 0.45em 0 0',
-    verticalAlign: 'middle',
-    cursor: 'pointer',
-    accentColor: 'var(--color-primary)',
-  },
-  '.cm-lp-bullet': { color: 'var(--color-primary)', display: 'inline-block', width: '0.8em' },
-  '.cm-lp-image': { maxWidth: '100%', maxHeight: '28em', verticalAlign: 'middle', borderRadius: '4px' },
-  '.cm-lp-image-blocked': { color: 'var(--color-text-dim, var(--color-muted))', fontStyle: 'italic' },
-  '.cm-lp-table': { padding: '0.3em 0', cursor: 'text', overflowX: 'auto' },
-  '.cm-lp-table table': { borderCollapse: 'collapse', fontFamily: 'inherit' },
-  '.cm-lp-table th, .cm-lp-table td': {
-    border: '1px solid var(--color-border, var(--color-muted))',
-    padding: '0.25em 0.6em',
-  },
-  '.cm-lp-table th': { background: 'var(--color-selected-bg, transparent)' },
-});
+// Styles live in app.css (`.cm-lp-*`), next to `.md-body`, so Live
+// Preview and the reader share one set of typographic tokens.
 
 /** The Live Preview extension (field + click handling + styles). */
 export function livePreview(): Extension {
-  return [livePreviewField, linkClicks, livePreviewTheme];
+  return [livePreviewField, linkClicks];
 }

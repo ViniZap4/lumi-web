@@ -50,7 +50,19 @@ export function enhanceRendered(root: HTMLElement, opts: EnhanceOptions): void {
       btn.textContent = 'Copy';
       btn.setAttribute('aria-label', 'Copy code');
       btn.setAttribute('data-hint-target', '');
-      head.append(lang, btn);
+      // Soft-wrap toggle for long lines (view-only state).
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'md-wrap';
+      wrap.dataset.action = 'wrap-code';
+      wrap.textContent = 'Wrap';
+      wrap.title = 'Wrap long lines';
+      wrap.setAttribute('aria-pressed', 'false');
+      wrap.setAttribute('data-hint-target', '');
+      const tools = document.createElement('span');
+      tools.className = 'md-code-tools';
+      tools.append(wrap, btn);
+      head.append(lang, tools);
       block.prepend(head);
     }
     const code = block.querySelector<HTMLElement>('pre > code');

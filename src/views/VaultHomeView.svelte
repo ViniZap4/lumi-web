@@ -2,7 +2,8 @@
   import { onMount, onDestroy, untrack, tick } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
-  import { renderBlocks, taskToggle } from '../lib/markdown.ts';
+  import { renderBlocks, taskToggle, startsWithTitle } from '../lib/markdown.ts';
+  import { keyLabel, settingsKey } from '../lib/platform.ts';
   import { ApiError } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
@@ -37,7 +38,7 @@
   import ContextMenu from '../components/ContextMenu.svelte';
   import HintOverlay from '../components/HintOverlay.svelte';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
-  import { countWords, type EditorStats } from '../lib/textstats.ts';
+  import { countWords, readingTime, type EditorStats } from '../lib/textstats.ts';
 
   let showSettings = $state(false);
   // Editor + Yjs runtime is lazy-loaded on first edit; types stay
@@ -70,7 +71,7 @@
   const keymap = new ShellKeymap();
   let shellPending = $state<string | null>(null);
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
-  let vimState = $state<{ mode: string; pending: string | null }>({ mode: 'normal', pending: null });
+  let vimState = $state<{ mode: string; pending: string | null; sub?: string | null }>({ mode: 'normal', pending: null });
   let paletteMode = $state<null | 'all' | 'command'>(null);
   let hintsOpen = $state(false);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; entry: Entry | null; title: string } | null>(null);
@@ -290,6 +291,7 @@
   });
 
   onMount(() => {
+    uiState.settingsHome = 'editor';
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   });
@@ -335,13 +337,7 @@
       return;
     }
 
-    // Cmd/Ctrl+Shift+, : settings (editor section), from anywhere.
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'Comma') {
-      e.preventDefault();
-      if (uiState.settings) uiState.closeSettings();
-      else uiState.openSettings(editMode ? 'vim' : 'editor');
-      return;
-    }
+    // ⌘, / Ctrl+, (settings) is global: App.svelte, capture phase.
     if (overlayOpen()) return;
 
     // A component (CodeMirror/vim, a form control) already handled it.
@@ -1040,6 +1036,7 @@
       case 'menu': openMenuAtCursor(); return;
       case 'reading': exitEditAnimated(); return;
       case 'toggleMode': editorSettings.toggleEditMode(); return;
+      case 'settings': uiState.openSettings('editor'); return;
       case 'confirm': void confirmDelete(); return;
       case 'submit':
         if (prompt) void submitPrompt();
@@ -1179,6 +1176,9 @@
   // notes (10k+ lines) are the slice 4.4 / 4.6 perf concern.
   const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
   const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
+  const readingMinutes = $derived(readingTime(readingWords));
+  /** The body opens with `# <title>`: don't print the title twice. */
+  const titleInBody = $derived(!!notes.content && startsWithTitle(notes.content.body ?? '', notes.selected?.title ?? ''));
   const noteFolder = $derived(notes.selected ? dirOf(notes.selected.path) : '');
   const noteCrumbs = $derived(noteFolder ? noteFolder.split('/') : []);
 
@@ -1189,6 +1189,10 @@
   // ---- legend -------------------------------------------------------------------
 
   const eff = $derived(effectiveSettings(editorSettings.value));
+  function vimModeLabel(m: string, sub?: string | null): string {
+    if (m === 'visual') return sub === 'linewise' ? 'V-Line' : sub === 'blockwise' ? 'V-Block' : 'Visual';
+    return m === 'insert' ? 'Insert' : m === 'replace' ? 'Replace' : 'Normal';
+  }
   const legendCtx: LegendContext = $derived.by(() => {
     if (paletteMode) return 'palette';
     if (pendingDelete) return 'confirm';
@@ -1237,7 +1241,7 @@
     { id: 'books', title: 'All books', keys: 'gb', group: 'navigate switch', run: () => books.openPicker() },
     { id: 'next-book', title: 'Next book', keys: ']', group: 'navigate switch', run: () => cycleBook(1) },
     { id: 'prev-book', title: 'Previous book', keys: '[', group: 'navigate switch', run: () => cycleBook(-1) },
-    { id: 'settings', title: 'Settings', keys: ',', group: 'preferences', run: () => uiState.openSettings('editor') },
+    { id: 'settings', title: 'Settings', keys: '⌘,', group: 'preferences', run: () => uiState.openSettings('editor') },
     { id: 'vim', title: 'Vim settings & .vimrc', group: 'preferences vimrc keys', run: () => uiState.openSettings('vim') },
     { id: 'appearance', title: 'Theme & appearance', group: 'preferences colour color dark light', run: () => uiState.openSettings('appearance') },
     { id: 'legend', title: editorSettings.value.legend ? 'Hide command legend' : 'Show command legend', group: 'view keys hints', run: () => editorSettings.update({ legend: !editorSettings.value.legend }) },
@@ -1290,11 +1294,11 @@
         title={structuralOffline ? OFFLINE_HINT : 'New note (a)'} aria-label="New note">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
-      <button class="ui-btn ghost sm palette-btn" onclick={() => (paletteMode = 'all')} type="button" title="Command palette (space, ⌘K)">
+      <button class="ui-btn ghost sm palette-btn" onclick={() => (paletteMode = 'all')} type="button" title="Command palette (space, {keyLabel('⌘K')})">
         <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <span class="palette-label">Search</span><kbd>⌘K</kbd>
+        <span class="palette-label">Search</span><kbd>{keyLabel('⌘K')}</kbd>
       </button>
-      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('editor')} type="button" title="Settings (,)" aria-label="Settings">
+      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('editor')} type="button" title="Settings ({settingsKey()} · ,)" aria-label="Settings">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.5" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
       </button>
     </div>
@@ -1459,11 +1463,14 @@
           </div>
         {/each}
         {#if editMode && editSession && NoteEditor}
-          <div class="editor-frame" class:readable={editorSettings.value.readableWidth && !splitOn} class:split={splitOn}>
-            <div class="editor-bar">
-              <div class="editor-meta">
+          <div class="editor-frame" class:split={splitOn}>
+            <header class="note-bar" data-testid="note-bar">
+              <div class="nb-lead">
                 <span class="conn-dot conn-{editSession.status}" data-testid="conn-status" title="Live sync: {editSession.status}">{editSession.status}</span>
-                <span class="editor-title">{notes.selected?.title}</span>
+                {#if noteCrumbs.length > 0}
+                  <span class="nb-crumbs" aria-hidden="true">{noteCrumbs.join(' / ')}<span class="nb-sep">/</span></span>
+                {/if}
+                <button type="button" class="nb-title" onclick={beginRename} title="Rename or move (r)">{notes.selected?.title}</button>
                 {#if editSession.peers.length > 0}
                   <span class="peers">
                     {#each editSession.peers as p (p.clientID)}
@@ -1472,54 +1479,63 @@
                   </span>
                 {/if}
               </div>
-              <div class="editor-actions">
-                <div class="ui-seg view-seg" role="group" aria-label="View mode" data-testid="view-mode">
-                  <button type="button" onclick={exitEditAnimated} title="Reading view (Cmd/Ctrl+E)">Reading</button>
+              <div class="nb-actions">
+                <div class="ui-seg nb-seg" role="group" aria-label="View mode" data-testid="view-mode">
+                  <button type="button" onclick={exitEditAnimated} title="Reading view ({keyLabel('⌘E')})">Reading</button>
                   <button type="button" class:active={editorSettings.value.editMode === 'live'}
                     aria-pressed={editorSettings.value.editMode === 'live'}
-                    onclick={() => setEditMode('live')} title="Live Preview (Cmd/Ctrl+Shift+E)">Live</button>
+                    onclick={() => setEditMode('live')} title="Live Preview ({keyLabel('⌘⇧E')})">Live</button>
                   <button type="button" class:active={editorSettings.value.editMode === 'source'}
                     aria-pressed={editorSettings.value.editMode === 'source'}
-                    onclick={() => setEditMode('source')} title="Source mode (Cmd/Ctrl+Shift+E)">Source</button>
+                    onclick={() => setEditMode('source')} title="Source ({keyLabel('⌘⇧E')})">Source</button>
                 </div>
-                <button class="ui-btn ghost sm icon split-btn" type="button" onclick={toggleSplit}
+                <button class="ui-btn ghost sm icon nb-icon split-btn" type="button" onclick={toggleSplit}
                   aria-pressed={splitOn} aria-label="Preview beside source"
-                  title="Preview beside source ({eff.leader}p · ⌘⌥P · :preview split)">
-                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.3"/><path d="M10 6h2.5M10 8.5h2.5M10 11h1.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" opacity=".7"/></svg>
+                  title="Preview beside source ({eff.leader}p · {keyLabel('⌘⌥P')} · :preview split)">
+                  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.3"/><path d="M10 6h2.5M10 8.5h2.5M10 11h1.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" opacity=".7"/></svg>
                 </button>
-                <button class="ui-btn ghost sm" onclick={saveEdit} disabled={saving || !editSession.editable} type="button" title="Sync now (⌘S)">{saving ? 'Saving…' : 'Save'}</button>
-                <button class="ui-btn sm" onclick={exitEditAnimated} type="button" title="Done (:q, ⌘E)">Done</button>
+                <button class="ui-btn ghost sm icon nb-icon nb-settings" type="button" onclick={() => uiState.openSettings('editor')}
+                  aria-label="Editor settings" title="Editor settings ({settingsKey()})">
+                  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>
+                <span class="nb-divider" aria-hidden="true"></span>
+                <button class="ui-btn sm nb-done" onclick={exitEditAnimated} type="button" title="Done (:q, {keyLabel('⌘E')})">Done</button>
               </div>
-            </div>
+            </header>
             {#if editError}<div class="error">{editError}</div>{/if}
             {#if editSession.lastError}<div class="error" data-testid="session-error">{editSession.lastError}</div>{/if}
             {#if !editSession.editable}
               <!-- Join rule: read-only preview until the server's
                    SyncStep2 has arrived. Never a local seed. -->
-              <div class="placeholder" data-testid="editor-syncing">
-                {editSession.stopped ? 'Live editing unavailable.' : 'Connecting to live editor… (read-only until synced)'}
+              <div class="editor-scroll">
+                <div class="placeholder" data-testid="editor-syncing">
+                  {editSession.stopped ? 'Live editing unavailable.' : 'Connecting to live editor… (read-only until synced)'}
+                </div>
+                <article class="rendered lumi-prose readonly-preview" data-prose={editorSettings.value.proseFont}>
+                  <MarkdownView blocks={previewBlocks} onlink={onMdLink} />
+                </article>
               </div>
-              <article class="rendered readonly-preview" data-prose={editorSettings.value.proseFont}>
-                <MarkdownView blocks={previewBlocks} onlink={onMdLink} />
-              </article>
             {:else if editSession.emptyAtSync && (notes.content.body ?? '') !== ''}
               <!-- Legacy note: server CRDT never initialised. Editing an
                    empty doc would overwrite the file on the next mirror,
                    so require an explicit action. -->
-              <div class="error" data-testid="editor-uninitialised">
-                The server has no live-editing state for this note yet. Load the
-                file's current contents into the shared document to start editing.
-                <button class="ui-btn sm" onclick={initialiseFromFile} type="button">Load file contents</button>
+              <div class="editor-scroll">
+                <div class="error" data-testid="editor-uninitialised">
+                  The server has no live-editing state for this note yet. Load the
+                  file's current contents into the shared document to start editing.
+                  <button class="ui-btn sm" onclick={initialiseFromFile} type="button">Load file contents</button>
+                </div>
+                <article class="rendered lumi-prose readonly-preview" data-prose={editorSettings.value.proseFont}>
+                  <MarkdownView blocks={previewBlocks} onlink={onMdLink} />
+                </article>
               </div>
-              <article class="rendered readonly-preview" data-prose={editorSettings.value.proseFont}>
-                <MarkdownView blocks={previewBlocks} onlink={onMdLink} />
-              </article>
             {:else}
               <SourceSplit
                 enabled={splitOn}
                 ytext={editSession.ytext}
                 editorView={() => noteEditorRef?.editorView() ?? null}
                 ratio={editorSettings.value.previewRatio}
+                prose={editorSettings.value.proseFont}
                 onratio={(r) => editorSettings.update({ previewRatio: r })}
                 ontoggletask={toggleTaskInEditor}
                 onlink={onMdLink}
@@ -1529,7 +1545,7 @@
                   session={editSession}
                   settings={editorSettings.value}
                   onexit={exitEditAnimated}
-                  onopensettings={() => uiState.openSettings('vim')}
+                  onopensettings={() => uiState.openSettings('editor')}
                   ontogglemode={() => editorSettings.toggleEditMode()}
                   ontogglesplit={toggleSplit}
                   onstats={(st) => (editorStats = st)}
@@ -1544,8 +1560,8 @@
         {:else if editorLoading}
           <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading editor…</div>
         {:else}
-          <article class="rendered" data-prose={editorSettings.value.proseFont}>
-            <div class="reading-head">
+          <article class="rendered lumi-prose" data-prose={editorSettings.value.proseFont}>
+            <header class="reading-head">
               {#if noteCrumbs.length > 0}
                 <nav class="note-crumbs" aria-label="Note location">
                   {#each noteCrumbs as c, i (i)}{#if i > 0}<span class="crumb-sep" aria-hidden="true">/</span>{/if}<span class="crumb-part">{c}</span>{/each}
@@ -1553,15 +1569,15 @@
               {/if}
               <div class="rendered-actions">
                 {#if notes.contentStale}<span class="stale" data-testid="content-stale">cópia local (offline)</span>{/if}
-                <span class="reading-meta">{readingWords} {readingWords === 1 ? 'word' : 'words'}</span>
-                <button class="ui-btn sm" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title="Edit (e or Cmd/Ctrl+E)">{editorLoading ? 'Loading…' : 'Edit'}</button>
+                <span class="reading-meta">{readingWords} {readingWords === 1 ? 'word' : 'words'} · {readingMinutes} min</span>
+                <button class="ui-btn sm nb-edit" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title="Edit (e · {keyLabel('⌘E')})">{editorLoading ? 'Loading…' : 'Edit'}</button>
                 <button class="ui-btn ghost sm icon danger-hover" onclick={beginDelete} type="button" aria-label="Delete note"
                   disabled={structuralOffline} title={structuralOffline ? OFFLINE_HINT : 'Delete (d)'}>
                   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
               </div>
-            </div>
-            <h1 class="rendered-title">{notes.selected?.title}</h1>
+            </header>
+            {#if !titleInBody}<h1 class="rendered-title">{notes.selected?.title}</h1>{/if}
             <!-- DOMPurify-sanitised blocks, see lib/markdown.ts. -->
             <MarkdownView blocks={previewBlocks} onlink={onMdLink} ontoggletask={(i) => void toggleTaskFromReader(i)} />
           </article>
@@ -1601,10 +1617,14 @@
   {/if}
 
   {#if editorSettings.value.legend}
-    <CommandLegend items={legendItems} pending={legendPending} mode={legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
+    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
   {/if}
 
   <footer class="statusbar" data-testid="editor-status">
+    {#if editMode && editSession && eff.vim}
+      <span class="sb-mode" data-mode={vimState.mode} data-testid="vim-mode">{vimModeLabel(vimState.mode, vimState.sub)}</span>
+      {#if vimState.pending && !editorSettings.value.legend}<span class="sb-pending">{vimState.pending}</span>{/if}
+    {/if}
     <span class="sb-path mono" title={fmtPath()}>{fmtPath()}</span>
     {#if !editMode}
       <span class="sb-item" aria-live="off">
@@ -1619,12 +1639,12 @@
         <span class="sb-item">{editorStats.words} {editorStats.words === 1 ? 'word' : 'words'}</span>
         <span class="sb-item">Ln {editorStats.line}, Col {editorStats.col}</span>
       {/if}
-      <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}{eff.vim ? ' · vim' : ''}</span>
+      <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}</span>
     {/if}
     <span class="sb-spacer"></span>
     {#if toast}<span class="sb-toast {toast.tone}" role="status">{toast.text}</span>{/if}
     {#if editMode && editSession}
-      <span class="sb-item sync" data-testid="editor-sync-state" title={editSession.persistence
+      <span class="sb-item sync" class:pending={editSession.pending} class:offline={!editSession.pending && !editSession.liveSynced} data-testid="editor-sync-state" title={editSession.persistence
         ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
         : 'Edits sync live; the file on disk follows within ~500 ms.'}>
         {editSession.pending
@@ -1812,9 +1832,7 @@
     .miller:not(.note-mode) .col-preview { display: none; }
     .miller.note-mode .col-current { display: none; }
     .miller.note-mode .col-preview { display: block; }
-    .preview { padding: var(--sp-4); }
-    .miller .preview.split-host { padding: var(--sp-3) var(--sp-3) 0; }
-    .preview .editor-frame.split .editor-bar { margin-right: 0; }
+    .preview { padding: var(--sp-5) var(--sp-4); }
     .sb-item:not(.sync):not(.stale) { display: none; }
   }
 
@@ -1826,53 +1844,48 @@
   .miller:not(.note-mode) .col-preview:has(> :global(.miller-col)) { padding: 0; }
 
   /* ── reading view ──────────────────────────────────────── */
+  /* Typeface, size and leading come from .lumi-prose (app.css), shared
+     with the split preview and Live Preview. */
   .rendered {
-    /* ~68ch measure for the prose (the title row shares it). */
-    max-width: calc(68ch + 2px);
+    max-width: calc(var(--md-measure) + 2px);
     margin: 0 auto;
-    font-family: var(--font-sans);
-    font-size: 16px;
-    line-height: 1.68;
-    color: var(--color-text);
+    padding-bottom: 20vh;
   }
-  .rendered[data-prose='serif'] { font-family: var(--font-serif); font-size: 18px; line-height: 1.62; }
-  .rendered[data-prose='mono'] { font-family: var(--font-mono); font-size: 14px; line-height: 1.7; }
   /* The pane that changes between explorer / reader / editor. */
   .col-preview { view-transition-name: lumi-pane; }
-  .preview.split-host { overflow: hidden; padding-left: var(--sp-4); padding-right: 0; }
-  .editor-frame.split { max-width: none; }
-  .editor-frame.split .editor-bar { margin-right: var(--sp-4); }
   .split-btn[aria-pressed='true'] { color: var(--color-primary); background: var(--tint-active); }
   .reading-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    min-height: 28px;
-    margin-bottom: var(--sp-3);
+    min-height: 30px;
+    margin-bottom: var(--sp-5);
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
+    line-height: 1.4;
   }
   .note-crumbs {
     display: flex;
     align-items: baseline;
-    gap: 4px;
+    gap: 6px;
     min-width: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-text-dim);
     overflow: hidden;
     white-space: nowrap;
   }
   .crumb-part { overflow: hidden; text-overflow: ellipsis; }
-  .crumb-sep { opacity: 0.5; }
+  .crumb-sep { opacity: 0.45; }
   .rendered-actions { display: flex; gap: var(--sp-2); align-items: center; margin-left: auto; }
-  .reading-meta { color: var(--color-text-dim); font-size: var(--text-xs); font-family: var(--font-mono); }
+  .reading-meta { color: var(--color-text-dim); font-size: var(--text-xs); font-variant-numeric: tabular-nums; margin-right: var(--sp-1); }
   .rendered-title {
-    margin: 0 0 var(--sp-5);
-    font-size: 2.1em;
-    line-height: 1.15;
-    font-weight: 720;
-    letter-spacing: -0.025em;
-    color: var(--color-text);
+    margin: 0 0 0.6em;
+    font-size: 1.875em;
+    line-height: 1.18;
+    font-weight: 700;
+    letter-spacing: -0.022em;
+    color: var(--md-heading);
     text-wrap: balance;
   }
   .rendered :global(.md-body) { animation: reader-in 200ms var(--ease); }
@@ -1930,51 +1943,84 @@
     background: color-mix(in srgb, var(--color-warning) 10%, transparent);
     border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
   }
-  .preview .banner { margin: 0 auto var(--sp-3); max-width: calc(68ch + 2px); }
+  .preview .banner { margin: 0 auto var(--sp-3); max-width: calc(var(--md-measure) + 2px); }
   .banner-actions { display: inline-flex; gap: var(--sp-1); flex-wrap: wrap; }
 
   /* ── editor ────────────────────────────────────────────── */
+  /* The pane is the editor: a slim note bar on top, the writing
+     column below (centred by the editor itself), the scrollbar at the
+     pane edge. */
+  .preview:has(> .editor-frame) { padding: 0; overflow: hidden; }
   .editor-frame {
-    margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: var(--sp-2);
     height: 100%;
+    min-height: 0;
   }
-  .editor-frame.readable { max-width: 52rem; }
-  .preview:has(.editor-frame) { padding-top: var(--sp-3); padding-bottom: 0; }
-  .editor-bar {
+  .editor-frame > .error { flex: none; padding: var(--sp-3) var(--sp-4); }
+  .editor-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) 0; }
+  .note-bar {
+    flex: none;
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
     gap: var(--sp-3);
-    flex-wrap: wrap;
-    padding: 0 var(--sp-1) var(--sp-2);
-    border-bottom: 1px solid var(--hairline);
+    height: 44px;
+    padding: 0 var(--sp-3) 0 var(--sp-4);
+    border-bottom: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent);
   }
-  .editor-meta { display: flex; gap: var(--sp-2); align-items: center; min-width: 0; }
-  .editor-title {
-    color: var(--color-text);
-    font-weight: 600;
-    font-size: var(--text-sm);
+  .nb-lead { display: flex; gap: var(--sp-2); align-items: center; min-width: 0; flex: 1; }
+  .nb-crumbs {
+    flex: none;
+    max-width: 30%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
   }
+  .nb-sep { margin-left: 6px; opacity: 0.45; }
+  .nb-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0 -6px;
+    padding: 3px 6px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    cursor: text;
+    transition: background 120ms var(--ease);
+  }
+  .nb-title:hover { background: var(--tint-hover); }
+  .nb-actions { flex: none; display: flex; gap: 2px; align-items: center; }
+  .nb-seg { margin-right: var(--sp-1); background: transparent; border-color: color-mix(in srgb, var(--hairline) 70%, transparent); }
+  .nb-seg button { height: 22px; padding: 0 10px; }
+  .nb-seg button.active { background: var(--tint-active); color: var(--color-text); box-shadow: none; }
+  .nb-icon { color: var(--color-text-dim); }
+  .nb-icon:hover { color: var(--color-text); }
+  .nb-divider { width: 1px; height: 16px; margin: 0 var(--sp-2); background: var(--hairline); }
+  .nb-done { height: 26px; padding: 0 12px; }
   .conn-dot {
     flex: none;
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--color-text-dim);
     font-size: 0;
     color: transparent;
     overflow: hidden;
+    transition: background 200ms var(--ease), box-shadow 200ms var(--ease);
   }
-  .conn-connected { background: var(--color-primary); box-shadow: 0 0 0 3px var(--tint-primary); }
+  .conn-connected { background: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 16%, transparent); }
   .conn-connecting { background: var(--color-warning); }
   .conn-disconnected { background: var(--color-error); }
-  .peers { display: flex; }
+  .peers { display: flex; margin-left: var(--sp-1); }
   .peer-chip {
     width: 20px;
     height: 20px;
@@ -1988,8 +2034,11 @@
     border: 2px solid var(--color-background);
     margin-left: -4px;
   }
-  .editor-actions { display: flex; gap: var(--sp-1); align-items: center; }
-  .view-seg button.active { background: var(--color-background); color: var(--color-text); }
+  @media (max-width: 720px) {
+    .note-bar { padding: 0 var(--sp-2) 0 var(--sp-3); gap: var(--sp-2); }
+    .nb-crumbs, .nb-divider, .nb-settings { display: none; }
+    .nb-seg button { padding: 0 8px; }
+  }
 
   /* ── prompt / confirm bars ─────────────────────────────── */
   .prompt-form, .confirm-bar {
@@ -2055,6 +2104,37 @@
     overflow: hidden;
     font-variant-numeric: tabular-nums;
   }
+  .sb-mode {
+    flex: none;
+    align-self: center;
+    margin-left: calc(-1 * var(--sp-1));
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: color-mix(in srgb, var(--m) 16%, transparent);
+    color: var(--m);
+    --m: var(--color-primary);
+    transition: background 120ms var(--ease), color 120ms var(--ease);
+  }
+  .sb-mode[data-mode='insert'] { --m: var(--color-accent); }
+  .sb-mode[data-mode='visual'] { --m: var(--color-secondary); }
+  .sb-mode[data-mode='replace'] { --m: var(--color-error); }
+  .sb-mode[data-mode='plain'] { display: none; }
+  .sb-pending { color: var(--color-warning); font-weight: 600; }
+  .sync::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    vertical-align: 1px;
+  }
+  .sync.pending::before { background: var(--color-warning); }
+  .sync.offline::before { background: var(--color-text-dim); }
   .sb-path { color: var(--color-text); overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 40%; }
   .sb-spacer { flex: 1; }
   .sb-toast { padding: 1px 8px; border-radius: 4px; background: var(--tint-active); color: var(--color-text); overflow: hidden; text-overflow: ellipsis; }

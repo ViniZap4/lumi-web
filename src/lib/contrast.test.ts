@@ -24,3 +24,32 @@ describe('theme contrast', () => {
     });
   }
 });
+
+/** CSS `color-mix(in srgb, a p%, b)` for opaque hex colours. */
+function mix(a: string, b: string, p: number): string {
+  const rgb = (h: string) => [0, 2, 4].map((i) => parseInt(h.replace('#', '').slice(i, i + 2), 16));
+  const [x, y] = [rgb(a), rgb(b)];
+  return '#' + x.map((v, i) => Math.round(v * p + y[i] * (1 - p)).toString(16).padStart(2, '0')).join('');
+}
+
+// The prose tokens in app.css (--md-dim for quotes/captions, inline
+// code on --md-inline-bg, code blocks on --md-code-bg) must not cost
+// much legibility. Some light themes' body text is itself close to AA
+// (tokyo-day 4.74:1), so the bounds are relative to the body text,
+// with an absolute floor.
+describe('prose token contrast', () => {
+  for (const name of themeOrder) {
+    it(`${name}: quotes, inline code and code blocks stay legible`, () => {
+      const t = themes[name];
+      const body = contrast(t.text, t.background);
+      const dim = contrast(mix(t.text, t.background, 0.82), t.background);
+      expect(dim).toBeGreaterThanOrEqual(3);
+      expect(dim / body).toBeGreaterThanOrEqual(0.6);
+      const pill = contrast(t.text, mix(t.text, t.background, 0.07));
+      // AAA (7:1) where the theme has it to spare, else ≤ 15% loss.
+      expect(pill).toBeGreaterThanOrEqual(Math.min(7, body * 0.85));
+      const code = contrast(t.text, mix(t.text, t.background, 0.04));
+      expect(code).toBeGreaterThanOrEqual(Math.min(7, body * 0.88));
+    });
+  }
+});

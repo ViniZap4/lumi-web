@@ -221,3 +221,21 @@ describe('task toggling — single-character ranged change', () => {
     expect(out.match(/<input/g)?.length).toBe(taskMarkers(src).length);
   });
 });
+
+describe('startsWithTitle + ==highlight==', async () => {
+  const { startsWithTitle, renderMarkdown } = await import('./markdown.ts');
+  it('detects a leading H1 equal to the title', () => {
+    expect(startsWithTitle('# Field notes\n\ntext', 'Field notes')).toBe(true);
+    expect(startsWithTitle('\n\n#  field NOTES  #\n', 'Field notes')).toBe(true);
+    expect(startsWithTitle('# *Field* notes', 'Field notes')).toBe(true);
+    expect(startsWithTitle('## Field notes', 'Field notes')).toBe(false);
+    expect(startsWithTitle('Intro\n# Field notes', 'Field notes')).toBe(false);
+    expect(startsWithTitle('# Other', 'Field notes')).toBe(false);
+    expect(startsWithTitle('# x', '')).toBe(false);
+  });
+  it('renders ==text== as <mark> (inline markdown inside), not across lines', () => {
+    expect(renderMarkdown('a ==b **c**== d')).toContain('<mark>b <strong>c</strong></mark>');
+    expect(renderMarkdown('a == b == c')).not.toContain('<mark>');
+    expect(renderMarkdown('x ==a\nb== y')).not.toContain('<mark>');
+  });
+});

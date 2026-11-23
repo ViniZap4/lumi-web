@@ -59,6 +59,15 @@
       );
       return;
     }
+    const wrap = t.closest<HTMLButtonElement>('button[data-action="wrap-code"]');
+    if (wrap) {
+      e.preventDefault();
+      const block = wrap.closest('.md-code');
+      const on = !block?.classList.contains('wrap');
+      block?.classList.toggle('wrap', on);
+      wrap.setAttribute('aria-pressed', String(on));
+      return;
+    }
     const box = t.closest<HTMLInputElement>('input[data-task]');
     if (box) {
       if (!ontoggletask) {

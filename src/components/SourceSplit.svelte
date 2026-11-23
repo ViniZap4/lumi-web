@@ -24,12 +24,14 @@
     ytext: Y.Text;
     editorView: () => EditorView | null;
     ratio: number;
+    /** Prose typeface (matches the reader). */
+    prose?: 'sans' | 'serif' | 'mono';
     onratio: (r: number) => void;
     ontoggletask?: (index: number) => void;
     onlink?: (href: string, e: MouseEvent) => void;
     children: Snippet;
   }
-  const { enabled, ytext, editorView, ratio, onratio, ontoggletask, onlink, children }: Props = $props();
+  const { enabled, ytext, editorView, ratio, prose = 'sans', onratio, ontoggletask, onlink, children }: Props = $props();
 
   let text = $state(untrack(() => (enabled ? ytext.toString() : '')));
   const blocks = $derived(enabled ? renderBlocks(text) : []);
@@ -283,7 +285,7 @@
     onfocusin={() => leader.claim('preview')}
     data-testid="split-preview"
   >
-    <article class="rendered split-rendered">
+    <article class="rendered lumi-prose split-rendered" data-prose={prose}>
       <MarkdownView {blocks} bind:element={body} {ontoggletask} {onlink} animateUpdates onrendered={remeasure} />
     </article>
   </section>
@@ -310,12 +312,11 @@
   .preview-pane {
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: var(--sp-4) var(--sp-5) 40vh;
+    padding: clamp(20px, 5vh, 56px) clamp(16px, 3vw, 40px) 40vh;
     outline: none;
-    background: color-mix(in srgb, var(--color-overlay-bg) 22%, var(--color-background));
-    border-radius: var(--radius) 0 0 0;
+    background: color-mix(in srgb, var(--color-text) 2.2%, var(--color-background));
   }
-  .split-rendered { max-width: var(--md-measure, 68ch); margin: 0 auto; }
+  .split-rendered { max-width: calc(var(--md-measure) + 2px); margin: 0 auto; }
   .divider {
     position: relative;
     cursor: col-resize;
@@ -349,7 +350,7 @@
   .tabs {
     display: flex;
     gap: 2px;
-    padding: 0 0 var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
   }
   .tabs [role='tab'] {
     flex: 1;

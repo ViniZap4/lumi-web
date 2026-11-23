@@ -306,6 +306,20 @@ class NotesStore {
     return updated;
   }
 
+  /** PATCH metadata (title/path) of ANY note of the open vault — the
+   *  explorer's rename/move works on the row under the cursor, which is
+   *  not necessarily the selected note. Never touches the body. */
+  async patch(id: string, input: { title?: string; path?: string }): Promise<NoteSummary | null> {
+    const vaultID = this.vaultID;
+    if (vaultID == null) return null;
+    const epoch = this.vaultEpoch;
+    const updated = await api.updateNote(vaultID, id, input);
+    if (epoch !== this.vaultEpoch) return updated;
+    this.list = this.list.map((n) => (n.id === updated.id ? updated : n));
+    if (this.content && this.content.id === updated.id) this.content = { ...this.content, path: updated.path };
+    return updated;
+  }
+
   /** DELETE the focused note. Clears selection on success. */
   async deleteSelected(): Promise<void> {
     const vaultID = this.vaultID;

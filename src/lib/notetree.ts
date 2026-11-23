@@ -11,6 +11,8 @@ import type { NoteSummary } from './types.ts';
 
 export interface FolderEntry {
   kind: 'folder';
+  /** Client-side only folder (created with `a dir/`, no note yet). */
+  virtual?: boolean;
   /** Stable identity within the tree ("d:" + path). */
   key: string;
   name: string;
@@ -82,7 +84,7 @@ export function noteKey(id: string): string {
   return 'n:' + id;
 }
 
-export function buildTree(notes: readonly NoteSummary[]): NoteTree {
+export function buildTree(notes: readonly NoteSummary[], extraDirs: Iterable<string> = []): NoteTree {
   const subdirs = new Map<string, Set<string>>([[ROOT, new Set()]]);
   const files = new Map<string, NoteEntry[]>([[ROOT, []]]);
   const noteDir = new Map<string, string>();
@@ -119,6 +121,15 @@ export function buildTree(notes: readonly NoteSummary[]): NoteTree {
     });
   }
 
+  // Virtual folders (no note yet) — only the ones notes did not create.
+  const virtual = new Set<string>();
+  for (const raw of extraDirs) {
+    const d = normalizePath(raw);
+    if (!d || subdirs.has(d)) continue;
+    ensureDir(d);
+    virtual.add(d);
+  }
+
   const folders = new Map<string, Entry[]>();
   for (const [dir, subs] of subdirs) {
     const folderEntries: FolderEntry[] = [];
@@ -129,6 +140,7 @@ export function buildTree(notes: readonly NoteSummary[]): NoteTree {
         name: baseName(sub),
         path: sub,
         count: subdirs.get(sub)!.size + files.get(sub)!.length,
+        ...(virtual.has(sub) ? { virtual: true } : {}),
       });
     }
     folderEntries.sort((a, b) => collator.compare(a.name, b.name));
@@ -149,6 +161,11 @@ export function filterEntries(entries: readonly Entry[], query: string): readonl
   return entries.filter(
     (e) => e.name.toLowerCase().includes(q) || (e.kind === 'note' && baseName(e.path).toLowerCase().includes(q)),
   );
+}
+
+/** Dot-files / dot-folders (hidden unless `.` toggles them). */
+export function isHidden(e: Entry): boolean {
+  return e.name.startsWith('.') || baseName(e.path).startsWith('.');
 }
 
 /** Nearest folder that still exists (notes moved/deleted under us). */

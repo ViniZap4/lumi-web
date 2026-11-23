@@ -25,6 +25,8 @@
     active?: boolean;
     /** Key of the note open in the reader (extra highlight). */
     openKey?: string | null;
+    /** Key of the yanked row (y/p), marked. */
+    yankedKey?: string | null;
     emptyText?: string;
     onpick?: (index: number, entry: Entry) => void;
     onopen?: (index: number, entry: Entry) => void;
@@ -38,6 +40,7 @@
     idPrefix,
     active = false,
     openKey = null,
+    yankedKey = null,
     emptyText = 'Empty folder',
     onpick,
     onopen,
@@ -57,19 +60,38 @@
     return Math.max(1, Math.floor(view / ROW_HEIGHT) - 1);
   }
 
-  // Keep the cursor row in view; clamp when the list shrinks. Runs on
-  // cursor/list/viewport changes only — NOT on scroll, so wheel/drag
-  // scrolling away from the cursor is not snapped back.
+  /** Rows kept between the cursor and the viewport edge (scrolloff). */
+  const SCROLLOFF = 2;
+
+  function reducedMotion(): boolean {
+    try {
+      return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  // Keep the cursor row in view (with a small scrolloff); clamp when the
+  // list shrinks. Runs on cursor/list/viewport changes only — NOT on
+  // scroll, so wheel/drag scrolling away from the cursor is not snapped
+  // back. Short hops animate; long jumps (G, ⌃d) are instant so the
+  // virtual window never shows blank rows mid-animation.
   $effect(() => {
     const max = Math.max(0, entries.length * ROW_HEIGHT - view);
-    let top = Math.min(untrack(() => scrollTop), max);
+    const prev = untrack(() => scrollTop);
+    let top = Math.min(prev, max);
     if (cursor >= 0) {
+      const margin = Math.min(SCROLLOFF * ROW_HEIGHT, Math.max(0, (view - ROW_HEIGHT) / 2));
       const rowTop = cursor * ROW_HEIGHT;
-      if (rowTop < top) top = rowTop;
-      else if (rowTop + ROW_HEIGHT > top + view) top = rowTop + ROW_HEIGHT - view;
+      if (rowTop - margin < top) top = Math.max(0, rowTop - margin);
+      else if (rowTop + ROW_HEIGHT + margin > top + view) top = Math.min(max, rowTop + ROW_HEIGHT + margin - view);
     }
     if (top !== scrollTop) scrollTop = top;
-    if (element && element.scrollTop !== top) element.scrollTop = top;
+    if (element && element.scrollTop !== top) {
+      const near = Math.abs(element.scrollTop - top) <= ROW_HEIGHT * 4;
+      if (near && typeof element.scrollTo === 'function' && !reducedMotion()) element.scrollTo({ top, behavior: 'smooth' });
+      else element.scrollTop = top;
+    }
   });
 
   function onscroll(): void {
@@ -104,6 +126,8 @@
           class:cursor={i === cursor}
           class:open={openKey != null && e.key === openKey}
           class:folder={e.kind === 'folder'}
+          class:virtual={e.kind === 'folder' && e.virtual}
+          class:yanked={yankedKey != null && e.key === yankedKey}
           role="option"
           tabindex="-1"
           aria-selected={i === cursor}
@@ -114,10 +138,17 @@
           onclick={() => onpick?.(i, e)}
           ondblclick={() => onopen?.(i, e)}
         >
-          <span class="icon" aria-hidden="true">{e.kind === 'folder' ? '▸' : '·'}</span>
+          <span class="icon" aria-hidden="true">
+            {#if e.kind === 'folder'}
+              <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+            {:else}
+              <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4.5 2h4.6L12 4.9v8.6a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5z M9 2v3h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+            {/if}
+          </span>
           <span class="name">{e.name}</span>
           {#if e.kind === 'folder'}
-            <span class="count" aria-hidden="true">{e.count}</span>
+            <span class="count" aria-hidden="true">{e.virtual ? 'new' : e.count}</span>
+            <span class="chev" aria-hidden="true">›</span>
             <span class="sr-only">, folder, {e.count} items</span>
           {/if}
         </div>
@@ -134,12 +165,11 @@
     height: 100%;
     min-height: 0;
     outline: none;
-  }
-  .miller-col.active:focus-visible {
-    box-shadow: inset 0 0 0 1px var(--color-secondary);
+    padding: 0 4px;
   }
   .spacer {
     position: relative;
+    margin: 4px 0;
   }
   .row {
     position: absolute;
@@ -147,36 +177,35 @@
     right: 0;
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0 0.6rem;
+    gap: 8px;
+    padding: 0 8px;
     box-sizing: border-box;
     cursor: pointer;
-    border-left: 2px solid transparent;
+    border-radius: var(--radius-sm);
     color: var(--color-text);
-    font-size: 0.88rem;
+    font-size: var(--text-sm);
     user-select: none;
   }
-  .row:hover {
-    background: var(--color-overlay-bg, transparent);
-  }
-  .row.cursor {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-  }
+  .row:hover { background: var(--tint-hover); }
+  .row.cursor { background: var(--tint-hover); }
   .miller-col.active .row.cursor {
-    border-left-color: var(--color-primary);
+    background: var(--tint-active);
+    box-shadow: inset 2px 0 0 var(--color-primary);
   }
-  .row.open .name {
-    color: var(--color-primary);
-  }
-  .row.folder .name {
-    color: var(--color-secondary);
-    font-weight: 500;
-  }
+  .miller-col.active:focus-visible .row.cursor { box-shadow: inset 2px 0 0 var(--color-primary), inset 0 0 0 1px var(--ring); }
+  .row.open .name { color: var(--color-primary); font-weight: 550; }
+  .row.yanked .name { text-decoration: underline dashed var(--color-warning); text-underline-offset: 3px; }
+  .row.virtual { opacity: 0.75; }
+  .row.virtual .icon { color: var(--color-warning); }
   .icon {
-    width: 0.8rem;
+    width: 14px;
+    height: 14px;
     flex: none;
-    color: var(--color-text-dim, var(--color-muted));
+    display: inline-flex;
+    color: var(--color-text-dim);
   }
+  .row.folder .icon { color: var(--color-secondary); }
+  .row.cursor .icon { color: var(--color-primary); }
   .name {
     flex: 1;
     overflow: hidden;
@@ -185,13 +214,15 @@
   }
   .count {
     flex: none;
-    font-size: 0.72rem;
-    color: var(--color-text-dim, var(--color-muted));
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--color-text-dim);
   }
+  .chev { flex: none; color: var(--color-text-dim); font-size: 14px; line-height: 1; margin-left: -2px; }
   .empty {
-    padding: 1rem;
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.82rem;
+    padding: var(--sp-5) var(--sp-3);
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
     text-align: center;
   }
   .sr-only {

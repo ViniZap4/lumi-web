@@ -6,8 +6,6 @@ import { loadSettings, saveSettings, sanitizeSettings, defaultSettings, type Edi
 
 export class EditorSettingsStore {
   value = $state<EditorSettings>(defaultSettings());
-  /** Settings modal visibility (one per app). */
-  open = $state(false);
   private readonly storage: KVStorage | null | undefined;
 
   constructor(storage?: KVStorage | null) {

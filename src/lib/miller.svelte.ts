@@ -19,6 +19,7 @@ import {
   buildTree,
   filterEntries,
   folderKey,
+  isHidden,
   nearestExisting,
   noteKey,
   parentDir,
@@ -46,6 +47,12 @@ export class MillerNav {
   cwd = $state(ROOT);
   /** Filter for the CURRENT column (`/`). Cleared on folder change. */
   filter = $state('');
+  /** Last non-empty filter, for `n`/`N` after the filter is cleared. */
+  lastQuery = $state('');
+  /** `.`: show dot-files. */
+  showHidden = $state(false);
+  /** Folders created client-side (`a dir/`) that hold no note yet. */
+  extraDirs = $state.raw<ReadonlySet<string>>(new Set());
   /** Per-folder remembered selection. Replaced, not mutated. */
   private memory = $state.raw<ReadonlyMap<string, Remembered>>(new Map());
   private back = $state.raw<readonly Loc[]>([]);
@@ -55,16 +62,16 @@ export class MillerNav {
    *  deriveds that read it lazily) to satisfy field-order checks. */
   private source: () => readonly NoteSummary[] = () => [];
 
-  readonly tree: NoteTree = $derived(buildTree(this.source()));
+  readonly tree: NoteTree = $derived(buildTree(this.source(), this.extraDirs));
   readonly dir: string = $derived(nearestExisting(this.tree, this.cwd));
-  readonly allEntries: readonly Entry[] = $derived(this.tree.folders.get(this.dir) ?? []);
+  readonly allEntries: readonly Entry[] = $derived(this.visible(this.tree.folders.get(this.dir) ?? []));
   readonly entries: readonly Entry[] = $derived(filterEntries(this.allEntries, this.filter));
   readonly cursor: number = $derived(this.resolveCursor(this.dir, this.entries));
   readonly current: Entry | null = $derived(this.entries[this.cursor] ?? null);
 
   readonly parent: string | null = $derived(parentDir(this.dir));
   readonly parentEntries: readonly Entry[] = $derived(
-    this.parent == null ? [] : (this.tree.folders.get(this.parent) ?? []),
+    this.parent == null ? [] : this.visible(this.tree.folders.get(this.parent) ?? []),
   );
   /** The current folder's row in the parent column. */
   readonly parentCursor: number = $derived(
@@ -72,7 +79,7 @@ export class MillerNav {
   );
   /** Children of the folder under the cursor (preview column). */
   readonly previewEntries: readonly Entry[] | null = $derived(
-    this.current?.kind === 'folder' ? (this.tree.folders.get(this.current.path) ?? []) : null,
+    this.current?.kind === 'folder' ? this.visible(this.tree.folders.get(this.current.path) ?? []) : null,
   );
   readonly previewCursor: number = $derived(
     this.current?.kind === 'folder' ? this.resolveCursor(this.current.path, this.previewEntries ?? []) : -1,
@@ -189,12 +196,58 @@ export class MillerNav {
 
   setFilter(q: string): void {
     this.filter = q;
+    if (q.trim()) this.lastQuery = q;
+  }
+
+  /** `n` / `N`: next/previous match (wrapping). With a filter on, every
+   *  row matches, so this walks the filtered rows; otherwise it jumps
+   *  between rows matching the last filter query. */
+  findNext(dir: 1 | -1): boolean {
+    const n = this.entries.length;
+    if (n === 0) return false;
+    if (this.filter.trim()) {
+      this.setCursor((this.cursor + dir + n) % n);
+      return true;
+    }
+    const q = this.lastQuery.trim().toLowerCase();
+    if (!q) return false;
+    for (let step = 1; step <= n; step++) {
+      const i = (this.cursor + dir * step + n * step) % n;
+      if (this.entries[i].name.toLowerCase().includes(q)) {
+        this.setCursor(i);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  toggleHidden(): void {
+    this.showHidden = !this.showHidden;
+  }
+
+  /** Register a client-side folder (`a dir/`) and its ancestors. */
+  addFolder(path: string): void {
+    const next = new Set(this.extraDirs);
+    next.add(path);
+    this.extraDirs = next;
+  }
+
+  /** Forget a client-side folder (and anything under it). */
+  removeFolder(path: string): void {
+    const next = new Set([...this.extraDirs].filter((d) => d !== path && !d.startsWith(path + '/')));
+    this.extraDirs = next;
+  }
+
+  private visible(entries: readonly Entry[]): readonly Entry[] {
+    return this.showHidden ? entries : entries.filter((e) => !isHidden(e));
   }
 
   /** Forget everything (book switch). */
   reset(): void {
     this.cwd = ROOT;
     this.filter = '';
+    this.lastQuery = '';
+    this.extraDirs = new Set();
     this.memory = new Map();
     this.back = [];
     this.fwd = [];

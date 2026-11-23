@@ -143,8 +143,8 @@ describe('offline editing in the view', () => {
     expect(target.querySelector('[data-testid="list-stale"]')).not.toBeNull();
     await notes.select('n1');
     await waitFor(() => target.querySelector('[data-testid="content-stale"]'), 'replica preview');
-    expect(findButton('Delete')!.disabled).toBe(true);
-    expect(findButton('+ New')!.disabled).toBe(true);
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="Delete note"]')!.disabled).toBe(true);
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="New note"]')!.disabled).toBe(true);
 
     (await waitFor(() => findButton('Edit'), 'Edit offline')).click();
     const content = await waitFor(() => target.querySelector<HTMLElement>('.cm-content'), 'editor offline');

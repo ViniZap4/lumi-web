@@ -15,6 +15,7 @@ vi.mock('../lib/api.ts', async (importOriginal) => {
     getNoteContent: vi.fn(),
     createNote: vi.fn(),
     updateNote: vi.fn(),
+    deleteNote: vi.fn(),
   };
 });
 
@@ -257,32 +258,207 @@ describe('miller browser — mouse', () => {
   });
 });
 
-describe('miller browser — new note goes into the browsed folder', () => {
-  it('creates at root then moves into the current folder', async () => {
-    const created = note('fresh', 'fresh.md', 'Fresh');
+describe('miller browser — file operations (a / r / d / y / p)', () => {
+  function serveMutable(): NoteSummary[] {
     const served = [...VAULT];
     serve(served);
-    vi.mocked(api.createNote).mockImplementation(async () => {
+    let n = 0;
+    vi.mocked(api.createNote).mockImplementation(async (_v, input) => {
+      const id = `new${++n}`;
+      const created = note(id, `${id}.md`, input.title);
       served.unshift(created);
       return created;
     });
-    vi.mocked(api.updateNote).mockImplementation(async (_v, _id, input) => {
-      const moved = { ...created, path: input.path! };
-      served[0] = moved;
-      return moved;
+    vi.mocked(api.updateNote).mockImplementation(async (_v, id, input) => {
+      const i = served.findIndex((x) => x.id === id);
+      served[i] = { ...served[i], ...(input.path ? { path: input.path } : {}), ...(input.title ? { title: input.title } : {}) };
+      return served[i];
     });
-    await mountView();
-    await press('l', 'n');
-    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.modal-panel input'), 'new-note input');
-    input.value = 'Fresh';
+    vi.mocked(api.deleteNote).mockImplementation(async (_v, id) => {
+      const i = served.findIndex((x) => x.id === id);
+      served.splice(i, 1);
+    });
+    return served;
+  }
+
+  async function typePrompt(text: string): Promise<void> {
+    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.prompt-input'), 'prompt input');
+    expect(document.activeElement).toBe(input);
+    input.value = text;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    target.querySelector<HTMLFormElement>('.modal-form')!.requestSubmit();
+    target.querySelector<HTMLFormElement>('.prompt-form')!.requestSubmit();
+    await settle();
+  }
+
+  it('a: creates at root then moves into the current folder', async () => {
+    serveMutable();
+    await mountView();
+    await press('l', 'a');
+    await typePrompt('Fresh');
     await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'move into folder');
-    expect(api.updateNote).toHaveBeenCalledWith('v1', 'fresh', { path: 'alpha/fresh.md' });
+    expect(api.createNote).toHaveBeenCalledWith('v1', { title: 'Fresh', body: '' });
+    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'alpha/new1.md' });
     await waitFor(() => names('cur').includes('Fresh'), 'fresh note in alpha');
     expect(crumbs()).toEqual(['Vault', 'alpha']);
     expect(cursorName('cur')).toBe('Fresh');
+  });
+
+  it('a with a path creates the folders on the way', async () => {
+    serveMutable();
+    await mountView();
+    await press('a');
+    await typePrompt('projects/2026/Plan');
+    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'moved');
+    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'projects/2026/new1.md' });
+    await waitFor(() => crumbs().join('/') === 'Vault/projects/2026', 'revealed in its folder');
+    expect(cursorName('cur')).toBe('Plan');
+  });
+
+  it('a dir/ makes a client-side folder and enters it; a note inside makes it real', async () => {
+    serveMutable();
+    await mountView();
+    await press('a');
+    await typePrompt('journal/');
+    expect(api.createNote).not.toHaveBeenCalled();
+    expect(crumbs()).toEqual(['Vault', 'journal']);
+    expect(names('parent')).toContain('journal');
+    await press('a');
+    await typePrompt('Day one');
+    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'moved');
+    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'journal/new1.md' });
+  });
+
+  it('a rejects dot segments inline without a request', async () => {
+    serveMutable();
+    await mountView();
+    await press('a');
+    await typePrompt('.secret');
+    expect(api.createNote).not.toHaveBeenCalled();
+    expect(target.querySelector('.prompt-preview')!.textContent).toMatch(/dot/);
+  });
+
+  it('r renames the title, r dir/name moves the note', async () => {
+    serveMutable();
+    await mountView();
+    await press('G'); // Two
+    await press('r');
+    await typePrompt('Second');
+    expect(api.updateNote).toHaveBeenLastCalledWith('v1', 'two', { title: 'Second' });
+    await waitFor(() => names('cur').includes('Second'), 'renamed');
+    await press('r');
+    await typePrompt('beta/Second');
+    expect(api.updateNote).toHaveBeenLastCalledWith('v1', 'two', { path: 'beta/two.md' });
+  });
+
+  it('r on a folder moves every note under it', async () => {
+    serveMutable();
+    await mountView();
+    await press('r'); // alpha
+    await typePrompt('archive');
+    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length === 2, 'two notes moved');
+    expect(vi.mocked(api.updateNote).mock.calls.map((c) => c[2])).toEqual([
+      { path: 'archive/inner.md' },
+      { path: 'archive/nested/deep.md' },
+    ]);
+  });
+
+  it('d asks inline; n cancels, y deletes', async () => {
+    serveMutable();
+    await mountView();
+    await press('G'); // Two
+    await press('d');
+    expect(target.querySelector('[data-testid="delete-confirm"]')).not.toBeNull();
+    await press('n');
+    expect(target.querySelector('[data-testid="delete-confirm"]')).toBeNull();
+    expect(api.deleteNote).not.toHaveBeenCalled();
+    await press('d', 'y');
+    await waitFor(() => vi.mocked(api.deleteNote).mock.calls.length > 0, 'deleted');
+    expect(api.deleteNote).toHaveBeenCalledWith('v1', 'two');
+    await waitFor(() => !names('cur').includes('Two'), 'row gone');
+  });
+
+  it('y then p pastes a copy into the current folder', async () => {
+    serveMutable();
+    await mountView();
+    await press('G', 'y'); // yank Two
+    await press('l'); // Two is a note: opens reader; go back
+    await press('Escape', 'g', 'g', 'l', 'p'); // into alpha, paste
+    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'pasted copy moved');
+    expect(api.createNote).toHaveBeenCalledWith('v1', { title: 'Two copy', body: '# body of two' });
+    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'alpha/new1.md' });
+  });
+});
+
+describe('miller browser — yazi extras', () => {
+  it('counts multiply moves', async () => {
+    await mountView();
+    await press('3', 'j');
+    expect(cursorName('cur')).toBe('Two');
+    await press('2', 'k');
+    expect(cursorName('cur')).toBe('beta');
+  });
+
+  it('n / N walk the matches of the last filter', async () => {
+    await mountView();
+    await press('/');
+    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.filter-input'), 'filter input');
+    input.value = 'o';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+    expect(cursorName('cur')).toBe('One');
+    await press('n');
+    expect(cursorName('cur')).toBe('Two');
+    await press('n');
+    expect(cursorName('cur')).toBe('One'); // wraps
+    await press('N');
+    expect(cursorName('cur')).toBe('Two');
+  });
+
+  it('[ and ] cycle books', async () => {
+    books.addCreated({ id: 'v2', name: 'Other', slug: 'other', created_by: 'u1', created_at: '', owner_user_id: 'u1' }, 'https://lumi.work.com#ana');
+    books.setActive('v1');
+    await mountView();
+    await press(']');
+    expect(books.activeID).toBe('v2');
+  });
+
+  it('the legend follows the context and shows chord completions', async () => {
+    await mountView();
+    const legend = () => target.querySelector('[data-testid="command-legend"]')!.textContent!;
+    expect(legend()).toMatch(/files/i);
+    expect(legend()).toMatch(/rename/);
+    await press('g');
+    expect(legend()).toMatch(/gh/);
+    expect(legend()).toMatch(/book root/);
+    await press('g');
+    expect(legend()).not.toMatch(/book root/);
+    await press('G', 'd');
+    expect(legend()).toMatch(/confirm/);
+    await press('Escape');
+  });
+
+  it('space opens the palette; a note result opens it', async () => {
+    await mountView();
+    await press(' ');
+    const input = await waitFor(() => target.querySelector<HTMLInputElement>('[data-testid="palette"] input'), 'palette');
+    input.value = 'deep';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitFor(() => notes.selectedID === 'deep', 'opened deep');
+    expect(crumbs()).toEqual(['Vault', 'alpha', 'nested']);
+  });
+
+  it('? opens the keymap help; any key closes it', async () => {
+    await mountView();
+    await press('?');
+    expect(document.querySelector('[data-testid="help"]')).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }));
+    await settle();
+    expect(document.querySelector('[data-testid="help"]')).toBeNull();
   });
 });
 

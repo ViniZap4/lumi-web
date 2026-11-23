@@ -1813,8 +1813,8 @@
     .miller.note-mode .col-current { display: none; }
     .miller.note-mode .col-preview { display: block; }
     .preview { padding: var(--sp-4); }
-    .preview.split-host { padding: var(--sp-3) var(--sp-3) 0; }
-    .editor-frame.split .editor-bar { margin-right: 0; }
+    .miller .preview.split-host { padding: var(--sp-3) var(--sp-3) 0; }
+    .preview .editor-frame.split .editor-bar { margin-right: 0; }
     .sb-item:not(.sync):not(.stale) { display: none; }
   }
 

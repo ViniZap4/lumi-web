@@ -8,6 +8,7 @@ import { sync } from './sync.svelte.ts';
 import { auth } from './auth.svelte.ts';
 import { notes } from './notes.svelte.ts';
 import { offline } from './offline.svelte.ts';
+import { registerServiceWorker } from './sw-register.ts';
 
 let booted: Promise<void> | null = null;
 
@@ -28,6 +29,8 @@ export function boot(): Promise<void> {
       } finally {
         auth.initialising = false;
       }
+      // App shell for offline reloads (production builds only).
+      registerServiceWorker();
     })();
   }
   return booted;

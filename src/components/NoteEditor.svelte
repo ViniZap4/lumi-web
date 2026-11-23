@@ -6,6 +6,7 @@
   let activeExit: (() => void) | null = null;
   let activeSettings: (() => void) | null = null;
   let activeToggleMode: (() => void) | null = null;
+  let activeLink: (() => void) | null = null;
   let vimExRegistered = false;
   function registerVimEx(): void {
     if (vimExRegistered) return;
@@ -19,11 +20,13 @@
     // :settings opens the editor settings; :preview flips live/source.
     Vim.defineEx('settings', 'settings', () => activeSettings?.());
     Vim.defineEx('preview', 'preview', () => activeToggleMode?.());
+    // :link (and the default <leader>l) opens the markdown link helper.
+    Vim.defineEx('link', 'link', () => activeLink?.());
   }
 </script>
 
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import {
     EditorView,
     keymap,
@@ -37,12 +40,14 @@
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
   import { languages } from '@codemirror/language-data';
   import { syntaxHighlighting, indentUnit } from '@codemirror/language';
-  import { vim } from '@replit/codemirror-vim';
+  import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
   import type { EditorSettings } from '../lib/editor-settings.ts';
-  import { applyVimConfig } from '../lib/vim-config.ts';
-  import { livePreview } from '../lib/live-preview.ts';
+  import type { NoteSummary } from '../lib/types.ts';
+  import { applyVimConfig, effectiveSettings, feedLeader, leaderKeyName, type EffectiveSettings } from '../lib/vim-config.ts';
+  import { livePreview, noteLinkHandler } from '../lib/live-preview.ts';
+  import { linkHelper, insertLink } from '../lib/link-helper.ts';
   import { relativeLineNumbers } from '../lib/editor-gutter.ts';
   import { countWords, type EditorStats } from '../lib/textstats.ts';
   import { lumiHighlightStyle } from '../lib/editor-highlight.ts';
@@ -57,9 +62,21 @@
     onopensettings?: () => void;
     ontogglemode?: () => void;
     onstats?: (s: EditorStats) => void;
+    /** Notes of the book (link helper candidates). */
+    notes?: () => readonly NoteSummary[];
+    /** Path of this note (links are relative to it). */
+    notePath?: () => string;
+    /** Open a relative note link (Ctrl/Cmd+click in Live Preview). */
+    onopennote?: (href: string) => void;
+    /** Vim mode + pending keys, for the command legend. */
+    onvimstate?: (s: { mode: string; pending: string | null }) => void;
   };
 
-  const { session, settings, onexit, onopensettings, ontogglemode, onstats }: Props = $props();
+  const { session, settings, onexit, onopensettings, ontogglemode, onstats, notes, notePath, onopennote, onvimstate }: Props = $props();
+
+  // The vimrc's `set` options override the device settings while vim
+  // is on; leader + maps come from the same parse.
+  const eff: EffectiveSettings = $derived(effectiveSettings(settings));
 
   let container: HTMLDivElement | null = $state(null);
   let view: EditorView | null = null;
@@ -72,26 +89,26 @@
   const fontC = new Compartment();
   const activeLineC = new Compartment();
 
-  function vimExt(s: EditorSettings): Extension {
+  function vimExt(s: EffectiveSettings): Extension {
     return s.vim ? vim({ status: true }) : [];
   }
-  function gutterExt(s: EditorSettings): Extension {
+  function gutterExt(s: EffectiveSettings): Extension {
     if (s.relativeLineNumbers) return relativeLineNumbers();
     return s.lineNumbers ? lineNumbers() : [];
   }
-  function wrapExt(s: EditorSettings): Extension {
+  function wrapExt(s: EffectiveSettings): Extension {
     return s.lineWrapping ? EditorView.lineWrapping : [];
   }
-  function previewExt(s: EditorSettings): Extension {
+  function previewExt(s: EffectiveSettings): Extension {
     return s.editMode === 'live' ? livePreview() : [];
   }
-  function tabExt(s: EditorSettings): Extension {
-    return [EditorState.tabSize.of(s.tabSize), indentUnit.of(' '.repeat(s.tabSize))];
+  function tabExt(s: EffectiveSettings): Extension {
+    return [EditorState.tabSize.of(s.tabSize), indentUnit.of(s.indentWithSpaces ? ' '.repeat(s.indentWidth) : '\t')];
   }
-  function fontExt(s: EditorSettings): Extension {
+  function fontExt(s: EffectiveSettings): Extension {
     return EditorView.theme({ '&': { fontSize: `${s.fontSize}px` } });
   }
-  function activeLineExt(s: EditorSettings): Extension {
+  function activeLineExt(s: EffectiveSettings): Extension {
     // The active-line band fights Live Preview's line styling (code
     // blocks, quotes); keep it for Source mode only.
     return s.editMode === 'source' ? highlightActiveLine() : [];
@@ -126,10 +143,10 @@
 
   // Live-apply settings changes to the mounted editor.
   $effect(() => {
-    const s = settings;
+    const s = eff;
     // Touch every field so the effect tracks them all.
-    void [s.vim, s.lineNumbers, s.relativeLineNumbers, s.lineWrapping, s.editMode, s.tabSize, s.fontSize];
-    void [s.escapeSequences.length, s.mappings.length, s.escapeTimeout];
+    void [s.vim, s.lineNumbers, s.relativeLineNumbers, s.lineWrapping, s.editMode, s.tabSize, s.fontSize, s.indentWidth, s.indentWithSpaces];
+    void [s.escapeSequences.length, s.mappings.length, s.escapeTimeout, s.vimrc];
     applyVimConfig(Vim, s);
     if (!view) return;
     view.dispatch({
@@ -154,12 +171,15 @@
     // remote delta at the wrong offsets.
     const initialDoc = session.ytext.toString();
     registerVimEx();
-    applyVimConfig(Vim, settings);
+    applyVimConfig(Vim, eff);
     activeExit = () => onexit?.();
     activeSettings = () => onopensettings?.();
     activeToggleMode = () => ontogglemode?.();
+    activeLink = () => {
+      if (view) insertLink(view, linkDeps);
+    };
 
-    const s = settings;
+    const s = eff;
     // Order matters: our highest-precedence keymap runs before vim (so
     // Mod-E works even where vim binds Ctrl-E); vim() MUST precede
     // yCollab() so vim's keymap doesn't shadow the Yjs undo.
@@ -168,7 +188,23 @@
         { key: 'Mod-e', run: () => { onexit?.(); return true; } },
         { key: 'Mod-Shift-e', run: () => { ontogglemode?.(); return true; } },
         { key: 'Mod-Enter', run: () => { onexit?.(); return true; } },
+        { key: 'Mod-k', run: (v) => insertLink(v, linkDeps) },
       ])),
+      // The vim leader (normal/visual) is fed to the engine as a private
+      // token so a leader that is also a command still reaches maps.
+      Prec.highest(EditorView.domEventHandlers({
+        keydown: (e, v) => {
+          if (!eff.vim) return false;
+          const cm = getCM(v);
+          if (!cm) return false;
+          const handled = feedLeader((t) => Vim.handleKey(cm, t, 'user'), cm.state.vim as never, leaderKeyName(e), eff.leader);
+          if (!handled) return false;
+          e.preventDefault();
+          e.stopPropagation();
+          onvimstate?.({ mode: vimMode, pending: eff.leader });
+          return true;
+        },
+      })),
       vimC.of(vimExt(s)),
       gutterC.of(gutterExt(s)),
       activeLineC.of(activeLineExt(s)),
@@ -185,11 +221,13 @@
         undoManager: session.undoManager,
       }),
       EditorView.updateListener.of(scheduleStats),
+      linkHelper(linkDeps),
+      noteLinkHandler.of((href) => onopennote?.(href)),
       EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', 'aria-label': 'Note editor' }),
       EditorView.theme({
         '&': {
           height: '100%',
-          fontFamily: 'var(--editor-font, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif)',
+          fontFamily: 'var(--editor-font, var(--font-sans))',
           background: 'transparent',
           color: 'var(--color-text)',
         },
@@ -227,11 +265,60 @@
       state: EditorState.create({ doc: initialDoc, extensions }),
       parent: container,
     });
+    watchVim();
     emitStats();
     view.focus();
   }
 
+  // ---- link helper + vim state -------------------------------------------
+
+  const linkDeps = {
+    notes: () => notes?.() ?? [],
+    fromPath: () => notePath?.() ?? '',
+    selfID: () => session.noteID,
+    /** Leave visual/normal so typing filters the picker. */
+    ensureInsert: (v: EditorView, pos: number) => {
+      const cm = eff.vim ? getCM(v) : null;
+      const st = cm?.state.vim;
+      if (!cm || !st || st.insertMode) return;
+      if (st.visualMode) Vim.handleKey(cm, '<Esc>', 'user');
+      v.dispatch({ selection: { anchor: pos } });
+      Vim.handleKey(cm, 'i', 'user');
+    },
+  };
+
+  let vimMode = 'normal';
+  function emitVim(): void {
+    const cm = view ? getCM(view) : null;
+    const st = cm?.state.vim as { status?: string; insertMode?: boolean } | undefined;
+    const pending = st && !st.insertMode && st.status ? st.status : null;
+    onvimstate?.({ mode: vimMode, pending });
+  }
+  function watchVim(): void {
+    if (!view || !onvimstate) return;
+    const cm = getCM(view);
+    if (!cm) {
+      onvimstate({ mode: 'plain', pending: null });
+      return;
+    }
+    vimMode = cm.state.vim?.insertMode ? 'insert' : 'normal';
+    cm.on('vim-mode-change', (e: { mode: string }) => {
+      vimMode = e.mode;
+      emitVim();
+    });
+    cm.on('vim-keypress', emitVim);
+    cm.on('vim-command-done', emitVim);
+    emitVim();
+  }
+
+  // Re-wire when vim is toggled on a mounted editor.
+  $effect(() => {
+    void eff.vim;
+    if (view) untrack(() => watchVim());
+  });
+
   function destroyEditor(): void {
+    activeLink = null;
     activeExit = null;
     activeSettings = null;
     activeToggleMode = null;
@@ -251,6 +338,7 @@
   class:readable={settings.readableWidth}
   data-testid="note-editor"
   data-mode={settings.editMode}
+  data-prose={settings.proseFont}
   bind:this={container}
 ></div>
 
@@ -270,7 +358,11 @@
     outline: none;
     min-width: 0;
   }
+  :global(.note-editor-host[data-prose='serif'] .cm-editor) {
+    --editor-font: var(--font-serif);
+  }
+  :global(.note-editor-host[data-prose='mono'] .cm-editor),
   :global(.note-editor-host[data-mode='source'] .cm-editor) {
-    --editor-font: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --editor-font: var(--font-mono);
   }
 </style>

@@ -17,7 +17,7 @@
 // It only rebuilds when the doc, the syntax tree, or the set of
 // "active" lines changes; plain cursor moves within a line are free.
 
-import { EditorState, StateField, Range, type Extension, type Text, type ChangeSpec } from '@codemirror/state';
+import { EditorState, StateField, Facet, Range, type Extension, type Text, type ChangeSpec } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
@@ -41,6 +41,19 @@ export function safeHref(raw: string): string | null {
   if (u.protocol !== 'http:' && u.protocol !== 'https:' && u.protocol !== 'mailto:') return null;
   return u.href;
 }
+
+/** Relative note link (`other.md`, `../a/b.md`, `/x`) — opened inside
+ *  the app, never by the browser. Anything with a scheme, `//host` or a
+ *  pure `#fragment` is not a note link. */
+export function noteHref(raw: string): string | null {
+  const s = raw.trim().replace(/^<|>$/g, '');
+  if (!s || s.startsWith('#') || s.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(s)) return null;
+  if (/[\u0000-\u001f\u007f]/.test(s)) return null;
+  return s;
+}
+
+/** In-app handler for note links (Ctrl/Cmd+click in Live Preview). */
+export const noteLinkHandler = Facet.define<(href: string) => void>();
 
 /** Image source safe for an <img> (CSP img-src: self data: blob: https:). */
 export function safeImageSrc(raw: string): string | null {
@@ -94,7 +107,7 @@ export type LPWidget =
 
 export type LPSpec =
   | { type: 'hide'; from: number; to: number }
-  | { type: 'mark'; from: number; to: number; cls: string; href?: string | null }
+  | { type: 'mark'; from: number; to: number; cls: string; href?: string | null; note?: string | null }
   | { type: 'line'; pos: number; cls: string }
   | { type: 'widget'; from: number; to: number; widget: LPWidget; block?: boolean };
 
@@ -175,12 +188,14 @@ export function computeLivePreview(state: EditorState, active: Set<number> = act
         case 'Link': {
           const marks = node.getChildren('LinkMark');
           const url = node.getChild('URL');
-          const href = url ? safeHref(doc.sliceString(url.from, url.to)) : null;
+          const rawUrl = url ? doc.sliceString(url.from, url.to) : '';
+          const href = url ? safeHref(rawUrl) : null;
+          const note = url && !href ? noteHref(rawUrl) : null;
           // `[text](url)`: marks are `[`, `]`, `(`, `)`.
           if (marks.length >= 2 && marks[0].from === from && doc.sliceString(marks[0].from, marks[0].to) === '[') {
             const textFrom = marks[0].to;
             const textTo = marks[1].from;
-            if (textTo > textFrom) specs.push({ type: 'mark', from: textFrom, to: textTo, cls: 'cm-lp-link', href });
+            if (textTo > textFrom) specs.push({ type: 'mark', from: textFrom, to: textTo, cls: note ? 'cm-lp-link cm-lp-note-link' : 'cm-lp-link', href, note });
             if (!revealed(from, to) && url && textTo > textFrom) {
               specs.push({ type: 'hide', from, to: textFrom });
               specs.push({ type: 'hide', from: textTo, to });
@@ -382,6 +397,10 @@ export function specsToDecorations(specs: LPSpec[]): DecorationSet {
         const attributes: Record<string, string> = {};
         if (s.href) attributes['data-lp-href'] = s.href;
         if (s.href) attributes.title = `${s.href} (Ctrl/Cmd+click to open)`;
+        if (s.note) {
+          attributes['data-lp-note'] = s.note;
+          attributes.title = `${s.note} (Ctrl/Cmd+click to open the note)`;
+        }
         ranges.push(Decoration.mark({ class: s.cls, attributes }).range(s.from, s.to));
         break;
       }
@@ -428,8 +447,17 @@ const livePreviewField = StateField.define<LPState>({
 });
 
 const linkClicks = EditorView.domEventHandlers({
-  mousedown(e) {
+  mousedown(e, view) {
     if (!(e.metaKey || e.ctrlKey) || e.button !== 0) return false;
+    const noteEl = (e.target as HTMLElement | null)?.closest?.('[data-lp-note]');
+    const note = noteEl?.getAttribute('data-lp-note');
+    if (note && noteHref(note)) {
+      const handlers = view.state.facet(noteLinkHandler);
+      if (handlers.length === 0) return false;
+      e.preventDefault();
+      handlers[0](note);
+      return true;
+    }
     const el = (e.target as HTMLElement | null)?.closest?.('[data-lp-href]');
     const href = el?.getAttribute('data-lp-href');
     // Re-validate: the attribute is ours, but never trust the DOM.
@@ -460,7 +488,8 @@ const livePreviewTheme = EditorView.baseTheme({
     padding: '0 0.2em',
   },
   '.cm-lp-link': { color: 'var(--color-accent, var(--color-primary))', textDecoration: 'underline', textUnderlineOffset: '2px' },
-  '.cm-lp-link[data-lp-href]': { cursor: 'pointer' },
+  '.cm-lp-link[data-lp-href], .cm-lp-link[data-lp-note]': { cursor: 'pointer' },
+  '.cm-lp-note-link': { textDecorationStyle: 'dotted' },
   '.cm-lp-quote': {
     borderLeft: '3px solid var(--color-secondary, var(--color-primary))',
     paddingLeft: '0.9em !important',

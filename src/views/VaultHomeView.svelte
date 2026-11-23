@@ -3,7 +3,7 @@
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
   import { renderBlocks, taskToggle, startsWithTitle } from '../lib/markdown.ts';
-  import { keyLabel, settingsKey } from '../lib/platform.ts';
+  import { keyLabel } from '../lib/platform.ts';
   import { ApiError } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
@@ -291,7 +291,6 @@
   });
 
   onMount(() => {
-    uiState.settingsHome = 'editor';
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   });
@@ -337,7 +336,6 @@
       return;
     }
 
-    // ⌘, / Ctrl+, (settings) is global: App.svelte, capture phase.
     if (overlayOpen()) return;
 
     // A component (CodeMirror/vim, a form control) already handled it.
@@ -1241,7 +1239,7 @@
     { id: 'books', title: 'All books', keys: 'gb', group: 'navigate switch', run: () => books.openPicker() },
     { id: 'next-book', title: 'Next book', keys: ']', group: 'navigate switch', run: () => cycleBook(1) },
     { id: 'prev-book', title: 'Previous book', keys: '[', group: 'navigate switch', run: () => cycleBook(-1) },
-    { id: 'settings', title: 'Settings', keys: '⌘,', group: 'preferences', run: () => uiState.openSettings('editor') },
+    { id: 'settings', title: 'Settings', keys: ',', group: 'preferences', run: () => uiState.openSettings('editor') },
     { id: 'vim', title: 'Vim settings & .vimrc', group: 'preferences vimrc keys', run: () => uiState.openSettings('vim') },
     { id: 'appearance', title: 'Theme & appearance', group: 'preferences colour color dark light', run: () => uiState.openSettings('appearance') },
     { id: 'legend', title: editorSettings.value.legend ? 'Hide command legend' : 'Show command legend', group: 'view keys hints', run: () => editorSettings.update({ legend: !editorSettings.value.legend }) },
@@ -1298,7 +1296,7 @@
         <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         <span class="palette-label">Search</span><kbd>{keyLabel('⌘K')}</kbd>
       </button>
-      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('editor')} type="button" title="Settings ({settingsKey()} · ,)" aria-label="Settings">
+      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('editor')} type="button" title="Settings (,)" aria-label="Settings">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.5" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
       </button>
     </div>
@@ -1495,7 +1493,7 @@
                   <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.3"/><path d="M10 6h2.5M10 8.5h2.5M10 11h1.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" opacity=".7"/></svg>
                 </button>
                 <button class="ui-btn ghost sm icon nb-icon nb-settings" type="button" onclick={() => uiState.openSettings('editor')}
-                  aria-label="Editor settings" title="Editor settings ({settingsKey()})">
+                  aria-label="Editor settings" title="Editor settings (:settings)">
                   <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
                 </button>
                 <span class="nb-divider" aria-hidden="true"></span>

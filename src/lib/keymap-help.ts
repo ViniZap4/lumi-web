@@ -58,7 +58,7 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['⌘V on selection', 'URL → [text](url)'],
       [':q  :wq  ⌘E', 'leave the editor'],
       ['⌘⇧E  :preview', 'live / source'],
-      ['⌘,  :settings', 'settings'],
+      [':settings', 'settings'],
     ],
   },
   {
@@ -68,7 +68,7 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['[  ]', 'previous / next book'],
       ['g1–9  ⌃⌘1–9', 'book by number'],
       ['gb', 'all books'],
-      ['⌘,  ,', 'settings'],
+      [',', 'settings'],
       ['?', 'this help'],
     ],
   },

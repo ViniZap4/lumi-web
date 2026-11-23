@@ -35,7 +35,7 @@
   import { serverLabel } from '../lib/serverurl.ts';
   import { isEditableTarget } from '../lib/shortcuts.ts';
   import { keymapFor } from '../lib/keymap-help.ts';
-  import { keyLabel, settingsKey, MAC } from '../lib/platform.ts';
+  import { keyLabel } from '../lib/platform.ts';
   const KEYMAP = keymapFor();
   import type { VimrcEditorHandle } from '../lib/vimrc-editor.ts';
 
@@ -298,7 +298,7 @@
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Settings
       </button>
-      <span class="esc" title="Close: Esc or {settingsKey()}"><kbd>Esc</kbd><kbd>{settingsKey()}</kbd></span>
+      <kbd class="esc">Esc</kbd>
     </div>
     <div class="search">
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -600,7 +600,7 @@
           <h2 id="sec-keys">Keys</h2>
           {#if show('keysLegend')}
             <label class="row">
-              <div class="row-text"><span class="row-title">Show the command legend</span><span class="row-desc">Press <kbd>?</kbd> anywhere for the full map. Settings open with <kbd>{settingsKey()}</kbd> from anywhere, <kbd>,</kbd> outside text fields, or <kbd>:settings</kbd> in vim{MAC ? ' (Safari keeps ⌘, for its own preferences: use , or :settings there)' : ''}.</span></div>
+              <div class="row-text"><span class="row-title">Show the command legend</span><span class="row-desc">Press <kbd>?</kbd> anywhere for the full map. Settings open with <kbd>,</kbd> outside text fields, <kbd>:settings</kbd> in the editor, or the command palette.</span></div>
               <input type="checkbox" class="ui-switch" checked={s.legend} onchange={(e) => editorSettings.update({ legend: checked(e) })} />
             </label>
           {/if}
@@ -717,7 +717,7 @@
   }
   .nav-head { display: flex; align-items: center; justify-content: space-between; }
   .back { font-weight: 600; color: var(--color-text); gap: 6px; padding-left: 4px; }
-  .esc { display: inline-flex; gap: 3px; opacity: 0.7; }
+  .esc { opacity: 0.7; }
   .search {
     display: flex;
     align-items: center;

@@ -105,5 +105,16 @@ describe('NoteEditor — vim visual mode + yank highlight', () => {
     expect(t.session.ytext.toString()).toBe('one two\nfour\n');
     t.done();
   });
-});
 
+  it('`,` in normal mode stays vim\'s repeat-find-backward (settings is :settings there)', async () => {
+    const t = await setup('abcabc\n');
+    t.keys('<Esc>gg0fc');
+    expect(t.view.state.selection.main.head).toBe(2);
+    t.keys(';');
+    expect(t.view.state.selection.main.head).toBe(5);
+    t.keys(',');
+    expect(t.view.state.selection.main.head).toBe(2);
+    expect(t.session.ytext.toString()).toBe('abcabc\n');
+    t.done();
+  });
+});

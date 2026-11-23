@@ -86,3 +86,14 @@ describe('fitLegend', () => {
     }
   });
 });
+
+describe('settings key labels', () => {
+  it('no context advertises ⌘, / Ctrl+, (browser preferences); settings is `,`', () => {
+    const ctxs = ['explorer', 'reader', 'normal', 'insert', 'visual', 'palette', 'books'] as const;
+    for (const c of ctxs) {
+      for (const it of legendFor(c, null, {})) expect(it.keys).not.toMatch(/[⌘⌃]⇧?,|Ctrl\+,/);
+    }
+    expect(legendFor('explorer', null, {}).some((i) => i.keys === ',' && i.label === 'settings')).toBe(true);
+  });
+});
+

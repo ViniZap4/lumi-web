@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectPlatform, isApple, isSettingsShortcut, keyLabel, primaryMod, settingsKey, modName } from './platform.ts';
+import { detectPlatform, isApple, keyLabel, primaryMod, modName } from './platform.ts';
 import { keymapFor } from './keymap-help.ts';
 
 const ev = (key: string, mods: { meta?: boolean; ctrl?: boolean; alt?: boolean; shift?: boolean } = {}, code?: string) => ({
@@ -33,26 +33,7 @@ describe('detectPlatform', () => {
   });
 });
 
-describe('settings shortcut (⌘, / Ctrl+,)', () => {
-  it('macOS: ⌘, only', () => {
-    expect(isSettingsShortcut(ev(',', { meta: true }), true)).toBe(true);
-    expect(isSettingsShortcut(ev(',', { meta: true, shift: true }), true)).toBe(true);
-    expect(isSettingsShortcut(ev(',', { ctrl: true }), true)).toBe(false);
-    expect(isSettingsShortcut(ev(',', { meta: true, ctrl: true }), true)).toBe(false);
-    expect(isSettingsShortcut(ev(',', { meta: true, alt: true }), true)).toBe(false);
-    expect(isSettingsShortcut(ev(','), true)).toBe(false);
-  });
-  it('Windows/Linux: Ctrl+, only (⊞/Super+, is not it)', () => {
-    expect(isSettingsShortcut(ev(',', { ctrl: true }), false)).toBe(true);
-    expect(isSettingsShortcut(ev('<', { ctrl: true, shift: true }), false)).toBe(true);
-    expect(isSettingsShortcut(ev(',', { meta: true }), false)).toBe(false);
-    expect(isSettingsShortcut(ev(',', { ctrl: true, alt: true }), false)).toBe(false);
-    expect(isSettingsShortcut(ev('k', { ctrl: true }), false)).toBe(false);
-  });
-  it('matches the physical key on layouts where , is elsewhere', () => {
-    expect(isSettingsShortcut(ev(';', { ctrl: true }, 'Comma'), false)).toBe(true);
-    expect(isSettingsShortcut(ev('m', { meta: true }, 'KeyM'), true)).toBe(false);
-  });
+describe('primaryMod', () => {
   it('primaryMod follows CodeMirror Mod', () => {
     expect(primaryMod(ev('k', { meta: true }), true)).toBe(true);
     expect(primaryMod(ev('k', { ctrl: true }), true)).toBe(false);
@@ -64,7 +45,6 @@ describe('settings shortcut (⌘, / Ctrl+,)', () => {
 describe('keyLabel', () => {
   it('keeps mac glyphs on Apple', () => {
     for (const k of ['⌘K', '⌘⇧E', '⌘⌥P', '⌘,', 'u ⌃r', '⌘-click link']) expect(keyLabel(k, true)).toBe(k);
-    expect(settingsKey(true)).toBe('⌘,');
     expect(modName(true)).toBe('⌘');
   });
   it('spells modifiers out elsewhere, Ctrl/Alt/Shift order', () => {
@@ -80,15 +60,17 @@ describe('keyLabel', () => {
     expect(keyLabel('space  :  ⌘K', false)).toBe('space  :  Ctrl+K');
     expect(keyLabel('Rendered preview (⌘⌥P, :preview split)', false)).toBe('Rendered preview (Ctrl+Alt+P, :preview split)');
     expect(keyLabel('gg G', false)).toBe('gg G');
-    expect(settingsKey(false)).toBe('Ctrl+,');
     expect(modName(false)).toBe('Ctrl');
   });
   it('the help keymap is platform-correct (and drops mac-only ⌃⌘1–9)', () => {
     const flat = (mac: boolean) => keymapFor(mac).flatMap((s) => s.rows.map(([k]) => k));
-    expect(flat(true)).toContain('⌘,  ,');
+    // Settings: `,` and `:settings` only (⌘, / Ctrl+, belong to the browser).
+    expect(flat(true)).toContain(',');
+    expect(flat(true)).toContain(':settings');
+    expect(flat(true).join(' ')).not.toMatch(/[⌘⌃]⇧?,/);
     expect(flat(true)).toContain('g1–9  ⌃⌘1–9');
     const pc = flat(false);
-    expect(pc).toContain('Ctrl+,  ,');
+    expect(pc.join(' ')).not.toContain('Ctrl+,');
     expect(pc).toContain('g1–9');
     expect(pc).toContain('space  :  Ctrl+K');
     expect(pc.join(' ')).not.toMatch(/[⌘⌃⌥⇧]/);

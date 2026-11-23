@@ -249,7 +249,6 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
         { keys: '⌃u', label: 'delete line start' },
         { keys: '⌃o', label: 'one normal cmd' },
         { keys: '⌘E', label: 'reading', do: 'app:reading' },
-        { keys: '⌘,', label: 'settings', do: 'app:settings' },
       ];
     }
     case 'visual':

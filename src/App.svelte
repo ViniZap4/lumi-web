@@ -21,26 +21,17 @@
   import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
   import { editorSettings } from './lib/editor-settings.svelte.ts';
   import { setReduceMotion } from './lib/motion.ts';
-  import { installSettingsShortcut } from './lib/settings-shortcut.ts';
 
   // Settings → Reduce motion (on top of prefers-reduced-motion).
   $effect(() => setReduceMotion(editorSettings.value.reduceMotion));
 
-  let uninstallShortcut: (() => void) | null = null;
   onMount(async () => {
     theme.init();
-    // ⌘, / Ctrl+, from anywhere (capture phase: beats CodeMirror/vim
-    // and modal handlers).
-    uninstallShortcut = installSettingsShortcut(window, {
-      toggle: () => uiState.toggleSettings(),
-      enabled: () => route !== 'login',
-    });
     await boot();
   });
 
   onDestroy(() => {
     theme.destroy();
-    uninstallShortcut?.();
   });
 
   // Routes (SPEC-LIVROS §5):

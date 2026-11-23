@@ -46,16 +46,6 @@ export function primaryMod(e: ModEvent, mac: boolean = MAC): boolean {
   return mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
 }
 
-/**
- * ⌘, (Apple) / Ctrl+, (Windows, Linux): open settings. Shift is
- * tolerated (⌘⇧, was the earlier binding and stays). Matches on the
- * physical key too, so layouts where `,` needs a modifier still work.
- */
-export function isSettingsShortcut(e: ModEvent, mac: boolean = MAC): boolean {
-  if (e.altKey || !primaryMod(e, mac)) return false;
-  return e.key === ',' || e.key === '<' || e.code === 'Comma';
-}
-
 /** Mac glyph → PC modifier name, in PC display order. */
 const PC_MOD: Record<string, string> = { '⌃': 'Ctrl', '⌘': 'Ctrl', '⌥': 'Alt', '⇧': 'Shift' };
 const PC_ORDER = ['Ctrl', 'Alt', 'Shift'];
@@ -82,9 +72,4 @@ export function keyLabel(s: string, mac: boolean = MAC): string {
 /** `⌘` or `Ctrl` (for prose such as "⌘-click" vs "Ctrl-click"). */
 export function modName(mac: boolean = MAC): string {
   return mac ? '⌘' : 'Ctrl';
-}
-
-/** The settings shortcut label: `⌘,` or `Ctrl+,`. */
-export function settingsKey(mac: boolean = MAC): string {
-  return keyLabel('⌘,', mac);
 }

@@ -7,6 +7,7 @@
   let activeSettings: (() => void) | null = null;
   let activeToggleMode: (() => void) | null = null;
   let activeLink: (() => void) | null = null;
+  let activeSplit: (() => void) | null = null;
   let vimExRegistered = false;
   function registerVimEx(): void {
     if (vimExRegistered) return;
@@ -19,7 +20,11 @@
     Vim.defineEx('write', 'w', () => {});
     // :settings opens the editor settings; :preview flips live/source.
     Vim.defineEx('settings', 'settings', () => activeSettings?.());
-    Vim.defineEx('preview', 'preview', () => activeToggleMode?.());
+    // `:preview split` toggles the side-by-side preview (Source mode).
+    Vim.defineEx('preview', 'preview', (_cm: unknown, params: { args?: string[] }) => {
+      if (params?.args?.[0] === 'split') activeSplit?.();
+      else activeToggleMode?.();
+    });
     // :link (and the default <leader>l) opens the markdown link helper.
     Vim.defineEx('link', 'link', () => activeLink?.());
   }
@@ -39,7 +44,7 @@
   import { searchKeymap } from '@codemirror/search';
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
   import { languages } from '@codemirror/language-data';
-  import { syntaxHighlighting, indentUnit } from '@codemirror/language';
+  import { syntaxHighlighting, indentUnit, codeFolding } from '@codemirror/language';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
@@ -61,6 +66,8 @@
     onexit?: () => void;
     onopensettings?: () => void;
     ontogglemode?: () => void;
+    /** Toggle the split preview (`:preview split`, `<leader>p`). */
+    ontogglesplit?: () => void;
     onstats?: (s: EditorStats) => void;
     /** Notes of the book (link helper candidates). */
     notes?: () => readonly NoteSummary[];
@@ -72,7 +79,7 @@
     onvimstate?: (s: { mode: string; pending: string | null }) => void;
   };
 
-  const { session, settings, onexit, onopensettings, ontogglemode, onstats, notes, notePath, onopennote, onvimstate }: Props = $props();
+  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate }: Props = $props();
 
   // The vimrc's `set` options override the device settings while vim
   // is on; leader + maps come from the same parse.
@@ -178,6 +185,7 @@
     activeLink = () => {
       if (view) insertLink(view, linkDeps);
     };
+    activeSplit = () => ontogglesplit?.();
 
     const s = eff;
     // Order matters: our highest-precedence keymap runs before vim (so
@@ -189,6 +197,7 @@
         { key: 'Mod-Shift-e', run: () => { ontogglemode?.(); return true; } },
         { key: 'Mod-Enter', run: () => { onexit?.(); return true; } },
         { key: 'Mod-k', run: (v) => insertLink(v, linkDeps) },
+        { key: 'Mod-Alt-p', run: () => { ontogglesplit?.(); return true; } },
       ])),
       // The vim leader (normal/visual) is fed to the engine as a private
       // token so a leader that is also a command still reaches maps.
@@ -214,6 +223,8 @@
       // We do NOT call history() — yCollab supplies a Yjs-aware
       // UndoManager that integrates with collaborative undo.
       syntaxHighlighting(lumiHighlightStyle),
+      // Fold placeholders for vim zc/zo/za (headings, lists, code).
+      codeFolding({ placeholderText: '⋯' }),
       keymap.of([...defaultKeymap.filter((b) => b.key !== 'Mod-z' && b.key !== 'Mod-y' && b.key !== 'Mod-Shift-z'), ...searchKeymap]),
       markdown({ base: markdownLanguage, codeLanguages: languages }),
       previewC.of(previewExt(s)),
@@ -270,6 +281,37 @@
     view.focus();
   }
 
+  // ---- external control (split preview, clickable legend) ----------------
+
+  /** The mounted CodeMirror view (split preview scroll sync). */
+  export function editorView(): EditorView | null {
+    return view;
+  }
+
+  /**
+   * Run a legend action: `vim:<keys>` feeds keys to the vim engine
+   * (`<C-r>`, `<Esc>` notation allowed), `ex:<cmd>` runs an ex command.
+   * Returns false when it could not run (vim off, not mounted).
+   */
+  export function run(action: string): boolean {
+    if (!view) return false;
+    view.focus();
+    const cm = eff.vim ? getCM(view) : null;
+    if (action.startsWith('ex:')) {
+      if (!cm) return false;
+      Vim.handleEx(cm as never, action.slice(3));
+      emitVim();
+      return true;
+    }
+    if (action.startsWith('vim:')) {
+      if (!cm) return false;
+      for (const k of action.slice(4).match(/<[^>]+>|./g) ?? []) Vim.handleKey(cm, k, 'user');
+      emitVim();
+      return true;
+    }
+    return false;
+  }
+
   // ---- link helper + vim state -------------------------------------------
 
   const linkDeps = {
@@ -319,6 +361,7 @@
 
   function destroyEditor(): void {
     activeLink = null;
+    activeSplit = null;
     activeExit = null;
     activeSettings = null;
     activeToggleMode = null;

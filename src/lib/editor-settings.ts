@@ -51,6 +51,13 @@ export interface EditorSettings {
   legend: boolean;
   /** Typeface for prose (reading view + live preview). */
   proseFont: ProseFont;
+  /** Source mode: show the rendered note beside the source. */
+  previewSplit: boolean;
+  /** Source share of the split (0.25–0.75). */
+  previewRatio: number;
+  /** Turn off view transitions and UI animation (on top of the OS
+   *  `prefers-reduced-motion`). */
+  reduceMotion: boolean;
 }
 
 export const STORAGE_KEY = 'lumi.v2.editor';
@@ -80,7 +87,18 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   vimrc: '',
   legend: true,
   proseFont: 'sans',
+  previewSplit: false,
+  previewRatio: 0.5,
+  reduceMotion: false,
 });
+
+export const PREVIEW_RATIO_MIN = 0.25;
+export const PREVIEW_RATIO_MAX = 0.75;
+
+export function clampRatio(v: unknown, d = 0.5): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return d;
+  return Math.round(Math.min(PREVIEW_RATIO_MAX, Math.max(PREVIEW_RATIO_MIN, v)) * 1000) / 1000;
+}
 
 export function defaultSettings(): EditorSettings {
   return { ...DEFAULT_SETTINGS, escapeSequences: [], mappings: [] };
@@ -170,6 +188,9 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     vimrc: sanitizeVimrc(o.vimrc),
     legend: bool(o.legend, d.legend),
     proseFont: o.proseFont === 'serif' || o.proseFont === 'mono' || o.proseFont === 'sans' ? o.proseFont : d.proseFont,
+    previewSplit: bool(o.previewSplit, d.previewSplit),
+    previewRatio: clampRatio(o.previewRatio, d.previewRatio),
+    reduceMotion: bool(o.reduceMotion, d.reduceMotion),
   };
 }
 

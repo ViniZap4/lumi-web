@@ -24,6 +24,7 @@ describe('planVimMappings', () => {
       { lhs: 'jk', rhs: '<Esc>', ctx: 'insert', noremap: false, source: 'escape' },
       { lhs: 'ff', rhs: '<Esc>', ctx: 'insert', noremap: false, source: 'escape' },
       { lhs: '<F35>l', rhs: ':link<CR>', ctx: 'normal', noremap: false, source: 'default', display: '\\l' },
+      { lhs: '<F35>p', rhs: ':preview split<CR>', ctx: 'normal', noremap: false, source: 'default', display: '\\p' },
     ]);
   });
   it('appends user mappings; first wins on duplicate (mode, lhs)', () => {
@@ -34,7 +35,7 @@ describe('planVimMappings', () => {
         { mode: 'normal', lhs: 'H', rhs: '^', noremap: true },
       ],
     });
-    expect(plan.map((p) => `${p.ctx}:${p.lhs}->${p.rhs}`)).toEqual(['insert:jk-><Esc>', 'normal:H->^', 'normal:<F35>l->:link<CR>']);
+    expect(plan.map((p) => `${p.ctx}:${p.lhs}->${p.rhs}`)).toEqual(['insert:jk-><Esc>', 'normal:H->^', 'normal:<F35>l->:link<CR>', 'normal:<F35>p->:preview split<CR>']);
   });
 });
 
@@ -42,17 +43,17 @@ describe('applyVimConfig', () => {
   it('maps, sets the timeout, and unmaps the previous set on re-apply', () => {
     const v = new FakeVim();
     applyVimConfig(v, { ...defaultSettings(), escapeSequences: ['jk'], escapeTimeout: 300, mappings: [{ mode: 'normal', lhs: 'H', rhs: '^', noremap: true }] });
-    expect(v.log).toEqual(['map insert jk <Esc>', 'noremap normal H ^', 'map normal <F35>l :link<CR>']);
+    expect(v.log).toEqual(['map insert jk <Esc>', 'noremap normal H ^', 'map normal <F35>l :link<CR>', 'map normal <F35>p :preview split<CR>']);
     expect(v.options.insertModeEscKeysTimeout).toBe(300);
     v.log = [];
     applyVimConfig(v, { ...defaultSettings(), escapeSequences: ['ff'] });
-    expect(v.log).toEqual(['unmap insert jk', 'unmap normal H', 'unmap normal <F35>l', 'map insert ff <Esc>', 'map normal <F35>l :link<CR>']);
+    expect(v.log).toEqual(['unmap insert jk', 'unmap normal H', 'unmap normal <F35>l', 'unmap normal <F35>p', 'map insert ff <Esc>', 'map normal <F35>l :link<CR>', 'map normal <F35>p :preview split<CR>']);
   });
   it('skips mappings the engine rejects', () => {
     const v = new FakeVim();
     v.throwOn.add('jk');
     const applied = applyVimConfig(v, { ...defaultSettings(), escapeSequences: ['jk', 'jj'] });
-    expect(applied.map((a) => a.lhs)).toEqual(['jj', '<F35>l']);
+    expect(applied.map((a) => a.lhs)).toEqual(['jj', '<F35>l', '<F35>p']);
   });
 
   it('applies vimrc maps (all-mode maps without a context) and the vimrc leader', () => {
@@ -64,6 +65,7 @@ describe('applyVimConfig', () => {
       'map undefined Y y$',
       'noremap insert jj <Esc>',
       'map normal <F35>l :link<CR>',
+      'map normal <F35>p :preview split<CR>',
     ]);
   });
 
@@ -77,15 +79,17 @@ describe('applyVimConfig', () => {
       'unmap undefined :W',
       'unmap insert jj',
       'unmap normal <F35>l',
+      'unmap normal <F35>p',
       'noremap insert jj <Esc>',
       'map normal <F35>l :link<CR>',
+      'map normal <F35>p :preview split<CR>',
     ]);
   });
 
   it('a vimrc `unmap` drops the mapping it follows', () => {
     const v = new FakeVim();
     applyVimConfig(v, { ...defaultSettings(), vimrc: 'nnoremap H ^\nnunmap H' });
-    expect(v.log).toEqual(['map normal <F35>l :link<CR>']);
+    expect(v.log).toEqual(['map normal <F35>l :link<CR>', 'map normal <F35>p :preview split<CR>']);
   });
 
   it('vimrc can rebind the default <leader>l', () => {
@@ -96,7 +100,7 @@ describe('applyVimConfig', () => {
   it('ignores the vimrc while vim is off', () => {
     const v = new FakeVim();
     applyVimConfig(v, { ...defaultSettings(), vim: false, vimrc: 'nnoremap H ^' });
-    expect(v.log).toEqual(['map normal <F35>l :link<CR>']);
+    expect(v.log).toEqual(['map normal <F35>l :link<CR>', 'map normal <F35>p :preview split<CR>']);
   });
 });
 

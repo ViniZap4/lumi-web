@@ -167,3 +167,46 @@ function waitSettled(s: EditorSession): Promise<void> {
     setTimeout(tick, 300);
   });
 }
+
+// ---- task toggle from the reader -------------------------------------------
+
+const TOGGLE_JOIN_MS = 8_000;
+
+/**
+ * Toggle task `index` of a note that is NOT open in the editor: join
+ * the note's live doc headless (empty doc, wait for the server's
+ * SyncStep2 — CRDT client protocol §2), locate the marker in the
+ * *current* CRDT text and apply a single-character ranged change in
+ * one transaction. Returns the new text, or an error string.
+ */
+export async function toggleTaskHeadless(vaultID: string, noteID: string, index: number): Promise<{ text: string } | { error: string }> {
+  const { taskToggle } = await import('./markdown.ts');
+  const Ctor = await loadEditorSession();
+  const plan = await planSession(vaultID, noteID, { headless: true });
+  if (typeof plan === 'string') return { error: plan };
+  const s = startSession(Ctor, plan);
+  try {
+    const started = Date.now();
+    while (!s.editable && !s.stopped && !s.isDestroyed && Date.now() - started < TOGGLE_JOIN_MS) {
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    if (!s.editable || s.isDestroyed) return { error: 'Sem conexão com o editor ao vivo — tente de novo.' };
+    if (s.emptyAtSync) return { error: 'Abra a nota no editor para inicializar a edição ao vivo.' };
+    const change = taskToggle(s.ytext.toString(), index);
+    if (!change) return { error: 'Tarefa não encontrada (a nota mudou?).' };
+    s.ydoc.transact(() => {
+      s.ytext.delete(change.from, change.to - change.from);
+      s.ytext.insert(change.from, change.insert);
+    });
+    const text = s.ytext.toString();
+    // Let the update reach the server (or the offline replica).
+    const sent = Date.now();
+    while (s.unsent && !s.isDestroyed && Date.now() - sent < 4_000) {
+      if (s.liveSynced) void s.confirmNow();
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return { text };
+  } finally {
+    s.destroy();
+  }
+}

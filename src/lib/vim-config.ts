@@ -55,7 +55,10 @@ function ctxOf(m: VimrcMode): MapMode | undefined {
 
 /** lumi's built-in leader bindings (user vimrc maps win). */
 export function defaultLeaderMaps(leader: string): PlannedMap[] {
-  return [{ lhs: `${LEADER_TOKEN}l`, rhs: ':link<CR>', ctx: 'normal', noremap: false, source: 'default', display: `${leader}l` }];
+  return [
+    { lhs: `${LEADER_TOKEN}l`, rhs: ':link<CR>', ctx: 'normal', noremap: false, source: 'default', display: `${leader}l` },
+    { lhs: `${LEADER_TOKEN}p`, rhs: ':preview split<CR>', ctx: 'normal', noremap: false, source: 'default', display: `${leader}p` },
+  ];
 }
 
 /** Pure: the list of maps a settings object asks for, in apply order. */

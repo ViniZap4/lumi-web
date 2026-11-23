@@ -141,3 +141,18 @@ describe('module default storage (localStorage)', () => {
     expect(loadSettings().fontSize).toBe(13);
   });
 });
+
+describe('split preview + motion settings', () => {
+  it('preview beside source is OFF by default, ratio 0.5, motion allowed', () => {
+    const d = defaultSettings();
+    expect(d.previewSplit).toBe(false);
+    expect(d.previewRatio).toBe(0.5);
+    expect(d.reduceMotion).toBe(false);
+  });
+  it('sanitizes the split ratio into 0.25–0.75', () => {
+    expect(sanitizeSettings({ previewRatio: 0.9 }).previewRatio).toBe(0.75);
+    expect(sanitizeSettings({ previewRatio: 0.1 }).previewRatio).toBe(0.25);
+    expect(sanitizeSettings({ previewRatio: 'x' }).previewRatio).toBe(0.5);
+    expect(sanitizeSettings({ previewSplit: true, reduceMotion: true })).toMatchObject({ previewSplit: true, reduceMotion: true });
+  });
+});

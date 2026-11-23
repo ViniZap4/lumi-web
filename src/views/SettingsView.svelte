@@ -53,6 +53,7 @@
   /** Searchable rows: id → [section, title + keywords]. */
   const INDEX: Record<string, [SettingsSection, string]> = {
     editMode: ['editor', 'editing mode live preview source markdown'],
+    previewSplit: ['editor', 'preview beside source split side by side rendered result pane'],
     openIn: ['editor', 'opening a note shows reading view editor open'],
     readable: ['editor', 'readable line length width column'],
     wrap: ['editor', 'wrap long lines wrapping'],
@@ -68,6 +69,7 @@
     themeMode: ['appearance', 'theme mode dark light auto system colour color'],
     themes: ['appearance', 'theme dark light tokyo catppuccin dracula obsidian palette'],
     legend: ['appearance', 'command legend bottom bar hints which-key keys'],
+    motion: ['appearance', 'reduce motion animation transitions accessibility vestibular'],
     keymap: ['keys', 'keymap shortcuts keys reference yazi help'],
     keysLegend: ['keys', 'command legend bottom bar hints which-key'],
     storage: ['storage', 'offline storage quota space persist local copies indexeddb'],
@@ -344,6 +346,12 @@
               </div>
             </div>
           {/if}
+          {#if show('previewSplit')}
+            <label class="row">
+              <div class="row-text"><span class="row-title">Show preview beside source</span><span class="row-desc">In Source mode, the rendered note sits to the right and scrolls with the editor. Toggle with <kbd>{'\\'}p</kbd>, <kbd>⌘⌥P</kbd> or <kbd>:preview split</kbd>.</span></div>
+              <input type="checkbox" class="ui-switch" checked={s.previewSplit} onchange={(e) => editorSettings.update({ previewSplit: checked(e) })} data-testid="preview-split-toggle" />
+            </label>
+          {/if}
           {#if show('openIn')}
             <div class="row">
               <div class="row-text"><span class="row-title">Opening a note shows</span><span class="row-desc">What <kbd>⏎</kbd> on a note opens.</span></div>
@@ -573,6 +581,12 @@
             <label class="row">
               <div class="row-text"><span class="row-title">Command legend</span><span class="row-desc">A one-line strip above the status bar with the keys for what you are doing now (explorer, reader, vim normal/insert/visual), and completions after <kbd>g</kbd>, <kbd>z</kbd> or the leader.</span></div>
               <input type="checkbox" class="ui-switch" checked={s.legend} onchange={(e) => editorSettings.update({ legend: checked(e) })} data-testid="legend-toggle" />
+            </label>
+          {/if}
+          {#if show('motion')}
+            <label class="row">
+              <div class="row-text"><span class="row-title">Reduce motion</span><span class="row-desc">Turns off view transitions and UI animation. Always on when your system asks for reduced motion.</span></div>
+              <input type="checkbox" class="ui-switch" checked={s.reduceMotion} onchange={(e) => editorSettings.update({ reduceMotion: checked(e) })} data-testid="reduce-motion-toggle" />
             </label>
           {/if}
         </section>

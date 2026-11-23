@@ -1504,6 +1504,10 @@
   .miller.no-preview .col-preview { display: none; }
   .miller.note-mode { grid-template-columns: 0 minmax(200px, 0.9fr) minmax(0, 3.6fr); }
   .miller.note-mode .col-parent { display: none; }
+  /* Explicit tracks: a hidden column must not shift the others. */
+  .col-parent { grid-column: 1; grid-row: 1; }
+  .col-current { grid-column: 2; grid-row: 1; }
+  .col-preview { grid-column: 3; grid-row: 1; }
   .col {
     min-width: 0;
     min-height: 0;
@@ -1547,14 +1551,18 @@
 
   /* Narrow screens: one column at a time + breadcrumb. */
   @media (max-width: 720px) {
-    .switcher-slot { max-width: 40vw; }
-    .breadcrumb { display: none; }
+    .home-mark { display: none; }
+    .switcher-slot { max-width: 34vw; }
+    /* Keep the trail (it is the only "up" affordance on touch); at the
+       root it would only repeat the switcher's book name. */
+    .breadcrumb > .crumb:only-of-type { display: none; }
     .palette-btn { min-width: 0; }
     .palette-label, .palette-btn kbd { display: none; }
     .miller,
     .miller.no-preview,
     .miller.note-mode { grid-template-columns: minmax(0, 1fr); }
     .miller .col-parent { display: none; }
+    .col-current, .col-preview { grid-column: 1; }
     .miller:not(.note-mode) .col-preview { display: none; }
     .miller.note-mode .col-current { display: none; }
     .miller.note-mode .col-preview { display: block; }

@@ -42,6 +42,10 @@
     white-space: nowrap;
     user-select: none;
   }
+  /* Touch-only devices have no keys to show. */
+  @media (hover: none) and (pointer: coarse) {
+    .legend { display: none; }
+  }
   .mode {
     flex: none;
     padding: 1px 6px;

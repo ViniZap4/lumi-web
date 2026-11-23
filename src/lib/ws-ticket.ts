@@ -2,7 +2,12 @@
 //
 // Contract (PM, wave 3):
 //   POST /api/vaults/:vault/notes/:id/ws-ticket   (account auth header)
-//     → 201 {"ticket": "...", "expires_at": "<RFC3339>"}
+//     → 201 {"ticket": "...", "expires_at": "<RFC3339>", "crdt_epoch": "..."}
+//   `crdt_epoch` (lineage contract, lib/lineage.ts) is the note's CRDT
+//   history id as of the mint; the server rejects a ticket whose note
+//   lineage changed before redeem with close 4401 "ticket_stale", so a
+//   re-mint (the normal 4401 retry) always reports the epoch of the doc
+//   the socket will join. Older servers omit it.
 //   The socket is then opened with `?ticket=<ticket>` instead of
 //   `?token=<token>`, so the long-lived account token never appears in
 //   a URL (proxy logs, browser history, Referer).
@@ -22,12 +27,13 @@
 // of the session (no extra round trip on each reconnect).
 
 import { ApiError } from './types.ts';
+import { normEpoch } from './lineage.ts';
 
 export interface WsTicket {
   ticket: string;
   expires_at: string;
-  /** Optional CRDT epoch of the note (assumed future server field; see
-   *  lib/lineage.ts). Ignored when absent. */
+  /** CRDT epoch of the note at mint time (lib/lineage.ts). Absent on
+   *  older servers. */
   crdt_epoch?: string | null;
 }
 
@@ -86,7 +92,7 @@ export class WsTicketAuth {
     }
     this.mode = 'ticket';
     this.issued++;
-    this.lastEpoch = typeof t.crdt_epoch === 'string' && t.crdt_epoch ? t.crdt_epoch : null;
+    this.lastEpoch = normEpoch(t.crdt_epoch);
     return { ticket: t.ticket };
   }
 

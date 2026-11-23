@@ -10,11 +10,15 @@
 // `checkLineage` is the ONE place that decides. It is fed by whatever
 // the server exposes, strongest signal first:
 //
-//   1. `epoch` — an explicit server CRDT generation/epoch (assumed
-//      contract: an opaque string that changes whenever the server
-//      starts a new history for a note id; exposed as `crdt_epoch` on
-//      the note metadata, the /snapshot response or the ws-ticket
-//      response). When both sides have one, it is authoritative.
+//   1. `epoch` — the server's `crdt_epoch` (CRDT protocol, lineage
+//      contract): an opaque string, compared by equality only, that
+//      changes whenever the server starts a new history for a note id
+//      (create, delete+recreate, lazy init / init-from-file). Edits, FS
+//      diff merges, compaction and moves keep it. Exposed on the note
+//      metadata (list/get/changes), /snapshot, /diff, /state-vector and
+//      the ws-ticket response. When both sides have one it decides
+//      ALONE; servers that predate it fall through to (2)/(3), and the
+//      replica adopts the server's epoch after a passing check.
 //   2. State-vector dominance (needs no server change). Every item this
 //      replica holds that was NOT authored on this device came from the
 //      server, so the server's state vector must be >= the replica's
@@ -34,6 +38,7 @@
 // a later note with the same id starts from an empty replica.
 
 import type { LineageStamp } from './offline-store.ts';
+import type { NoteSnapshot, NoteStateVector, NoteSummary } from './types.ts';
 
 export type StateVector = Map<number, number>;
 
@@ -47,7 +52,8 @@ export interface LocalLineage {
 
 export interface ServerLineage {
   stamp: LineageStamp;
-  /** Server state vector (GET /snapshot `vector_clock`), when known. */
+  /** Server state vector (GET /state-vector `state_vector` or GET
+   *  /snapshot `vector_clock`), when known. */
   sv: StateVector | null;
 }
 
@@ -88,3 +94,58 @@ export const LINEAGE_REASON: Record<'epoch' | 'history' | 'recreated', string> =
   history: 'o servidor não tem mais o histórico desta cópia (nota recriada ou estado redefinido)',
   recreated: 'a nota foi apagada e criada de novo com o mesmo nome',
 };
+
+/** A usable `crdt_epoch` value, or null (absent, empty, not a string). */
+export function normEpoch(v: unknown): string | null {
+  return typeof v === 'string' && v !== '' ? v : null;
+}
+
+/** What a REST probe learnt about the server's copy of a note. Same
+ *  shape as editor-session's `ServerProbe`. */
+export interface LineageProbe {
+  /** Server state vector, base64 lib0-v1. */
+  vectorClock: string | null;
+  /** Server text (only fetched for a full probe). */
+  text: string | null;
+  lineage: LineageStamp;
+}
+
+export interface ProbeFetchers {
+  snapshot: () => Promise<NoteSnapshot>;
+  /** GET /state-vector with the /snapshot fallback (api.ts). */
+  stateVector: () => Promise<NoteStateVector>;
+  note: () => Promise<NoteSummary>;
+}
+
+/**
+ * Build the replica's REST probe.
+ *
+ * - `full` (lineage gate before a dial): /snapshot for the text that
+ *   decides whether a conflict copy is needed, plus the note metadata
+ *   for `created_at` (fallback signal). The epoch comes from whichever
+ *   carries it.
+ * - not full (ack confirmation of live edits): only the cheap
+ *   /state-vector — `{crdt_epoch, state_vector}`, no document download.
+ *   api.ts falls back to /snapshot on servers without the route.
+ */
+export function makeServerProbe(f: ProbeFetchers): (full: boolean) => Promise<LineageProbe> {
+  return async (full) => {
+    if (!full) {
+      const r = await f.stateVector();
+      return {
+        vectorClock: typeof r.state_vector === 'string' ? r.state_vector : null,
+        text: null,
+        lineage: { epoch: normEpoch(r.crdt_epoch) },
+      };
+    }
+    const [snap, note] = await Promise.all([f.snapshot(), f.note()]);
+    return {
+      vectorClock: typeof snap.vector_clock === 'string' ? snap.vector_clock : null,
+      text: typeof snap.text === 'string' ? snap.text : null,
+      lineage: {
+        epoch: normEpoch(snap.crdt_epoch) ?? normEpoch(note?.crdt_epoch),
+        createdAt: note?.created_at ?? null,
+      },
+    };
+  };
+}

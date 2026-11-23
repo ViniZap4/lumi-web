@@ -36,6 +36,25 @@ describe('WsTicketAuth', () => {
     expect(fetchTicket).toHaveBeenCalledTimes(2);
   });
 
+  it('records crdt_epoch from each ticket response (null when absent/empty)', async () => {
+    const replies = [
+      { ticket: 't1', expires_at: 'x', crdt_epoch: 'e1' },
+      { ticket: 't2', expires_at: 'x', crdt_epoch: 'e2' },
+      { ticket: 't3', expires_at: 'x' },
+      { ticket: 't4', expires_at: 'x', crdt_epoch: '' },
+    ];
+    let i = 0;
+    const a = new WsTicketAuth(async () => replies[i++], () => 'tk');
+    await a.params();
+    expect(a.lastEpoch).toBe('e1');
+    await a.params();
+    expect(a.lastEpoch).toBe('e2'); // re-mint after a 4401 ticket_stale sees the new lineage
+    await a.params();
+    expect(a.lastEpoch).toBeNull();
+    await a.params();
+    expect(a.lastEpoch).toBeNull();
+  });
+
   it('falls back to ?token= on 404 and stops asking for tickets', async () => {
     const fetchTicket = vi.fn(async () => { throw notFound(); });
     let token = 'tk';

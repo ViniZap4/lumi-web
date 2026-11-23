@@ -26,6 +26,7 @@ import {
   type NoteSummary,
   type NoteContent,
   type NoteSnapshot,
+  type NoteStateVector,
   type RemoteRole,
   type RemoteMember,
   type ServerError,
@@ -513,6 +514,34 @@ export class ApiClient {
     return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/snapshot`);
   }
 
+  /** Whether this server has GET …/state-vector (null = not probed). */
+  stateVectorSupported: boolean | null = null;
+
+  /**
+   * `{crdt_epoch, state_vector}` without the document (ack confirmation,
+   * lineage). Servers without the route answer 404/405/501: fall back
+   * to /snapshot (mapped to the same shape) and remember that, so later
+   * calls go straight to /snapshot. A 404 is ambiguous (old server vs.
+   * note gone): the fallback settles it — a /snapshot 404 propagates as
+   * "note gone" and does NOT mark the route unsupported.
+   */
+  async getNoteStateVector(vaultID: string, noteID: string): Promise<NoteStateVector> {
+    if (this.stateVectorSupported !== false) {
+      try {
+        const r = await this.request<NoteStateVector>(`/api/vaults/${vaultID}/notes/${enc(noteID)}/state-vector`);
+        this.stateVectorSupported = true;
+        return r;
+      } catch (e) {
+        const routeMissing =
+          e instanceof ApiError && (e.status === 405 || e.status === 501 || (e.status === 404 && this.stateVectorSupported !== true));
+        if (!routeMissing) throw e;
+      }
+    }
+    const snap = await this.getNoteSnapshot(vaultID, noteID);
+    this.stateVectorSupported = false;
+    return { id: snap.id, crdt_epoch: snap.crdt_epoch ?? null, state_vector: snap.vector_clock };
+  }
+
   applyNoteDiff(vaultID: string, noteID: string, text: string, baseClock?: string): Promise<NoteSnapshot> {
     return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/diff`, {
       method: 'POST',
@@ -617,6 +646,7 @@ export async function updateNote(v: string, n: string, i: UpdateNoteInput) { ret
 export async function deleteNote(v: string, n: string) { return vc(v).deleteNote(v, n); }
 export async function createNoteWsTicket(v: string, n: string) { return vc(v).createNoteWsTicket(v, n); }
 export async function getNoteSnapshot(v: string, n: string) { return vc(v).getNoteSnapshot(v, n); }
+export async function getNoteStateVector(v: string, n: string) { return vc(v).getNoteStateVector(v, n); }
 export async function applyNoteDiff(v: string, n: string, t: string, b?: string) { return vc(v).applyNoteDiff(v, n, t, b); }
 
 export function isAbortError(err: unknown): boolean {

@@ -200,8 +200,9 @@ export interface NoteSummary {
   title: string;
   created_at: string;
   updated_at: string;
-  /** Assumed optional server field: CRDT epoch/generation of the note
-   *  (lib/lineage.ts). Absent on today's server. */
+  /** CRDT lineage id of the note (lib/lineage.ts): opaque, compare by
+   *  equality only; changes when the server starts a new CRDT history
+   *  for this id. Absent on servers that predate it. */
   crdt_epoch?: string | null;
 }
 
@@ -220,8 +221,18 @@ export interface NoteSnapshot {
   vector_clock: string; // base64
   /** Full lib0-v1 state, base64 (CRDT §10 S9). */
   state?: string;
-  /** Assumed optional server field, see NoteSummary.crdt_epoch. */
+  /** See NoteSummary.crdt_epoch (also on the POST /diff response). */
   crdt_epoch?: string | null;
+}
+
+/** GET /api/vaults/:vault/notes/:id/state-vector — cheap ack/lineage
+ *  probe without the document body. `state_vector` uses the same
+ *  encoding as NoteSnapshot.vector_clock. */
+export interface NoteStateVector {
+  id?: string;
+  crdt_epoch?: string | null;
+  /** base64 lib0-v1 state vector. */
+  state_vector: string;
 }
 
 // Server error envelope — every 4xx / 5xx response. detail is optional

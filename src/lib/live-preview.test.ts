@@ -10,6 +10,8 @@ import {
   safeHref,
   safeImageSrc,
   taskToggleChange,
+  noteHref,
+  noteLinkHandler,
   type LPSpec,
 } from './live-preview.ts';
 
@@ -174,5 +176,36 @@ describe('checkbox widget → Y.Text', () => {
     expect(deltas).toEqual([[{ retain: at }, { delete: 1 }, { insert: 'x' }]]);
     view.destroy();
     ydoc.destroy();
+  });
+});
+
+describe('live preview: note links', () => {
+  it('relative links are note links; schemes, // and #fragments are not', () => {
+    expect(noteHref('../a/b.md')).toBe('../a/b.md');
+    expect(noteHref('<x y.md>')).toBe('x y.md');
+    expect(noteHref('https://x.y')).toBeNull();
+    expect(noteHref('javascript:alert(1)')).toBeNull();
+    expect(noteHref('//evil.com')).toBeNull();
+    expect(noteHref('#top')).toBeNull();
+  });
+
+  it('marks a relative link with its note href and opens it on Mod-click', () => {
+    const doc = 'see [Plan](work/plan.md) and [web](https://x.y)\n\nend';
+    const st = stateAt(doc, doc.length);
+    const marks = computeLivePreview(st).filter((s): s is Extract<LPSpec, { type: 'mark' }> => s.type === 'mark' && s.cls.includes('cm-lp-link') && !doc.slice(s.from, s.to).includes('.'));
+    expect(marks.map((m) => [doc.slice(m.from, m.to), m.note ?? null, m.href ?? null])).toEqual([
+      ['Plan', 'work/plan.md', null],
+      ['web', null, 'https://x.y/'],
+    ]);
+    const opened: string[] = [];
+    const view = new EditorView({
+      state: EditorState.create({ doc, selection: { anchor: doc.length }, extensions: [markdown({ base: markdownLanguage }), livePreview(), noteLinkHandler.of((h) => opened.push(h))] }),
+      parent: document.body,
+    });
+    const el = view.contentDOM.querySelector('[data-lp-note]') as HTMLElement;
+    expect(el.getAttribute('data-lp-note')).toBe('work/plan.md');
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, metaKey: true, button: 0 }));
+    expect(opened).toEqual(['work/plan.md']);
+    view.destroy();
   });
 });

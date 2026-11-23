@@ -9,9 +9,12 @@
 // — but mappings end up in the vim engine, so they are length- and
 // shape-limited.
 
+import { sanitizeVimrc } from './vimrc.ts';
+
 export type EditMode = 'live' | 'source';
 export type OpenIn = 'reading' | 'editing';
 export type MapMode = 'normal' | 'insert' | 'visual';
+export type ProseFont = 'sans' | 'serif' | 'mono';
 
 export interface VimMapping {
   mode: MapMode;
@@ -41,6 +44,13 @@ export interface EditorSettings {
   readableWidth: boolean;
   fontSize: number;
   tabSize: number;
+  /** User `.vimrc` text (safe subset, parsed — see vimrc.ts). Applied
+   *  when vim is on. */
+  vimrc: string;
+  /** Which-key style command legend at the bottom of the window. */
+  legend: boolean;
+  /** Typeface for prose (reading view + live preview). */
+  proseFont: ProseFont;
 }
 
 export const STORAGE_KEY = 'lumi.v2.editor';
@@ -67,6 +77,9 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   readableWidth: true,
   fontSize: 15,
   tabSize: 4,
+  vimrc: '',
+  legend: true,
+  proseFont: 'sans',
 });
 
 export function defaultSettings(): EditorSettings {
@@ -154,6 +167,9 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     readableWidth: bool(o.readableWidth, d.readableWidth),
     fontSize: clampInt(o.fontSize, FONT_SIZE_MIN, FONT_SIZE_MAX, d.fontSize),
     tabSize: tab,
+    vimrc: sanitizeVimrc(o.vimrc),
+    legend: bool(o.legend, d.legend),
+    proseFont: o.proseFont === 'serif' || o.proseFont === 'mono' || o.proseFont === 'sans' ? o.proseFont : d.proseFont,
   };
 }
 

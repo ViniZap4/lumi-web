@@ -7,7 +7,8 @@ import { accounts } from './accounts.svelte.ts';
 import { books } from './books.svelte.ts';
 import { offline } from './offline.svelte.ts';
 import { notes } from './notes.svelte.ts';
-import { isAuthFailure, createNoteWsTicket, getNoteSnapshot, getNote } from './api.ts';
+import { isAuthFailure, createNoteWsTicket, getNoteSnapshot, getNoteStateVector, getNote } from './api.ts';
+import { makeServerProbe } from './lineage.ts';
 import { serverLabel } from './serverurl.ts';
 import type { ConflictCopy, ReplicaRecord } from './offline-store.ts';
 import type {
@@ -66,20 +67,13 @@ export async function planSession(vaultID: string, noteID: string, o: PlanOpts =
   }
   const meta = notes.vaultID === vaultID ? notes.list.find((n) => n.id === noteID) : undefined;
 
-  const probe = async (full: boolean): Promise<ServerProbe> => {
-    const [snap, note] = await Promise.all([
-      getNoteSnapshot(vaultID, noteID),
-      full ? getNote(vaultID, noteID) : Promise.resolve(null),
-    ]);
-    return {
-      vectorClock: snap.vector_clock ?? null,
-      text: typeof snap.text === 'string' ? snap.text : null,
-      lineage: {
-        epoch: snap.crdt_epoch ?? note?.crdt_epoch ?? null,
-        createdAt: note?.created_at ?? null,
-      },
-    };
-  };
+  // Full probe (lineage gate): /snapshot + metadata. Ack confirmation:
+  // GET /state-vector only (falls back to /snapshot on older servers).
+  const probe: (full: boolean) => Promise<ServerProbe> = makeServerProbe({
+    snapshot: () => getNoteSnapshot(vaultID, noteID),
+    stateVector: () => getNoteStateVector(vaultID, noteID),
+    note: () => getNote(vaultID, noteID),
+  });
 
   const options: EditorSessionOptions = {
     serverUrl: acct.server_url,

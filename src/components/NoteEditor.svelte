@@ -1,5 +1,7 @@
 <script lang="ts" module>
   import { Vim } from '@replit/codemirror-vim';
+  import { installYankFlash } from '../lib/yank-flash.ts';
+  import { motionAllowed } from '../lib/motion.ts';
 
   // Vim ex commands are registered globally on the Vim singleton, so
   // they dispatch to whichever editor is currently mounted.
@@ -27,6 +29,8 @@
     });
     // :link (and the default <leader>l) opens the markdown link helper.
     Vim.defineEx('link', 'link', () => activeLink?.());
+    // Neovim-style yank highlight (purely visual).
+    installYankFlash(Vim as never, () => !motionAllowed());
   }
 </script>
 
@@ -37,6 +41,8 @@
     keymap,
     lineNumbers,
     highlightActiveLine,
+    highlightActiveLineGutter,
+    drawSelection,
     type ViewUpdate,
   } from '@codemirror/view';
   import { EditorState, Compartment, Prec, type Extension } from '@codemirror/state';
@@ -44,7 +50,9 @@
   import { searchKeymap } from '@codemirror/search';
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
   import { languages } from '@codemirror/language-data';
-  import { syntaxHighlighting, indentUnit, codeFolding } from '@codemirror/language';
+  import { syntaxHighlighting, indentUnit, codeFolding, foldGutter } from '@codemirror/language';
+  import { yankFlash } from '../lib/yank-flash.ts';
+  import { editorKeymap } from '../lib/editor-keys.ts';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
@@ -76,7 +84,7 @@
     /** Open a relative note link (Ctrl/Cmd+click in Live Preview). */
     onopennote?: (href: string) => void;
     /** Vim mode + pending keys, for the command legend. */
-    onvimstate?: (s: { mode: string; pending: string | null }) => void;
+    onvimstate?: (s: { mode: string; pending: string | null; sub?: string | null }) => void;
   };
 
   const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate }: Props = $props();
@@ -86,6 +94,110 @@
   const eff: EffectiveSettings = $derived(effectiveSettings(settings));
 
   let container: HTMLDivElement | null = $state(null);
+
+  // Editor chrome. Colours are theme tokens (see app.css for the Live
+  // Preview prose styles); layout keeps the text in a centred writing
+  // column with the gutter hugging it, while the scrollbar stays at
+  // the pane edge.
+  const mono = 'var(--font-mono)';
+  const EDITOR_THEME = {
+    '&': {
+      height: '100%',
+      fontFamily: 'var(--editor-font, var(--prose-font))',
+      background: 'transparent',
+      color: 'var(--color-text)',
+    },
+    '&.cm-focused': { outline: 'none' },
+    '.cm-scroller': {
+      fontFamily: 'inherit',
+      lineHeight: 'var(--editor-leading, var(--prose-leading))',
+      padding: '0 var(--editor-pad-x, 24px)',
+      overscrollBehavior: 'contain',
+    },
+    // Centre content (and the gutter beside it): the free space goes
+    // to the gutter's left margin and the content's right margin.
+    '.cm-content': {
+      maxWidth: 'var(--editor-measure, none)',
+      marginInline: 'auto',
+      padding: 'var(--editor-pad-top, 40px) 0 40vh',
+      caretColor: 'var(--color-primary)',
+    },
+    '.cm-gutters ~ .cm-content': { marginLeft: '0' },
+    '.cm-line': { padding: '0 1px' },
+    '.cm-gutters': {
+      marginLeft: 'auto',
+      paddingTop: 'var(--editor-pad-top, 40px)',
+      background: 'transparent',
+      color: 'var(--md-marker)',
+      border: 'none',
+      fontFamily: mono,
+      fontSize: '0.74em',
+      fontVariantNumeric: 'tabular-nums',
+    },
+    '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 6px', minWidth: '28px', opacity: '0.75' },
+    '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--color-text)' },
+    '.cm-lineNumbers .cm-activeLineGutter': { opacity: '1' },
+    '.cm-foldGutter .cm-gutterElement': { padding: '0 6px 0 2px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+    '.cm-fold-marker': { display: 'inline-flex', color: 'var(--md-marker)', opacity: '0', cursor: 'pointer', transition: 'opacity 120ms, transform 120ms' },
+    '.cm-fold-marker[data-open="true"]': { transform: 'rotate(90deg)' },
+    '.cm-fold-marker[data-open="false"]': { opacity: '1', color: 'var(--color-primary)' },
+    '.cm-gutters:hover .cm-fold-marker': { opacity: '1' },
+    '.cm-foldPlaceholder': {
+      margin: '0 0.35em',
+      padding: '0 0.5em',
+      border: '1px solid var(--md-rule)',
+      borderRadius: '999px',
+      background: 'var(--md-inline-bg)',
+      color: 'var(--md-dim)',
+      fontFamily: mono,
+      fontSize: '0.8em',
+      cursor: 'pointer',
+    },
+    // Translucent bands only, so the selection layer (drawn beneath the
+    // text) is never covered.
+    '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--color-text) 3.5%, transparent)', borderRadius: '3px' },
+    '.cm-cursor, .cm-dropCursor': { borderLeft: '2px solid var(--color-primary)' },
+    '.cm-fat-cursor': { background: 'color-mix(in srgb, var(--color-primary) 80%, transparent) !important', color: 'var(--color-background) !important', borderRadius: '1px' },
+    '&:not(.cm-focused) .cm-fat-cursor': { background: 'none !important', outline: '1px solid var(--color-primary) !important' },
+    '.cm-selectionLayer .cm-selectionBackground': { background: 'var(--editor-selection-blur) !important' },
+    '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { background: 'var(--editor-selection) !important' },
+    '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' },
+    '.cm-searchMatch': {
+      backgroundColor: 'color-mix(in srgb, var(--color-warning) 26%, transparent)',
+      outline: '1px solid color-mix(in srgb, var(--color-warning) 55%, transparent)',
+      borderRadius: '2px',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected, .cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--color-primary) 34%, transparent)', outlineColor: 'var(--color-primary)' },
+    '&.cm-focused .cm-matchingBracket': { backgroundColor: 'color-mix(in srgb, var(--color-accent) 22%, transparent)', outline: '1px solid color-mix(in srgb, var(--color-accent) 50%, transparent)' },
+    '&.cm-focused .cm-nonmatchingBracket': { backgroundColor: 'color-mix(in srgb, var(--color-error) 22%, transparent)' },
+    '.cm-yank-flash': {
+      backgroundColor: 'color-mix(in srgb, var(--color-accent) 38%, transparent)',
+      borderRadius: '2px',
+      animation: 'cm-yank-fade 220ms ease-out forwards',
+    },
+    '@keyframes cm-yank-fade': {
+      from: { backgroundColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)' },
+      to: { backgroundColor: 'color-mix(in srgb, var(--color-accent) 0%, transparent)' },
+    },
+    '.cm-ySelectionCaret': { borderLeftWidth: '2px' },
+    '.cm-ySelectionInfo': { fontFamily: 'var(--font-sans)', fontSize: '11px', fontWeight: '600', padding: '1px 5px', borderRadius: '4px 4px 4px 0', top: '-1.4em' },
+    '.cm-panels': {
+      background: 'color-mix(in srgb, var(--color-overlay-bg) 70%, var(--color-background))',
+      color: 'var(--color-text)',
+      fontFamily: mono,
+      fontSize: '13px',
+    },
+    '.cm-panels-bottom': { borderTop: '1px solid var(--hairline)' },
+    '.cm-vim-panel': { padding: '0 var(--editor-pad-x, 24px)', minHeight: '30px', alignItems: 'center' },
+    '.cm-vim-panel input': { color: 'var(--color-text)', background: 'transparent', font: 'inherit' },
+    '.cm-tooltip': {
+      background: 'var(--color-background)',
+      border: '1px solid var(--hairline)',
+      borderRadius: 'var(--radius)',
+      boxShadow: 'var(--shadow-pop)',
+      overflow: 'hidden',
+    },
+  };
   let view: EditorView | null = null;
 
   const vimC = new Compartment();
@@ -95,13 +207,31 @@
   const tabC = new Compartment();
   const fontC = new Compartment();
   const activeLineC = new Compartment();
+  const keysC = new Compartment();
+
+  function baseKeys(s: EffectiveSettings): Extension {
+    return keymap.of([...editorKeymap(defaultKeymap, s.vim), ...searchKeymap]);
+  }
 
   function vimExt(s: EffectiveSettings): Extension {
-    return s.vim ? vim({ status: true }) : [];
+    // No vim status panel: the mode pill lives in the status bar and
+    // pending keys in the legend. `:` and `/` still open their prompt.
+    return s.vim ? vim({ status: false }) : [];
+  }
+  function foldMarker(open: boolean): HTMLElement {
+    const el = document.createElement('span');
+    el.className = 'cm-fold-marker';
+    el.dataset.open = String(open);
+    el.title = open ? 'Fold (za)' : 'Unfold (za)';
+    el.innerHTML = '<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M5.5 3.5 10 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return el;
   }
   function gutterExt(s: EffectiveSettings): Extension {
-    if (s.relativeLineNumbers) return relativeLineNumbers();
-    return s.lineNumbers ? lineNumbers() : [];
+    const numbers = s.relativeLineNumbers ? relativeLineNumbers() : s.lineNumbers ? lineNumbers() : [];
+    // Fold chevrons in Source (headings, lists, code); they show on hover.
+    const folds = s.editMode === 'source' ? foldGutter({ markerDOM: foldMarker }) : [];
+    const active = s.lineNumbers || s.relativeLineNumbers ? highlightActiveLineGutter() : [];
+    return [numbers, folds, active];
   }
   function wrapExt(s: EffectiveSettings): Extension {
     return s.lineWrapping ? EditorView.lineWrapping : [];
@@ -113,7 +243,13 @@
     return [EditorState.tabSize.of(s.tabSize), indentUnit.of(s.indentWithSpaces ? ' '.repeat(s.indentWidth) : '\t')];
   }
   function fontExt(s: EffectiveSettings): Extension {
-    return EditorView.theme({ '&': { fontSize: `${s.fontSize}px` } });
+    // Live Preview = the reader's prose size, scaled by the setting
+    // (15 is the default, so defaults match the reader exactly).
+    // Source is monospace, optically ~7% smaller for the same size.
+    const size = s.editMode === 'live'
+      ? `calc(var(--prose-size) * ${s.fontSize / 15})`
+      : `${Math.round(s.fontSize * 0.93 * 10) / 10}px`;
+    return EditorView.theme({ '&': { fontSize: size } });
   }
   function activeLineExt(s: EffectiveSettings): Extension {
     // The active-line band fights Live Preview's line styling (code
@@ -165,6 +301,7 @@
         tabC.reconfigure(tabExt(s)),
         fontC.reconfigure(fontExt(s)),
         activeLineC.reconfigure(activeLineExt(s)),
+        keysC.reconfigure(baseKeys(s)),
       ],
     });
   });
@@ -215,6 +352,12 @@
         },
       })),
       vimC.of(vimExt(s)),
+      // The selection layer: vim hides the native ::selection, so
+      // without it visual mode would draw nothing.
+      drawSelection({ cursorBlinkRate: 1100 }),
+      // Blockwise visual (<C-v>) is one range per line.
+      EditorState.allowMultipleSelections.of(true),
+      yankFlash(),
       gutterC.of(gutterExt(s)),
       activeLineC.of(activeLineExt(s)),
       wrapC.of(wrapExt(s)),
@@ -225,7 +368,7 @@
       syntaxHighlighting(lumiHighlightStyle),
       // Fold placeholders for vim zc/zo/za (headings, lists, code).
       codeFolding({ placeholderText: '⋯' }),
-      keymap.of([...defaultKeymap.filter((b) => b.key !== 'Mod-z' && b.key !== 'Mod-y' && b.key !== 'Mod-Shift-z'), ...searchKeymap]),
+      keysC.of(baseKeys(s)),
       markdown({ base: markdownLanguage, codeLanguages: languages }),
       previewC.of(previewExt(s)),
       yCollab(session.ytext, session.provider?.awareness ?? null, {
@@ -235,41 +378,7 @@
       linkHelper(linkDeps),
       noteLinkHandler.of((href) => onopennote?.(href)),
       EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', 'aria-label': 'Note editor' }),
-      EditorView.theme({
-        '&': {
-          height: '100%',
-          fontFamily: 'var(--editor-font, var(--font-sans))',
-          background: 'transparent',
-          color: 'var(--color-text)',
-        },
-        '&.cm-focused': { outline: 'none' },
-        '.cm-scroller': { lineHeight: '1.6' },
-        '.cm-content': { padding: '1.25rem 0 40vh', caretColor: 'var(--color-primary)' },
-        '.cm-line': { padding: '0 1.25rem' },
-        '.cm-gutters': {
-          background: 'transparent',
-          color: 'var(--color-text-dim, var(--color-muted))',
-          border: 'none',
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-          fontSize: '0.8em',
-        },
-        '.cm-activeLine': { backgroundColor: 'var(--color-selected-bg, transparent)' },
-        '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--color-text)' },
-        '.cm-cursor': { borderLeftColor: 'var(--color-primary)' },
-        '.cm-fat-cursor': { background: 'var(--color-primary) !important', color: 'var(--color-background) !important' },
-        '&:not(.cm-focused) .cm-fat-cursor': { background: 'none !important', outline: '1px solid var(--color-primary) !important' },
-        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--color-selected-bg) !important' },
-        '.cm-ySelectionCaret': { borderLeftWidth: '2px' },
-        '.cm-panels': {
-          background: 'var(--color-overlay-bg, var(--color-background))',
-          color: 'var(--color-text)',
-          borderTop: '1px solid var(--color-border, var(--color-muted))',
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-          fontSize: '12px',
-        },
-        '.cm-vim-panel': { padding: '2px 8px' },
-        '.cm-vim-panel input': { color: 'var(--color-text)', background: 'transparent' },
-      }),
+      EditorView.theme(EDITOR_THEME),
     ];
 
     view = new EditorView({
@@ -330,11 +439,12 @@
   };
 
   let vimMode = 'normal';
+  let vimSub: string | null = null;
   function emitVim(): void {
     const cm = view ? getCM(view) : null;
     const st = cm?.state.vim as { status?: string; insertMode?: boolean } | undefined;
     const pending = st && !st.insertMode && st.status ? st.status : null;
-    onvimstate?.({ mode: vimMode, pending });
+    onvimstate?.({ mode: vimMode, pending, sub: vimSub });
   }
   function watchVim(): void {
     if (!view || !onvimstate) return;
@@ -344,8 +454,9 @@
       return;
     }
     vimMode = cm.state.vim?.insertMode ? 'insert' : 'normal';
-    cm.on('vim-mode-change', (e: { mode: string }) => {
+    cm.on('vim-mode-change', (e: { mode: string; subMode?: string }) => {
       vimMode = e.mode;
+      vimSub = e.mode === 'visual' ? (e.subMode ?? null) : null;
       emitVim();
     });
     cm.on('vim-keypress', emitVim);
@@ -388,24 +499,36 @@
 <style>
   .note-editor-host {
     flex: 1;
-    min-height: 60vh;
+    min-height: 0;
+    height: 100%;
     display: flex;
     width: 100%;
+    /* Shared with the editor theme (NoteEditor EDITOR_THEME). */
+    --editor-selection: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    --editor-selection-blur: color-mix(in srgb, var(--color-text) 14%, transparent);
+    --editor-pad-x: clamp(16px, 4vw, 40px);
+    --editor-pad-top: clamp(20px, 5vh, 56px);
   }
-  .note-editor-host.readable {
-    max-width: 48rem;
-    margin: 0 auto;
+  /* Live Preview: the reader's typeface, size, leading and measure. */
+  .note-editor-host[data-mode='live'] {
+    --editor-leading: var(--prose-leading);
+    --ed-heading: var(--md-heading);
   }
+  .note-editor-host[data-mode='live'].readable { --editor-measure: calc(var(--md-measure) + 2px); }
+  /* Source: monospace, markers dimmed, headings tinted and gently sized. */
+  .note-editor-host[data-mode='source'] {
+    --editor-font: var(--font-mono);
+    --editor-leading: 1.7;
+    --ed-heading: var(--color-primary);
+    --ed-h1: 1.32em;
+    --ed-h2: 1.2em;
+    --ed-h3: 1.1em;
+    --ed-h4: 1.04em;
+  }
+  .note-editor-host[data-mode='source'].readable { --editor-measure: 76ch; }
   :global(.note-editor-host .cm-editor) {
     flex: 1;
     outline: none;
     min-width: 0;
-  }
-  :global(.note-editor-host[data-prose='serif'] .cm-editor) {
-    --editor-font: var(--font-serif);
-  }
-  :global(.note-editor-host[data-prose='mono'] .cm-editor),
-  :global(.note-editor-host[data-mode='source'] .cm-editor) {
-    --editor-font: var(--font-mono);
   }
 </style>

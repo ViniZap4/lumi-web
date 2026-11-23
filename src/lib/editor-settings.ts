@@ -58,6 +58,13 @@ export interface EditorSettings {
   /** Turn off view transitions and UI animation (on top of the OS
    *  `prefers-reduced-motion`). */
   reduceMotion: boolean;
+  /** Ctrl-h/j/k/l move focus between panes (vim-tmux-navigator style).
+   *  `Ctrl-w h/j/k/l/w/p` always work; explicit .vimrc maps of these
+   *  keys win in the editor. */
+  paneNav: boolean;
+  /** Leaving the split preview by keyboard moves the editor cursor to
+   *  the source line at the top of the preview. */
+  previewCursorSync: boolean;
 }
 
 export const STORAGE_KEY = 'lumi.v2.editor';
@@ -90,6 +97,8 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   previewSplit: false,
   previewRatio: 0.5,
   reduceMotion: false,
+  paneNav: true,
+  previewCursorSync: false,
 });
 
 export const PREVIEW_RATIO_MIN = 0.25;
@@ -191,6 +200,8 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     previewSplit: bool(o.previewSplit, d.previewSplit),
     previewRatio: clampRatio(o.previewRatio, d.previewRatio),
     reduceMotion: bool(o.reduceMotion, d.reduceMotion),
+    paneNav: bool(o.paneNav, d.paneNav),
+    previewCursorSync: bool(o.previewCursorSync, d.previewCursorSync),
   };
 }
 

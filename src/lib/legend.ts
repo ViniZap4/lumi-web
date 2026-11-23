@@ -13,6 +13,8 @@
 export type LegendContext =
   | 'explorer'
   | 'reader'
+  /** The split preview, focused: a keyboard reader. */
+  | 'preview'
   | 'normal'
   | 'insert'
   | 'visual'
@@ -43,7 +45,35 @@ export interface LegendExtras {
   source?: boolean;
   /** The split preview is showing. */
   split?: boolean;
+  /** More than one pane on screen and Ctrl-h/j/k/l pane keys on. */
+  panes?: boolean;
 }
+
+/** Completions after `Ctrl-w` (vim window commands). */
+export const PANE_W: LegendItem[] = [
+  { keys: 'h l', label: 'left/right pane' },
+  { keys: 'j k', label: 'lower/upper pane' },
+  { keys: 'w', label: 'next pane', do: 'app:panes' },
+  { keys: 'p', label: 'previous pane' },
+  { keys: 'Esc', label: 'cancel' },
+];
+
+const PANES_ITEM: LegendItem = { keys: '⌃h ⌃l', label: 'panes', do: 'app:panes', tip: 'Ctrl-h/j/k/l move between panes · Ctrl-w w next · Ctrl-w p previous' };
+
+const PREVIEW_ITEMS: LegendItem[] = [
+  { keys: 'j k', label: 'scroll', do: 'preview:down' },
+  { keys: 'd u', label: 'half page', do: 'preview:halfDown' },
+  { keys: '{ }', label: 'heading', do: 'preview:nextHeading', tip: '} next heading · { previous (also ]] [[)' },
+  { keys: '/', label: 'find', do: 'preview:find', tip: '/ find in the preview · n N next/previous match' },
+  { keys: 'f', label: 'hints', do: 'app:hints', tip: 'Label links, tasks and copy buttons; type a label to click it' },
+  { keys: 'q ⌃h', label: 'editor', do: 'preview:back', tip: 'q, Esc, e, i or Ctrl-h: back to the editor' },
+  { keys: 'y', label: 'copy', do: 'preview:yank', tip: 'Copy the selection / current match, else the note' },
+  { keys: 'gg G', label: 'top/end', do: 'preview:top' },
+  { keys: 'n N', label: 'next match', do: 'preview:findNext' },
+  { keys: '⏎', label: 'open link', tip: 'Tab to a link, then Enter' },
+  { keys: 'space b', label: 'page' },
+  { keys: '⌃w w', label: 'next pane', do: 'app:panes' },
+];
 
 const SHELL_G: LegendItem[] = [
   { keys: 'gg', label: 'top', do: 'shell:top' },
@@ -136,6 +166,16 @@ export function fitLegend(widths: readonly number[], available: number, gap: num
 export function legendFor(ctx: LegendContext, pending: string | null = null, x: LegendExtras = {}): LegendItem[] {
   const leader = x.leader ?? '\\';
   const pend = pending ?? '';
+  if (pend === '⌃w') return PANE_W;
+
+  if (ctx === 'preview') {
+    const count = /^(\d+)/.exec(pend)?.[1];
+    const chord = pend.replace(/^\d+/, '');
+    if (chord === 'g') return [{ keys: 'gg', label: 'top', do: 'preview:top' }];
+    if (chord === '[' || chord === ']') return [{ keys: '[[', label: 'previous heading' }, { keys: ']]', label: 'next heading', do: 'preview:nextHeading' }];
+    if (count) return [{ keys: `${count}j`, label: `scroll ${count}` }, { keys: `${count}}`, label: `${count} headings` }, { keys: 'Esc', label: 'cancel' }];
+    return PREVIEW_ITEMS;
+  }
 
   if (ctx === 'explorer' || ctx === 'reader') {
     const count = /^(\d+)/.exec(pend)?.[1];
@@ -159,6 +199,7 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
         { keys: 'd', label: 'delete', do: 'shell:delete' },
         { keys: 'y p', label: 'copy', do: 'shell:yank', tip: 'y: yank the note · p: paste a copy here' },
         { keys: 'f', label: 'hints', do: 'app:hints', tip: 'Label everything clickable; type a label to click it' },
+        ...(x.panes ? [PANES_ITEM] : []),
         { keys: 'space', label: 'commands', do: 'shell:palette' },
         { keys: '?', label: 'keys', do: 'shell:help' },
         { keys: 'gg G', label: 'top/end', do: 'shell:top' },
@@ -182,6 +223,7 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
       { keys: 'q h', label: 'back', do: 'shell:parent' },
       { keys: 'y', label: 'copy', do: 'shell:yank' },
       { keys: 'F', label: 'hints', do: 'app:hints', tip: 'Label links, tasks and buttons; type a label to click it' },
+      ...(x.panes ? [PANES_ITEM] : []),
       { keys: 'space', label: 'commands', do: 'shell:palette' },
       { keys: '?', label: 'keys', do: 'shell:help' },
       { keys: 'r', label: 'rename', do: 'shell:rename' },
@@ -220,6 +262,8 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
         { keys: `${leader}l`, label: 'link', do: 'ex:link' },
       ];
       if (x.source) items.push({ keys: `${leader}p`, label: x.split ? 'hide preview' : 'preview', do: 'ex:preview split', tip: 'Rendered preview beside the source (⌘⌥P, :preview split)' });
+      if (x.split && x.panes) items.push({ keys: '⌃l', label: 'read preview', do: 'app:readPreview', tip: 'Ctrl-l focuses the preview: j/k, { }, /, f; q or Ctrl-h comes back' });
+      else if (x.panes) items.push(PANES_ITEM);
       items.push(
         { keys: ':q', label: 'close', do: 'ex:q' },
         { keys: '⌘E', label: 'reading', do: 'app:reading' },

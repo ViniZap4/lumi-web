@@ -9,6 +9,8 @@
   // - The divider resizes by drag or keyboard (←/→, h/l, Home/End,
   //   Enter resets) and is a proper ARIA separator.
   // - Narrow windows collapse to Source | Preview tabs.
+  // - Focused, the preview is a keyboard reader (lib/preview-keys.ts):
+  //   the view feeds keys, `run` scrolls / jumps / finds here.
   import { onMount, untrack, type Snippet } from 'svelte';
   import type { EditorView } from '@codemirror/view';
   import type * as Y from 'yjs';
@@ -16,6 +18,8 @@
   import { renderBlocks } from '../lib/markdown.ts';
   import { normalizeAnchors, measureAnchors, lineToOffset, offsetToLine, ScrollLeader, debounce, PREVIEW_DEBOUNCE_MS, type Anchor } from '../lib/scroll-sync.ts';
   import { PREVIEW_RATIO_MIN, PREVIEW_RATIO_MAX, clampRatio } from '../lib/editor-settings.ts';
+  import { headingTarget, findRanges, nextMatchIndex, type PreviewAction } from '../lib/preview-keys.ts';
+  import { motionAllowed } from '../lib/motion.ts';
 
   interface Props {
     /** Preview showing. Off → the editor alone, full width (the editor
@@ -29,9 +33,13 @@
     onratio: (r: number) => void;
     ontoggletask?: (index: number) => void;
     onlink?: (href: string, e: MouseEvent) => void;
+    /** Which side has keyboard focus (subtle indicator). */
+    focused?: 'editor' | 'split' | null;
+    /** Tabs layout (narrow) changed. */
+    onnarrow?: (narrow: boolean) => void;
     children: Snippet;
   }
-  const { enabled, ytext, editorView, ratio, prose = 'sans', onratio, ontoggletask, onlink, children }: Props = $props();
+  const { enabled, ytext, editorView, ratio, prose = 'sans', onratio, ontoggletask, onlink, focused = null, onnarrow, children }: Props = $props();
 
   let text = $state(untrack(() => (enabled ? ytext.toString() : '')));
   const blocks = $derived(enabled ? renderBlocks(text) : []);
@@ -48,6 +56,15 @@
   let dragging = $state(false);
   let narrow = $state(false);
   let tab = $state<'source' | 'preview'>('source');
+  $effect(() => onnarrow?.(narrow));
+
+  // ---- find (/ n N) --------------------------------------------------------
+  let findOpen = $state(false);
+  let findQuery = $state('');
+  let findInput = $state<HTMLInputElement | null>(null);
+  let findInfo = $state('');
+  let ranges: Range[] = [];
+  let matchIdx = -1;
 
   const leader = new ScrollLeader();
   let anchors: Anchor[] = [];
@@ -216,6 +233,190 @@
   export function showTab(t: 'source' | 'preview'): void {
     tab = t;
   }
+
+  // ---- keyboard reader (split preview focused) --------------------------------
+
+  /** Focus the preview pane (switching to its tab when narrow). */
+  export async function focusPreview(): Promise<boolean> {
+    if (!enabled) return false;
+    if (narrow) tab = 'preview';
+    await Promise.resolve();
+    if (!scroller) return false;
+    scroller.focus({ preventScroll: true });
+    if (narrow) requestAnimationFrame(remeasure);
+    return true;
+  }
+
+  /** Show the source side (narrow tabs) before the editor is focused. */
+  export function revealSource(): void {
+    if (narrow) tab = 'source';
+  }
+
+  /** The preview scroller (hint mode root). */
+  export function previewElement(): HTMLElement | null {
+    return scroller;
+  }
+
+  /** 1-based source line shown at the top of the preview. */
+  export function topLine(): number | null {
+    if (!scroller || !enabled) return null;
+    if (!anchors.length) remeasure();
+    const line = offsetToLine(anchors, scroller.scrollTop + 8);
+    return Math.max(1, Math.floor(line) + 1);
+  }
+
+  function smoothTo(top: number): void {
+    const sc = scroller;
+    if (!sc) return;
+    leader.claim('preview');
+    const t = Math.max(0, Math.min(top, sc.scrollHeight - sc.clientHeight));
+    if (typeof sc.scrollTo === 'function') sc.scrollTo({ top: t, behavior: motionAllowed() ? 'smooth' : 'auto' });
+    else sc.scrollTop = t;
+  }
+
+  function headingTops(): number[] {
+    if (!body || !scroller) return [];
+    const base = scroller.getBoundingClientRect().top - scroller.scrollTop;
+    return Array.from(body.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')).map((h) => Math.round(h.getBoundingClientRect().top - base - 12));
+  }
+
+  /** Run a reader action. Returns false when it does not apply here. */
+  export function run(a: PreviewAction): boolean {
+    const sc = scroller;
+    if (!sc || !enabled) return false;
+    const h = sc.clientHeight || 600;
+    switch (a.kind) {
+      case 'scroll': {
+        const step = a.unit === 'line' ? 56 : a.unit === 'half' ? h / 2 : h * 0.9;
+        if (a.unit === 'line') {
+          leader.claim('preview');
+          sc.scrollTop += step * a.n;
+        } else smoothTo(sc.scrollTop + step * a.n);
+        return true;
+      }
+      case 'top': smoothTo(0); return true;
+      case 'bottom': smoothTo(sc.scrollHeight); return true;
+      case 'heading': {
+        const t = headingTarget(headingTops(), sc.scrollTop, a.dir, a.n);
+        if (t != null) smoothTo(t);
+        return true;
+      }
+      case 'find': void openFind(); return true;
+      case 'findNext': stepMatch(a.dir); return true;
+      case 'open': {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && el !== sc && sc.contains(el) && el.matches('a[href], button, input[data-task]')) {
+          el.click();
+          return true;
+        }
+        return false;
+      }
+      default: return false;
+    }
+  }
+
+  async function openFind(): Promise<void> {
+    findOpen = true;
+    await Promise.resolve();
+    findInput?.focus();
+    findInput?.select();
+  }
+
+  function clearHighlights(): void {
+    try {
+      const hl = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights;
+      hl?.delete('lumi-find');
+      hl?.delete('lumi-find-current');
+    } catch { /* unsupported */ }
+  }
+
+  function paint(): void {
+    clearHighlights();
+    const g = globalThis as { CSS?: { highlights?: Map<string, unknown> }; Highlight?: new (...r: Range[]) => unknown };
+    try {
+      if (g.CSS?.highlights && g.Highlight && ranges.length) {
+        g.CSS.highlights.set('lumi-find', new g.Highlight(...ranges));
+        if (matchIdx >= 0) g.CSS.highlights.set('lumi-find-current', new g.Highlight(ranges[matchIdx]));
+      }
+    } catch { /* unsupported */ }
+    findInfo = findQuery ? (ranges.length ? `${matchIdx + 1}/${ranges.length}` : 'no match') : '';
+  }
+
+  function reveal(r: Range): void {
+    const sc = scroller;
+    if (!sc) return;
+    const rect = r.getBoundingClientRect();
+    const top = rect.top - sc.getBoundingClientRect().top + sc.scrollTop;
+    leader.claim('preview');
+    sc.scrollTop = Math.max(0, top - sc.clientHeight / 3);
+    // The current match is the selection too, so `y` copies it.
+    try {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(r);
+    } catch { /* jsdom */ }
+  }
+
+  /** Recompute matches; the first one at/after the top of the view wins. */
+  function search(): void {
+    ranges = body && findQuery ? findRanges(body, findQuery) : [];
+    matchIdx = -1;
+    if (ranges.length && scroller) {
+      const scTop = scroller.getBoundingClientRect().top;
+      const i = ranges.findIndex((r) => r.getBoundingClientRect().top >= scTop - 1);
+      matchIdx = i >= 0 ? i : 0;
+      reveal(ranges[matchIdx]);
+    }
+    paint();
+  }
+
+  function stepMatch(dir: 1 | -1): void {
+    if (!ranges.length && findQuery) search();
+    if (!ranges.length) return;
+    matchIdx = nextMatchIndex(ranges.length, matchIdx, dir);
+    reveal(ranges[matchIdx]);
+    paint();
+  }
+
+  function onFindKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      findOpen = false;
+      scroller?.focus({ preventScroll: true });
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      findOpen = false;
+      findQuery = '';
+      ranges = [];
+      matchIdx = -1;
+      paint();
+      scroller?.focus({ preventScroll: true });
+    }
+  }
+
+  /** Esc in the reader: clear an active search first. */
+  export function clearFind(): boolean {
+    if (!findQuery) return false;
+    findQuery = '';
+    ranges = [];
+    matchIdx = -1;
+    paint();
+    try { window.getSelection()?.removeAllRanges(); } catch { /* jsdom */ }
+    return true;
+  }
+
+  // Re-render invalidates the ranges.
+  function onRendered(): void {
+    remeasure();
+    if (findQuery) {
+      ranges = body ? findRanges(body, findQuery) : [];
+      matchIdx = Math.min(matchIdx, ranges.length - 1);
+      paint();
+    }
+  }
+
+  $effect(() => () => clearHighlights());
 </script>
 
 <div
@@ -237,6 +438,8 @@
   {/if}
   <div
     class="pane src"
+    class:pane-focus={focused === 'editor'}
+    data-pane="editor"
     id="split-src"
     role={enabled && narrow ? 'tabpanel' : undefined}
     hidden={enabled && narrow && tab !== 'source'}
@@ -272,6 +475,8 @@
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <section
     class="pane preview-pane"
+    class:pane-focus={focused === 'split'}
+    data-pane="split"
     id="split-preview"
     role={narrow ? 'tabpanel' : 'region'}
     aria-label="Rendered preview"
@@ -285,8 +490,19 @@
     onfocusin={() => leader.claim('preview')}
     data-testid="split-preview"
   >
+    {#if findOpen}
+      <div class="find-bar" data-testid="preview-find">
+        <span class="find-slash" aria-hidden="true">/</span>
+        <input class="find-input" type="search" aria-label="Find in preview" placeholder="find in preview"
+          bind:this={findInput} bind:value={findQuery} oninput={search} onkeydown={onFindKey}
+          onblur={() => (findOpen = false)} autocomplete="off" spellcheck="false" />
+        <span class="find-info">{findInfo}</span>
+      </div>
+    {:else if findQuery}
+      <div class="find-bar idle" aria-live="polite"><span class="find-slash" aria-hidden="true">/</span>{findQuery}<span class="find-info">{findInfo} · n N</span></div>
+    {/if}
     <article class="rendered lumi-prose split-rendered" data-prose={prose}>
-      <MarkdownView {blocks} bind:element={body} {ontoggletask} {onlink} animateUpdates onrendered={remeasure} />
+      <MarkdownView {blocks} bind:element={body} {ontoggletask} {onlink} animateUpdates onrendered={onRendered} />
     </article>
   </section>
   {/if}
@@ -316,6 +532,31 @@
     outline: none;
     background: color-mix(in srgb, var(--color-text) 2.2%, var(--color-background));
   }
+  /* Focused pane: a quiet accent line on top (pane navigation). */
+  .pane-focus { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 50%, transparent); }
+  .find-bar {
+    position: sticky;
+    top: calc(-1 * clamp(20px, 5vh, 56px) + 6px);
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    max-width: 420px;
+    margin: 0 0 var(--sp-3) auto;
+    padding: 4px 10px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    background: var(--color-background);
+    box-shadow: var(--shadow-pop);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+  .find-bar.idle { color: var(--color-text-dim); box-shadow: none; }
+  .find-slash { color: var(--color-primary); }
+  .find-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--color-text); font: inherit; }
+  .find-info { color: var(--color-text-dim); margin-left: auto; white-space: nowrap; }
+  :global(::highlight(lumi-find)) { background-color: color-mix(in srgb, var(--color-warning) 30%, transparent); }
+  :global(::highlight(lumi-find-current)) { background-color: color-mix(in srgb, var(--color-primary) 40%, transparent); }
   .split-rendered { max-width: calc(var(--md-measure) + 2px); margin: 0 auto; }
   .divider {
     position: relative;

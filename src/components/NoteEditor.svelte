@@ -52,13 +52,14 @@
   import { languages } from '@codemirror/language-data';
   import { syntaxHighlighting, indentUnit, codeFolding, foldGutter } from '@codemirror/language';
   import { yankFlash } from '../lib/yank-flash.ts';
-  import { editorKeymap } from '../lib/editor-keys.ts';
+  import { editorKeymap, vimInsertKeys } from '../lib/editor-keys.ts';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
   import type { EditorSettings } from '../lib/editor-settings.ts';
   import type { NoteSummary } from '../lib/types.ts';
-  import { applyVimConfig, effectiveSettings, feedLeader, leaderKeyName, type EffectiveSettings } from '../lib/vim-config.ts';
+  import { applyVimConfig, appliedMappings, effectiveSettings, feedLeader, leaderKeyName, type EffectiveSettings } from '../lib/vim-config.ts';
+  import { PaneKeys, editorPaneRoute, fallsThroughWithoutTarget, vimMidCommand, type PaneDir, type VimModeName } from '../lib/pane-nav.ts';
   import { livePreview, noteLinkHandler } from '../lib/live-preview.ts';
   import { linkHelper, insertLink } from '../lib/link-helper.ts';
   import { relativeLineNumbers } from '../lib/editor-gutter.ts';
@@ -85,9 +86,15 @@
     onopennote?: (href: string) => void;
     /** Vim mode + pending keys, for the command legend. */
     onvimstate?: (s: { mode: string; pending: string | null; sub?: string | null }) => void;
+    /** Pane navigation (Ctrl-h/j/k/l, Ctrl-w …) in NORMAL/VISUAL.
+     *  Returns false when no pane lies that way. */
+    onpane?: (dir: PaneDir) => boolean;
+    /** A `Ctrl-w` prefix is armed / done (legend). */
+    onpanepending?: (pending: boolean) => void;
   };
 
-  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate }: Props = $props();
+  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate, onpane, onpanepending }: Props = $props();
+  const paneKeys = new PaneKeys();
 
   // The vimrc's `set` options override the device settings while vim
   // is on; leader + maps come from the same parse.
@@ -210,7 +217,8 @@
   const keysC = new Compartment();
 
   function baseKeys(s: EffectiveSettings): Extension {
-    return keymap.of([...editorKeymap(defaultKeymap, s.vim), ...searchKeymap]);
+    const insert = s.vim ? vimInsertKeys((v) => !!(getCM(v)?.state.vim as { insertMode?: boolean } | undefined)?.insertMode) : [];
+    return keymap.of([...insert, ...editorKeymap(defaultKeymap, s.vim), ...searchKeymap]);
   }
 
   function vimExt(s: EffectiveSettings): Extension {
@@ -343,6 +351,7 @@
           if (!eff.vim) return false;
           const cm = getCM(v);
           if (!cm) return false;
+          if (onpane && routePaneKey(e, cm)) return true;
           const handled = feedLeader((t) => Vim.handleKey(cm, t, 'user'), cm.state.vim as never, leaderKeyName(e), eff.leader);
           if (!handled) return false;
           e.preventDefault();
@@ -388,6 +397,48 @@
     watchVim();
     emitStats();
     view.focus();
+  }
+
+  // ---- pane navigation ---------------------------------------------------
+
+  /** Ctrl-h/j/k/l and Ctrl-w chords in NORMAL/VISUAL move between
+   *  panes; INSERT keeps vim's Ctrl-h (backspace) / Ctrl-j (newline). */
+  function routePaneKey(e: KeyboardEvent, cm: NonNullable<ReturnType<typeof getCM>>): boolean {
+    const st = cm.state.vim as { insertMode?: boolean; visualMode?: boolean; inputState?: Parameters<typeof vimMidCommand>[0] } | undefined;
+    const mode: VimModeName = st?.insertMode ? 'insert' : st?.visualMode ? 'visual' : 'normal';
+    const wasPending = paneKeys.pending;
+    const r = editorPaneRoute(paneKeys, e, {
+      vim: eff.vim,
+      mode,
+      vimPending: vimMidCommand(st?.inputState),
+      ctrlHjkl: settings.paneNav,
+      maps: appliedMappings(),
+    });
+    if (wasPending !== paneKeys.pending) onpanepending?.(paneKeys.pending);
+    if (!r) return false;
+    if (r.kind === 'nav') {
+      const moved = onpane?.(r.dir) ?? false;
+      if (!moved && fallsThroughWithoutTarget(r)) return false;
+      // Leaving the window ends visual mode, as in vim.
+      if (moved && mode === 'visual') Vim.handleKey(cm, '<Esc>', 'user');
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
+  /** Put the cursor at the start of a 1-based line (split preview →
+   *  editor with "move cursor" on). */
+  export function gotoLine(n: number): void {
+    if (!view) return;
+    const doc = view.state.doc;
+    const line = doc.line(Math.min(doc.lines, Math.max(1, Math.round(n))));
+    view.dispatch({ selection: { anchor: line.from } });
+  }
+
+  /** Focus the editor (pane navigation, click). */
+  export function focus(): void {
+    view?.focus();
   }
 
   // ---- external control (split preview, clickable legend) ----------------

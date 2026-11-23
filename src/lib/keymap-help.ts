@@ -62,6 +62,30 @@ export const KEYMAP: readonly KeymapSection[] = [
     ],
   },
   {
+    title: 'Panes',
+    rows: [
+      ['⌃h ⌃l', 'left / right pane'],
+      ['⌃j ⌃k', 'lower / upper pane (tabs)'],
+      ['⌃w h j k l', 'same, vim window keys'],
+      ['⌃w w  ⌃w p', 'next / previous pane'],
+      ['click', 'focus a pane'],
+    ],
+  },
+  {
+    title: 'Split preview',
+    rows: [
+      ['⌃l  ⌃w l', 'read the preview'],
+      ['j k  d u', 'scroll'],
+      ['{ }  [[ ]]', 'previous / next heading'],
+      ['gg  G', 'top / bottom'],
+      ['/  n N', 'find, next / prev'],
+      ['f', 'hints: links, tasks, copy'],
+      ['⏎', 'open the focused link'],
+      ['y', 'copy selection / note'],
+      ['q  Esc  ⌃h', 'back to the editor'],
+    ],
+  },
+  {
     title: 'App',
     rows: [
       ['space  :  ⌘K', 'command palette'],

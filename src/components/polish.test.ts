@@ -136,6 +136,69 @@ describe('SourceSplit', () => {
   });
 });
 
+describe('SourceSplit — keyboard reader', () => {
+  // jsdom has no layout for ranges.
+  const R = Range.prototype as unknown as Record<string, unknown>;
+  R.getBoundingClientRect ??= () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+  type SplitApi = { focusPreview(): Promise<boolean>; run(a: unknown): boolean; clearFind(): boolean; topLine(): number | null; previewElement(): HTMLElement | null };
+  function make(props: Record<string, unknown> = {}) {
+    const doc = new Y.Doc();
+    const ytext = doc.getText('content');
+    ytext.insert(0, '# Hello\n\nworld and World\n\n## Two\n\nmore world');
+    cmp = mount(SourceSplit, {
+      target: setup(),
+      props: { enabled: true, ytext, editorView: () => null, ratio: 0.5, onratio: () => {}, children: editorSnippet, ...props },
+    });
+    return cmp as unknown as SplitApi;
+  }
+
+  it('focusPreview focuses the preview pane; the focused side is marked', async () => {
+    const api = make({ focused: 'split' });
+    await settle();
+    expect(await api.focusPreview()).toBe(true);
+    const pane = target.querySelector<HTMLElement>('[data-testid="split-preview"]')!;
+    expect(document.activeElement).toBe(pane);
+    expect(pane.dataset.pane).toBe('split');
+    expect(pane.classList.contains('pane-focus')).toBe(true);
+    expect(target.querySelector('[data-pane="editor"]')!.classList.contains('pane-focus')).toBe(false);
+    expect(api.previewElement()).toBe(pane);
+    expect(api.topLine()).toBeGreaterThanOrEqual(1); // jsdom: no layout
+  });
+
+  it('scroll / heading / top actions run; unknown ones report false', async () => {
+    const api = make();
+    await settle();
+    expect(api.run({ kind: 'scroll', unit: 'line', n: 3 })).toBe(true);
+    expect(api.run({ kind: 'heading', dir: 1, n: 1 })).toBe(true);
+    expect(api.run({ kind: 'top' })).toBe(true);
+    expect(api.run({ kind: 'open' })).toBe(false); // nothing focused
+    expect(api.run({ kind: 'yank' })).toBe(false); // the view copies
+  });
+
+  it('/ opens a find bar: smartcase matches, n steps, Esc in the reader clears', async () => {
+    const api = make();
+    await settle();
+    api.run({ kind: 'find' });
+    await settle();
+    const input = target.querySelector<HTMLInputElement>('[data-testid="preview-find"] input')!;
+    expect(document.activeElement).toBe(input);
+    input.value = 'world';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(target.querySelector('.find-info')?.textContent).toBe('1/3');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('[data-testid="preview-find"]')).toBeNull();
+    api.run({ kind: 'findNext', dir: 1 });
+    await settle();
+    expect(target.querySelector('.find-info')?.textContent).toContain('2/3');
+    expect(api.clearFind()).toBe(true);
+    await settle();
+    expect(target.querySelector('.find-info')).toBeNull();
+    expect(api.clearFind()).toBe(false);
+  });
+});
+
 describe('CommandLegend', () => {
   it('items with actions are buttons that run them; the rest are labels', async () => {
     const onaction = vi.fn();

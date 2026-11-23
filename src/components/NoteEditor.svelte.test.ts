@@ -118,3 +118,116 @@ describe('NoteEditor — vim visual mode + yank highlight', () => {
     t.done();
   });
 });
+
+describe('NoteEditor — pane keys (Ctrl-h/j/k/l, Ctrl-w) vs vim INSERT', () => {
+  async function setup(body: string, over: Partial<EditorSettings> = {}, paneResult = true) {
+    const { Vim, getCM } = await import('@replit/codemirror-vim');
+    const session = fakeSession(body);
+    const calls: string[] = [];
+    const pending: boolean[] = [];
+    const props = $state({
+      session,
+      settings: { ...defaultSettings(), vim: true, editMode: 'source', ...over } as EditorSettings,
+      onpane: (d: string) => { calls.push(d); return paneResult; },
+      onpanepending: (p: boolean) => pending.push(p),
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(NoteEditor, { target, props }) as unknown as { editorView(): import('@codemirror/view').EditorView };
+    flushSync();
+    const view = cmp.editorView();
+    const cm = getCM(view)!;
+    const vim = (s: string) => { for (const k of s.match(/<[^>]+>|./g) ?? []) Vim.handleKey(cm, k, 'user'); };
+    /** A real keydown on the content (runs the keymaps + vim plugin). */
+    const key = (k: string, mods: KeyboardEventInit = {}) => {
+      const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...mods });
+      view.contentDOM.dispatchEvent(ev);
+      return ev;
+    };
+    const done = () => { unmount(cmp as never); target.remove(); };
+    return { session, view, cm, vim, key, calls, pending, done };
+  }
+
+  it('NORMAL: Ctrl-h/j/k/l move between panes and are consumed', async () => {
+    const t = await setup('abc\ndef\n');
+    t.vim('<Esc>');
+    for (const k of ['h', 'j', 'k', 'l']) expect(t.key(k, { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(t.calls).toEqual(['h', 'j', 'k', 'l']);
+    expect(t.session.ytext.toString()).toBe('abc\ndef\n');
+    t.done();
+  });
+
+  it('VISUAL: Ctrl-l moves and leaves visual mode', async () => {
+    const t = await setup('abc def\n');
+    t.vim('<Esc>gg0ve');
+    expect(t.cm.state.vim!.visualMode).toBe(true);
+    t.key('l', { ctrlKey: true });
+    expect(t.calls).toEqual(['l']);
+    expect(t.cm.state.vim!.visualMode).toBe(false);
+    t.done();
+  });
+
+  it('Ctrl-w h / Ctrl-w w / Ctrl-w p (legend sees the pending prefix)', async () => {
+    const t = await setup('abc\n', { paneNav: false });
+    t.vim('<Esc>');
+    expect(t.key('w', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(t.pending).toEqual([true]);
+    t.key('h');
+    t.key('w', { ctrlKey: true });
+    t.key('w');
+    t.key('w', { ctrlKey: true });
+    t.key('p');
+    expect(t.calls).toEqual(['h', 'w', 'p']);
+    expect(t.pending.at(-1)).toBe(false);
+    // Ctrl-hjkl off: plain Ctrl-h is not a pane key.
+    t.key('h', { ctrlKey: true });
+    expect(t.calls).toEqual(['h', 'w', 'p']);
+    expect(t.session.ytext.toString()).toBe('abc\n');
+    t.done();
+  });
+
+  it('INSERT keeps vim semantics: Ctrl-h backspace, Ctrl-j newline', async () => {
+    const t = await setup('abc\n');
+    t.vim('<Esc>gg$a');
+    expect(t.cm.state.vim!.insertMode).toBe(true);
+    expect(t.key('h', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(t.session.ytext.toString()).toBe('ab\n');
+    t.key('j', { ctrlKey: true });
+    expect(t.session.ytext.toString()).toBe('ab\n\n');
+    expect(t.calls).toEqual([]);
+    t.done();
+  });
+
+  it('mid-command (an operator pending) the key stays vim\'s', async () => {
+    const t = await setup('abc\n');
+    t.vim('<Esc>d');
+    t.key('l', { ctrlKey: true });
+    expect(t.calls).toEqual([]);
+    t.vim('<Esc>');
+    t.done();
+  });
+
+  it('Ctrl-k with no pane above falls through to its usual meaning', async () => {
+    const t = await setup('abc\n', {}, false);
+    t.vim('<Esc>');
+    t.key('k', { ctrlKey: true });
+    expect(t.calls).toEqual(['k']);
+    // Off macOS Ctrl-k is Mod-k: the link helper takes it (insert mode).
+    expect(t.cm.state.vim!.insertMode).toBe(true);
+    t.vim('<Esc>');
+    // Ctrl-h without a target is still consumed (no browser history).
+    expect(t.key('h', { ctrlKey: true }).defaultPrevented).toBe(true);
+    t.done();
+  });
+
+  it('explicit .vimrc maps win; `<C-w>l` maps become pane moves', async () => {
+    const t = await setup('abc def\n', { vimrc: 'nnoremap <C-l> w\nnnoremap <C-j> <C-w>l\n' });
+    t.vim('<Esc>gg0');
+    t.key('l', { ctrlKey: true });
+    expect(t.calls).toEqual([]);
+    expect(t.view.state.selection.main.head).toBe(4); // vim ran `w`
+    t.key('j', { ctrlKey: true });
+    expect(t.calls).toEqual(['l']);
+    t.done();
+  });
+});

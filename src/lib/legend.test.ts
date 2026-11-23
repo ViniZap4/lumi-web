@@ -37,6 +37,35 @@ describe('legendFor', () => {
   });
 });
 
+describe('legendFor — panes and the split preview reader', () => {
+  it('the focused split preview has its own context', () => {
+    const items = legendFor('preview');
+    expect(keys(items).slice(0, 6)).toEqual(['j k', 'd u', '{ }', '/', 'f', 'q ⌃h']);
+    expect(items.find((i) => i.keys === 'q ⌃h')?.do).toBe('preview:back');
+    expect(items.every((i) => !i.do || /^(preview|app):/.test(i.do))).toBe(true);
+  });
+  it('preview chords and counts', () => {
+    expect(keys(legendFor('preview', 'g'))).toEqual(['gg']);
+    expect(keys(legendFor('preview', ']'))).toEqual(['[[', ']]']);
+    expect(keys(legendFor('preview', '3'))).toEqual(['3j', '3}', 'Esc']);
+  });
+  it('Ctrl-w pending lists the window commands in any context', () => {
+    for (const ctx of ['explorer', 'reader', 'normal', 'visual', 'preview'] as const) {
+      expect(keys(legendFor(ctx, '⌃w'))).toEqual(['h l', 'j k', 'w', 'p', 'Esc']);
+    }
+  });
+  it('a panes hint only when there is more than one pane', () => {
+    expect(keys(legendFor('explorer'))).not.toContain('⌃h ⌃l');
+    expect(keys(legendFor('explorer', null, { panes: true }))).toContain('⌃h ⌃l');
+    expect(keys(legendFor('reader', null, { panes: true }))).toContain('⌃h ⌃l');
+    expect(keys(legendFor('normal', null, { panes: true }))).toContain('⌃h ⌃l');
+    // With the split preview showing, normal mode points at it.
+    const n = legendFor('normal', null, { panes: true, source: true, split: true });
+    expect(n.find((i) => i.keys === '⌃l')).toMatchObject({ label: 'read preview', do: 'app:readPreview' });
+    expect(keys(n)).not.toContain('⌃h ⌃l');
+  });
+});
+
 describe('helpers', () => {
   it('describeRhs', () => {
     expect(describeRhs(':w<CR>')).toBe('save');

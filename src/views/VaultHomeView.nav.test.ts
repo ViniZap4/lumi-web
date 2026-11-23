@@ -462,6 +462,87 @@ describe('miller browser — yazi extras', () => {
   });
 });
 
+describe('pane navigation (Ctrl-h/j/k/l, Ctrl-w)', () => {
+  async function ctrl(key: string): Promise<KeyboardEvent> {
+    const ev = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
+    (document.activeElement && document.activeElement !== document.body ? document.activeElement : window).dispatchEvent(ev);
+    await settle();
+    return ev;
+  }
+  const main = () => target.querySelector<HTMLElement>('.col-preview')!;
+
+  it('reader: Ctrl-h to the explorer, Ctrl-l back; the focused pane is marked', async () => {
+    await mountView();
+    await press('G'); // Two
+    await waitFor(() => target.querySelector('.rendered'), 'preview');
+    await press('Enter');
+    expect(document.activeElement).toBe(main());
+    expect(main().classList.contains('pane-focus')).toBe(true);
+
+    const h = await ctrl('h');
+    expect(h.defaultPrevented).toBe(true); // no browser history
+    expect(document.activeElement).toBe(col('cur'));
+    expect(target.querySelector('.col-current')!.classList.contains('pane-focus')).toBe(true);
+    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(true);
+    // Explorer keys there: j/k move the cursor, Esc returns to the note.
+    await press('k');
+    expect(cursorName('cur')).toBe('One');
+    await press('Escape');
+    expect(document.activeElement).toBe(main());
+
+    await ctrl('h');
+    expect(document.activeElement).toBe(col('cur'));
+    await ctrl('l');
+    expect(document.activeElement).toBe(main());
+    // No pane to the right: consumed, focus stays.
+    expect((await ctrl('l')).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(main());
+  });
+
+  it('Ctrl-w w cycles and Ctrl-w p returns', async () => {
+    await mountView();
+    await press('G');
+    await waitFor(() => target.querySelector('.rendered'), 'preview');
+    await press('Enter');
+    await ctrl('w');
+    await press('w');
+    expect(document.activeElement).toBe(col('cur'));
+    await ctrl('w');
+    await press('w');
+    expect(document.activeElement).toBe(main());
+    await ctrl('w');
+    await press('p');
+    expect(document.activeElement).toBe(col('cur'));
+  });
+
+  it('browsing: Ctrl-l focuses the note preview, where j scrolls instead of moving the cursor', async () => {
+    await mountView();
+    await press('G'); // Two (a note)
+    await waitFor(() => target.querySelector('.rendered'), 'preview');
+    await ctrl('l');
+    expect(document.activeElement).toBe(main());
+    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(false);
+    await press('k');
+    expect(cursorName('cur')).toBe('Two');
+    await ctrl('h');
+    expect(document.activeElement).toBe(col('cur'));
+  });
+
+  it('a folder preview is not a pane; the setting turns Ctrl-hjkl off', async () => {
+    await mountView(); // cursor on the alpha folder
+    col('cur')!.focus();
+    await ctrl('l');
+    expect(document.activeElement).toBe(col('cur'));
+    const { editorSettings } = await import('../lib/editor-settings.svelte.ts');
+    editorSettings.update({ paneNav: false });
+    try {
+      expect((await ctrl('h')).defaultPrevented).toBe(false);
+    } finally {
+      editorSettings.update({ paneNav: true });
+    }
+  });
+});
+
 describe('miller browser — 10k notes performance smoke', () => {
   it('loads all pages, renders a bounded window, and jumps to the end quickly', async () => {
     const many: NoteSummary[] = [];

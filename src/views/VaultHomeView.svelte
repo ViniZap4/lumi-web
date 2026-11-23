@@ -20,6 +20,8 @@
   import { planCreate, planRename, planFolderRename, movedPath, copyTitle, type CreatePlan, type RenamePlan, type FolderRenamePlan } from '../lib/fileops.ts';
   import { findNoteByHref, markdownLink } from '../lib/links.ts';
   import { legendFor, contextForVimMode, type LegendContext, type LegendItem } from '../lib/legend.ts';
+  import { PaneKeys, paneLayout, paneTarget, fallsThroughWithoutTarget, PANE_CHORD_MS, type PaneId, type PaneDir } from '../lib/pane-nav.ts';
+  import { PreviewKeymap, type PreviewAction } from '../lib/preview-keys.ts';
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
   import { withViewTransition, animate } from '../lib/motion.ts';
   import { effectiveSettings, appliedMappings, LEADER_TOKEN } from '../lib/vim-config.ts';
@@ -76,7 +78,20 @@
   let hintsOpen = $state(false);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; entry: Entry | null; title: string } | null>(null);
   let homeEl = $state<HTMLElement | null>(null);
-  let noteEditorRef = $state<{ editorView(): import('@codemirror/view').EditorView | null; run(a: string): boolean } | null>(null);
+  let noteEditorRef = $state<{ editorView(): import('@codemirror/view').EditorView | null; run(a: string): boolean; gotoLine(n: number): void; focus(): void } | null>(null);
+  let splitRef = $state<{ focusPreview(): Promise<boolean>; revealSource(): void; previewElement(): HTMLElement | null; topLine(): number | null; run(a: PreviewAction): boolean; clearFind(): boolean } | null>(null);
+  /** Hint mode scope (the split preview's `f` labels only its links). */
+  let hintRoot = $state<(() => HTMLElement | null) | null>(null);
+
+  // ---- panes (Ctrl-h/j/k/l, Ctrl-w h/j/k/l/w/p) ------------------------------
+  const paneKeys = new PaneKeys();
+  const previewKeys = new PreviewKeymap();
+  let focusedPane = $state<PaneId | null>(null);
+  let prevPane: PaneId | null = null;
+  let panePending = $state(false);
+  let previewPending = $state<string | null>(null);
+  let narrowView = $state(false);
+  let splitNarrow = $state(false);
 
   // ---- explorer prompt (a / r), inline delete confirm, yank -----------------
   type Prompt = { kind: 'create'; text: string } | { kind: 'rename'; text: string; entry: Entry };
@@ -292,8 +307,86 @@
 
   onMount(() => {
     window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
+    window.addEventListener('focusin', onFocusIn);
+    let mq: MediaQueryList | null = null;
+    const onmq = () => (narrowView = !!mq?.matches);
+    try {
+      mq = window.matchMedia('(max-width: 720px)');
+      onmq();
+      mq.addEventListener?.('change', onmq);
+    } catch {
+      /* jsdom */
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      window.removeEventListener('focusin', onFocusIn);
+      mq?.removeEventListener?.('change', onmq);
+    };
   });
+
+  /** Which pane holds keyboard focus (click focuses panes too). */
+  function onFocusIn(e: FocusEvent): void {
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-pane]') : null;
+    const p = (el?.dataset.pane as PaneId | undefined) ?? null;
+    if (!p || p === focusedPane) return;
+    prevPane = focusedPane;
+    focusedPane = p;
+    previewKeys.reset();
+    previewPending = null;
+  }
+
+  const layout = $derived(
+    paneLayout({
+      narrow: narrowView,
+      splitNarrow,
+      pane,
+      editing: editMode && !!editSession,
+      split: editMode && editorSettings.value.editMode === 'source' && editorSettings.value.previewSplit && !!editSession?.editable,
+      mainHasNote: !!notes.selectedID && !!notes.content && !(pane === 'browse' && (nav.current?.kind === 'folder' || !showPreview)),
+    }),
+  );
+  /** The focused pane when it is on screen; else the pane the current
+   *  mode implies. */
+  const activePane: PaneId = $derived.by(() => {
+    const all = [...layout.order, ...(layout.stack ?? [])];
+    if (focusedPane && all.includes(focusedPane)) return focusedPane;
+    if (editMode && editSession) return 'editor';
+    return pane === 'note' ? 'main' : 'explorer';
+  });
+  const multiPane = $derived(layout.order.length + (layout.stack ? 1 : 0) > 1);
+
+  /** Move focus `dir`; false when no pane lies that way. */
+  function navigatePane(dir: PaneDir): boolean {
+    const from = activePane;
+    const to = paneTarget(layout, from, dir, prevPane);
+    if (!to || to === from) return false;
+    void focusPaneEl(to, from);
+    return true;
+  }
+
+  async function focusPaneEl(to: PaneId, from: PaneId | null = activePane): Promise<void> {
+    switch (to) {
+      case 'explorer':
+        await focusColumn(true);
+        return;
+      case 'main':
+        previewEl?.focus({ preventScroll: true });
+        return;
+      case 'split':
+        await splitRef?.focusPreview();
+        return;
+      case 'editor': {
+        splitRef?.revealSource();
+        await tick();
+        if (from === 'split' && editorSettings.value.previewCursorSync) {
+          const line = splitRef?.topLine();
+          if (line != null) noteEditorRef?.gotoLine(line);
+        }
+        noteEditorRef?.focus();
+        return;
+      }
+    }
+  }
 
   onDestroy(() => {
     if (selTimer) clearTimeout(selTimer);
@@ -340,7 +433,10 @@
 
     // A component (CodeMirror/vim, a form control) already handled it.
     if (e.defaultPrevented) return;
-    if (isEditableTarget(e.target)) return;
+    // A task checkbox (focused by a click or a hint) is not text entry:
+    // the reader keys keep working around it.
+    const taskBox = (e.target as HTMLElement | null)?.matches?.('input[type="checkbox"][data-task]') ?? false;
+    if (isEditableTarget(e.target) && !taskBox) return;
 
     // Inline delete confirmation owns y/n/Enter/Esc.
     if (pendingDelete) {
@@ -348,6 +444,27 @@
       if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') void confirmDelete();
       else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape' || e.key === 'q') pendingDelete = null;
       return;
+    }
+
+    // Pane navigation: Ctrl-h/j/k/l, Ctrl-w h/j/k/l/w/p. (The editor
+    // routes its own, vim-mode aware, see NoteEditor.)
+    const pk = paneKeys.feed(e, { ctrlHjkl: editorSettings.value.paneNav });
+    panePending = paneKeys.pending;
+    if (pk) {
+      if (pk.kind !== 'nav' || navigatePane(pk.dir) || !fallsThroughWithoutTarget(pk)) {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // The split preview, focused, is a keyboard reader.
+    if (editMode && activePane === 'split') {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K' || e.key === 'e' || e.key === 'E')) {
+        // fall through to the palette / reading toggles below
+      } else {
+        handlePreviewKey(e);
+        return;
+      }
     }
 
     // Cmd/Ctrl+K: palette (in the editor CodeMirror takes it for links).
@@ -379,10 +496,11 @@
     }
 
     // In edit mode, leaving is an explicit command only (Done button,
-    // Mod-Enter, Mod-E, vim :q) — never a stray Esc.
-    if (editMode) return;
+    // Mod-Enter, Mod-E, vim :q) — never a stray Esc. The explorer
+    // column keeps its keys while the editor is open.
+    if (editMode && activePane !== 'explorer') return;
 
-    const action = keymap.feed(e, pane === 'note' ? 'reader' : 'explorer');
+    const action = keymap.feed(e, shellContext());
     syncPending();
     if (!action) return;
     e.preventDefault();
@@ -390,16 +508,68 @@
     runAction(action);
   }
 
+  /** Explorer keys or reader keys, by the focused pane. */
+  function shellContext(): 'explorer' | 'reader' {
+    if (activePane === 'explorer') return 'explorer';
+    if (activePane === 'main') return 'reader';
+    return pane === 'note' ? 'reader' : 'explorer';
+  }
+
+  function handlePreviewKey(e: KeyboardEvent): void {
+    const t = e.target as HTMLElement | null;
+    // Tab / Enter on a focused link or button keep their native meaning.
+    if (e.key === 'Tab') return;
+    const a = previewKeys.feed(e);
+    previewPending = previewKeys.pending;
+    if (!a) return;
+    if (a.kind === 'open' && !(t && t.matches('a[href], button, input[data-task]'))) return;
+    e.preventDefault();
+    if (a.kind === 'pending') return;
+    switch (a.kind) {
+      case 'back':
+        if (e.key === 'Escape' && splitRef?.clearFind()) return;
+        void focusPaneEl('editor', 'split');
+        return;
+      case 'hints':
+        hintRoot = () => splitRef?.previewElement() ?? null;
+        hintsOpen = true;
+        return;
+      case 'yank':
+        void copyPreviewText();
+        return;
+      case 'help':
+        uiState.helpOpen = true;
+        return;
+      case 'command':
+        paletteMode = 'command';
+        return;
+      default:
+        splitRef?.run(a);
+    }
+  }
+
+  async function copyPreviewText(): Promise<void> {
+    const sel = window.getSelection?.()?.toString();
+    const text = sel || editSession?.ytext.toString() || notes.content?.body || '';
+    try {
+      await navigator.clipboard.writeText(text);
+      flash(sel ? 'copied selection' : 'copied note text');
+    } catch {
+      flash('clipboard unavailable', 'warn');
+    }
+  }
+
   /** Note id the next action applies to: the open note in the reader,
    *  else the note under the browser cursor. */
   function noteUnderFocus(): string | null {
-    if (pane === 'note') return notes.selectedID;
+    if (pane === 'note' && activePane !== 'explorer') return notes.selectedID;
+    if (activePane === 'main' && notes.selectedID) return notes.selectedID;
     const cur = nav.current;
     return cur?.kind === 'note' ? cur.note.id : null;
   }
 
   function runAction(a: ShellAction): void {
-    const reader = pane === 'note';
+    const reader = shellContext() === 'reader';
     const page = currentCol?.pageRows() ?? 10;
     switch (a.kind) {
       case 'move':
@@ -453,6 +623,8 @@
       case 'clearOrBack':
         if (reader) leaveNote();
         else if (nav.filter) { nav.setFilter(''); filterOpen = false; }
+        // Explorer beside an open note / editor: back to the note.
+        else if (pane === 'note') void focusPaneEl(editMode && editSession ? 'editor' : 'main');
         else back();
         return;
       case 'close':
@@ -487,7 +659,8 @@
         return;
       case 'edit': {
         const target = noteUnderFocus();
-        if (target) void editNote(target);
+        if (target && editMode && editSession?.noteID === target) void focusPaneEl('editor');
+        else if (target) void editNote(target);
         return;
       }
       case 'palette':
@@ -513,6 +686,7 @@
         cycleBook(a.kind === 'nextBook' ? 1 : -1);
         return;
       case 'hints':
+        hintRoot = null;
         hintsOpen = true;
         return;
       case 'menu':
@@ -1010,6 +1184,17 @@
 
   // ---- legend actions ------------------------------------------------------------
 
+  const PREVIEW_ALIASES: Record<string, PreviewAction> = {
+    down: { kind: 'scroll', unit: 'line', n: 1 },
+    halfDown: { kind: 'scroll', unit: 'half', n: 1 },
+    top: { kind: 'top' },
+    nextHeading: { kind: 'heading', dir: 1, n: 1 },
+    find: { kind: 'find' },
+    findNext: { kind: 'findNext', dir: 1 },
+    yank: { kind: 'yank' },
+    back: { kind: 'back' },
+  };
+
   const SHELL_ALIASES: Record<string, ShellAction> = {
     down: { kind: 'move', n: 1 },
     halfDown: { kind: 'halfPage', dir: 1 },
@@ -1025,12 +1210,24 @@
       runAction(SHELL_ALIASES[arg] ?? ({ kind: arg } as ShellAction));
       return;
     }
+    if (ns === 'preview') {
+      const a = PREVIEW_ALIASES[arg];
+      if (a.kind === 'back') void focusPaneEl('editor', 'split');
+      else if (a.kind === 'yank') void copyPreviewText();
+      else splitRef?.run(a);
+      return;
+    }
     if (ns === 'vim' || ns === 'ex') {
       noteEditorRef?.run(d);
       return;
     }
     switch (arg) {
-      case 'hints': hintsOpen = true; return;
+      case 'hints':
+        hintRoot = legendCtx === 'preview' ? () => splitRef?.previewElement() ?? null : null;
+        hintsOpen = true;
+        return;
+      case 'panes': navigatePane('w'); return;
+      case 'readPreview': void focusPaneEl('split'); return;
       case 'menu': openMenuAtCursor(); return;
       case 'reading': exitEditAnimated(); return;
       case 'toggleMode': editorSettings.toggleEditMode(); return;
@@ -1195,17 +1392,35 @@
     if (paletteMode) return 'palette';
     if (pendingDelete) return 'confirm';
     if (prompt) return 'prompt';
-    if (editMode && editSession) return eff.vim ? contextForVimMode(vimState.mode) : 'insert';
     if (filterFocused) return 'filter';
-    return pane === 'note' ? 'reader' : 'explorer';
+    if (editMode && editSession && activePane === 'split') return 'preview';
+    if (editMode && editSession && activePane !== 'explorer') return eff.vim ? contextForVimMode(vimState.mode) : 'insert';
+    return shellContextFor(activePane);
   });
-  const legendPending = $derived(editMode ? (vimState.pending === eff.leader ? eff.leader : vimState.pending) : shellPending);
+  // The Ctrl-w prefix expires like vim's other pending keys.
+  $effect(() => {
+    if (!panePending) return;
+    const t = setTimeout(() => (panePending = paneKeys.pending), PANE_CHORD_MS + 20);
+    return () => clearTimeout(t);
+  });
+  function shellContextFor(p: PaneId): 'explorer' | 'reader' {
+    if (p === 'explorer') return 'explorer';
+    if (p === 'main') return 'reader';
+    return pane === 'note' ? 'reader' : 'explorer';
+  }
+  const legendPending = $derived.by(() => {
+    if (panePending) return '⌃w';
+    if (legendCtx === 'preview') return previewPending;
+    if (editMode && legendCtx !== 'explorer' && legendCtx !== 'filter') return vimState.pending === eff.leader ? eff.leader : vimState.pending;
+    return shellPending;
+  });
   const legendItems = $derived(
     legendFor(legendCtx, legendPending, {
       leader: eff.leader,
       escapeSequences: eff.escapeSequences,
       source: editMode && editorSettings.value.editMode === 'source',
       split: editMode && splitOn,
+      panes: multiPane && editorSettings.value.paneNav,
       leaderMaps: editMode
         ? appliedMappings()
             .filter((m) => m.lhs.startsWith(LEADER_TOKEN))
@@ -1361,7 +1576,7 @@
     class:no-preview={!showPreview && pane === 'browse'}
     data-testid="miller"
   >
-    <section class="col col-parent" aria-label="Parent folder">
+    <section class="col col-parent" aria-label="Parent folder" data-pane="explorer">
       {#if nav.parent != null}
         <MillerColumn
           entries={nav.parentEntries}
@@ -1381,7 +1596,7 @@
     </section>
 
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <section class="col col-current" aria-label="Current folder" oncontextmenu={onColumnContext}>
+    <section class="col col-current" class:pane-focus={multiPane && activePane === 'explorer'} aria-label="Current folder" data-pane="explorer" oncontextmenu={onColumnContext}>
       {#if filterOpen || nav.filter}
         <div class="filter-row">
           <span class="filter-slash" aria-hidden="true">/</span>
@@ -1420,7 +1635,7 @@
 
     <!-- Right-click on the open note: the same menu as its row. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <main class="col col-preview preview" class:split-host={editMode && splitOn} bind:this={previewEl} tabindex="-1" aria-label="Preview" oncontextmenu={onReaderContext}>
+    <main class="col col-preview preview" class:split-host={editMode && splitOn} class:pane-focus={multiPane && activePane === 'main'} data-pane="main" bind:this={previewEl} tabindex="-1" aria-label="Preview" oncontextmenu={onReaderContext}>
       {#if pane === 'browse' && nav.current?.kind === 'folder' && nav.previewEntries}
         <MillerColumn
           entries={nav.previewEntries}
@@ -1529,7 +1744,10 @@
               </div>
             {:else}
               <SourceSplit
+                bind:this={splitRef}
                 enabled={splitOn}
+                focused={multiPane && (activePane === 'editor' || activePane === 'split') ? activePane : null}
+                onnarrow={(n) => (splitNarrow = n)}
                 ytext={editSession.ytext}
                 editorView={() => noteEditorRef?.editorView() ?? null}
                 ratio={editorSettings.value.previewRatio}
@@ -1551,6 +1769,8 @@
                   notePath={() => notes.selected?.path ?? notes.content?.path ?? ''}
                   onopennote={openLinkedNote}
                   onvimstate={(st) => (vimState = st)}
+                  onpane={navigatePane}
+                  onpanepending={(p) => (panePending = p)}
                 />
               </SourceSplit>
             {/if}
@@ -1672,7 +1892,7 @@
   {/if}
 
   {#if hintsOpen}
-    <HintOverlay root={() => homeEl} onclose={() => (hintsOpen = false)} />
+    <HintOverlay root={hintRoot ?? (() => homeEl)} onclose={() => { hintsOpen = false; hintRoot = null; }} />
   {/if}
 
   {#if uiState.helpOpen}
@@ -1771,6 +1991,8 @@
   /* Explicit tracks: a hidden column must not shift the others. */
   .col-parent { grid-column: 1; grid-row: 1; }
   .col-current { grid-column: 2; grid-row: 1; }
+  /* Focused pane (Ctrl-h/j/k/l): a quiet accent line along the top. */
+  .col.pane-focus { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 50%, transparent); }
   .col-preview { grid-column: 3; grid-row: 1; }
   .col {
     min-width: 0;

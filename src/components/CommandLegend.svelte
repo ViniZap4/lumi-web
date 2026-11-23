@@ -9,6 +9,7 @@
   import { tick } from 'svelte';
   import { fitLegend, type LegendItem } from '../lib/legend.ts';
   import { animate } from '../lib/motion.ts';
+  import { keyLabel } from '../lib/platform.ts';
 
   interface Props {
     items: readonly LegendItem[];
@@ -69,7 +70,7 @@
   });
 
   function tipOf(it: LegendItem): string {
-    return it.tip ?? `${it.label} (${it.keys})`;
+    return keyLabel(it.tip ?? `${it.label} (${it.keys})`);
   }
 </script>
 
@@ -80,9 +81,9 @@
     {#each shown as it (it.keys + it.label)}
       {#if it.do && onaction}
         <button type="button" class="item act" tabindex="-1" title={tipOf(it)} onclick={() => onaction(it)}
-          ><span class="keys">{it.keys}</span><span class="label">{it.label}</span></button>
+          ><span class="keys">{keyLabel(it.keys)}</span><span class="label">{it.label}</span></button>
       {:else}
-        <span class="item" title={tipOf(it)}><span class="keys">{it.keys}</span><span class="label">{it.label}</span></span>
+        <span class="item" title={tipOf(it)}><span class="keys">{keyLabel(it.keys)}</span><span class="label">{it.label}</span></span>
       {/if}
     {/each}
     {#if fit.overflow && onmore}
@@ -92,7 +93,7 @@
   <!-- Off-screen twin used only to measure item widths. -->
   <span class="measure" aria-hidden="true" bind:this={measure}>
     {#each items as it (it.keys + it.label)}
-      <span class="item"><span class="keys">{it.keys}</span><span class="label">{it.label}</span></span>
+      <span class="item"><span class="keys">{keyLabel(it.keys)}</span><span class="label">{it.label}</span></span>
     {/each}
   </span>
 </div>

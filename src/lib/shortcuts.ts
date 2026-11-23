@@ -9,6 +9,8 @@
 // ("home"), `zp` toggles the preview column. Unknown second keys cancel
 // the prefix and are NOT consumed, so `g` then `j` still moves down.
 
+import { detectPlatform, isApple } from './platform.ts';
+
 export const CHORD_MS = 500;
 
 export type ChordAction =
@@ -34,12 +36,7 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function isMac(): boolean {
-  try {
-    const p = (navigator as any).userAgentData?.platform ?? navigator.platform ?? '';
-    return /mac/i.test(p);
-  } catch {
-    return false;
-  }
+  return isApple(detectPlatform());
 }
 
 /** Stateful `g` chord reader. Feed every keydown that reached the

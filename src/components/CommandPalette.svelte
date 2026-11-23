@@ -7,6 +7,7 @@
   import { fuzzyScore, linkCandidates } from '../lib/links.ts';
   import type { NoteSummary } from '../lib/types.ts';
   import type { PaletteCommand } from '../lib/palette.ts';
+  import { keyLabel } from '../lib/platform.ts';
 
   interface Props {
     commands: readonly PaletteCommand[];
@@ -158,7 +159,7 @@
             {/if}
           </span>
           <span class="title">{it.title}</span>
-          {#if it.detail}<span class="detail">{it.detail}</span>{/if}
+          {#if it.detail}<span class="detail">{it.kind === 'cmd' ? keyLabel(it.detail) : it.detail}</span>{/if}
         </li>
       {:else}
         <li class="none" role="presentation">No matches</li>

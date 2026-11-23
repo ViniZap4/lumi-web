@@ -4,6 +4,7 @@
   // with their sync dot; accounts section with "Entrar" / "Sair deste
   // aparelho"; first-time explanation and empty states.
   import { onMount, tick } from 'svelte';
+  import { settingsKey } from '../lib/platform.ts';
   import { captureFocus, trapTab } from '../lib/list-keys.ts';
   import { books } from '../lib/books.svelte.ts';
   import { sync } from '../lib/sync.svelte.ts';
@@ -71,6 +72,7 @@
   const chord = new GChord();
 
   onMount(() => {
+    uiState.settingsHome = 'appearance';
     cursor = Math.max(0, order.findIndex((b) => b.id === books.activeID));
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -161,7 +163,7 @@
       <button class="ui-btn ghost sm icon" onclick={() => uiState.openThemePicker()} type="button" title="Theme" aria-label="Theme">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor"/></svg>
       </button>
-      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('appearance')} type="button" title="Settings (,)" aria-label="Settings">
+      <button class="ui-btn ghost sm icon" onclick={() => uiState.openSettings('appearance')} type="button" title="Settings (, · {settingsKey()})" aria-label="Settings">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.5" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
       </button>
     </div>

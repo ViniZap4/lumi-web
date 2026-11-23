@@ -1,5 +1,8 @@
 // The full keymap, for the `?` overlay and Settings → Keys. Mirrors the
 // Apple client's KeymapHelp sections so both clients document one map.
+// Written in macOS glyphs; `keymapFor` renders it per platform.
+
+import { keyLabel, MAC } from './platform.ts';
 
 export interface KeymapSection {
   title: string;
@@ -55,7 +58,7 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['⌘V on selection', 'URL → [text](url)'],
       [':q  :wq  ⌘E', 'leave the editor'],
       ['⌘⇧E  :preview', 'live / source'],
-      [':settings  ⌘⇧,', 'editor settings'],
+      ['⌘,  :settings', 'settings'],
     ],
   },
   {
@@ -65,8 +68,20 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['[  ]', 'previous / next book'],
       ['g1–9  ⌃⌘1–9', 'book by number'],
       ['gb', 'all books'],
-      [',', 'settings'],
+      ['⌘,  ,', 'settings'],
       ['?', 'this help'],
     ],
   },
 ];
+
+/** Shortcuts that exist on macOS only (⌃⌘1–9: Ctrl+1–9 is the
+ *  browser's tab switcher elsewhere). */
+const MAC_ONLY = /\s*⌃⌘1–9/;
+
+/** KEYMAP with platform-correct labels (⌘K vs Ctrl+K). */
+export function keymapFor(mac: boolean = MAC): KeymapSection[] {
+  return KEYMAP.map((sec) => ({
+    title: sec.title,
+    rows: sec.rows.map(([k, label]) => [keyLabel(mac ? k : k.replace(MAC_ONLY, ''), mac), label] as const),
+  }));
+}

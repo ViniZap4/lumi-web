@@ -17,8 +17,16 @@ class UIState {
   /** `?` keymap overlay. */
   helpOpen = $state(false);
 
+  /** Section ⌘, / Ctrl+, opens to (views set it for their context). */
+  settingsHome: SettingsSection = 'editor';
+
   openSettings(section: SettingsSection = 'editor'): void {
     this.settings = section;
+  }
+
+  /** ⌘, / Ctrl+,: open on the current context's section, or close. */
+  toggleSettings(section: SettingsSection = this.settingsHome): void {
+    this.settings = this.settings ? null : section;
   }
 
   closeSettings(): void {

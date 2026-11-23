@@ -4,7 +4,8 @@
   // key closes it and focus returns to where it was.
   import { onMount, onDestroy, tick } from 'svelte';
   import { captureFocus } from '../lib/list-keys.ts';
-  import { KEYMAP } from '../lib/keymap-help.ts';
+  import { keymapFor } from '../lib/keymap-help.ts';
+  const KEYMAP = keymapFor();
 
   interface Props {
     onclose: () => void;

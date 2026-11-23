@@ -34,7 +34,9 @@
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
   import { serverLabel } from '../lib/serverurl.ts';
   import { isEditableTarget } from '../lib/shortcuts.ts';
-  import { KEYMAP } from '../lib/keymap-help.ts';
+  import { keymapFor } from '../lib/keymap-help.ts';
+  import { keyLabel, settingsKey, MAC } from '../lib/platform.ts';
+  const KEYMAP = keymapFor();
   import type { VimrcEditorHandle } from '../lib/vimrc-editor.ts';
 
   const s = $derived(editorSettings.value);
@@ -296,7 +298,7 @@
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Settings
       </button>
-      <kbd class="esc">Esc</kbd>
+      <span class="esc" title="Close: Esc or {settingsKey()}"><kbd>Esc</kbd><kbd>{settingsKey()}</kbd></span>
     </div>
     <div class="search">
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -339,7 +341,7 @@
           <h2 id="sec-editor">Editor</h2>
           {#if show('editMode')}
             <div class="row">
-              <div class="row-text"><span class="row-title">Editing mode</span><span class="row-desc">Live Preview hides markdown syntax off the cursor line; Source shows it raw. <kbd>⌘⇧E</kbd></span></div>
+              <div class="row-text"><span class="row-title">Editing mode</span><span class="row-desc">Live Preview hides markdown syntax off the cursor line; Source shows it raw. <kbd>{keyLabel('⌘⇧E')}</kbd></span></div>
               <div class="ui-seg">
                 <button type="button" aria-pressed={s.editMode === 'live'} onclick={() => editorSettings.update({ editMode: 'live' })}>Live Preview</button>
                 <button type="button" aria-pressed={s.editMode === 'source'} onclick={() => editorSettings.update({ editMode: 'source' })}>Source</button>
@@ -348,7 +350,7 @@
           {/if}
           {#if show('previewSplit')}
             <label class="row">
-              <div class="row-text"><span class="row-title">Show preview beside source</span><span class="row-desc">In Source mode, the rendered note sits to the right and scrolls with the editor. Toggle with <kbd>{'\\'}p</kbd>, <kbd>⌘⌥P</kbd> or <kbd>:preview split</kbd>.</span></div>
+              <div class="row-text"><span class="row-title">Show preview beside source</span><span class="row-desc">In Source mode, the rendered note sits to the right and scrolls with the editor. Toggle with <kbd>{'\\'}p</kbd>, <kbd>{keyLabel('⌘⌥P')}</kbd> or <kbd>:preview split</kbd>.</span></div>
               <input type="checkbox" class="ui-switch" checked={s.previewSplit} onchange={(e) => editorSettings.update({ previewSplit: checked(e) })} data-testid="preview-split-toggle" />
             </label>
           {/if}
@@ -485,7 +487,7 @@
                   {#if !draft.trim()}<button class="ui-btn sm ghost" type="button" onclick={insertExample}>Insert example</button>{/if}
                   {#if dirty}<button class="ui-btn sm ghost" type="button" onclick={revertVimrc}>Revert</button>{/if}
                   <button class="ui-btn sm primary" type="button" disabled={!dirty} onclick={applyVimrc} data-testid="vimrc-apply">
-                    {savedFlash ? 'Applied' : 'Apply'} <kbd class="on-primary">⌘S</kbd>
+                    {savedFlash ? 'Applied' : 'Apply'} <kbd class="on-primary">{keyLabel('⌘S')}</kbd>
                   </button>
                 </span>
               </div>
@@ -598,7 +600,7 @@
           <h2 id="sec-keys">Keys</h2>
           {#if show('keysLegend')}
             <label class="row">
-              <div class="row-text"><span class="row-title">Show the command legend</span><span class="row-desc">Press <kbd>?</kbd> anywhere for the full map.</span></div>
+              <div class="row-text"><span class="row-title">Show the command legend</span><span class="row-desc">Press <kbd>?</kbd> anywhere for the full map. Settings open with <kbd>{settingsKey()}</kbd> from anywhere, <kbd>,</kbd> outside text fields, or <kbd>:settings</kbd> in vim{MAC ? ' (Safari keeps ⌘, for its own preferences: use , or :settings there)' : ''}.</span></div>
               <input type="checkbox" class="ui-switch" checked={s.legend} onchange={(e) => editorSettings.update({ legend: checked(e) })} />
             </label>
           {/if}
@@ -715,7 +717,7 @@
   }
   .nav-head { display: flex; align-items: center; justify-content: space-between; }
   .back { font-weight: 600; color: var(--color-text); gap: 6px; padding-left: 4px; }
-  .esc { opacity: 0.7; }
+  .esc { display: inline-flex; gap: 3px; opacity: 0.7; }
   .search {
     display: flex;
     align-items: center;

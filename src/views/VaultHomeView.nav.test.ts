@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 //
-// Miller-column browser (wave 3): column rendering from note paths,
-// yazi keyboard grammar, filter, mouse, ARIA wiring, preserved book
-// chords, and a 10k-note performance smoke test.
+// The book shell with the floating explorer as the ONLY navigation
+// (SPEC-PARTE2 §2, owner decision 2026-11-24): a book opens on its last
+// note (per book, per device) or on a calm empty home with the explorer
+// floating on top; `-`, the top-bar button, the palette and `:explore`
+// open it; `gb` opens it at the books level; `[`/`]` still cycle books;
+// file operations run inside it; splits, deep links and a 10k-note book
+// keep working.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync, tick } from 'svelte';
@@ -25,18 +29,25 @@ import { vaults } from '../lib/vaults.svelte.ts';
 import { notes, PAGE_SIZE } from '../lib/notes.svelte.ts';
 import { accounts } from '../lib/accounts.svelte.ts';
 import { books } from '../lib/books.svelte.ts';
+import { uiState } from '../lib/uistate.svelte.ts';
+import { toasts } from '../lib/toasts.svelte.ts';
+import { LAST_NOTE_KEY } from '../lib/book-home.ts';
 import type { NoteSummary } from '../lib/types.ts';
 
-const note = (id: string, path: string, title = id): NoteSummary => ({
-  id, vault_id: 'v1', path, title, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+// jsdom has no Web Animations: svelte's transitions need a stand-in.
+const proto = Element.prototype as unknown as Record<string, unknown>;
+proto.getAnimations ??= () => [];
+
+const note = (id: string, path: string, title = id, updated = '2026-01-01T00:00:00Z'): NoteSummary => ({
+  id, vault_id: 'v1', path, title, created_at: '2026-01-01T00:00:00Z', updated_at: updated,
 });
 
 const VAULT = [
-  note('two', 'two.md', 'Two'),
-  note('inner', 'alpha/inner.md', 'Inner'),
-  note('deep', 'alpha/nested/deep.md', 'Deep'),
-  note('b1', 'beta/b1.md', 'B1'),
-  note('one', 'one.md', 'One'),
+  note('two', 'two.md', 'Two', '2026-01-02T00:00:00Z'),
+  note('inner', 'alpha/inner.md', 'Inner', '2026-01-05T00:00:00Z'),
+  note('deep', 'alpha/nested/deep.md', 'Deep', '2026-01-04T00:00:00Z'),
+  note('b1', 'beta/b1.md', 'B1', '2026-01-03T00:00:00Z'),
+  note('one', 'one.md', 'One', '2026-01-01T00:00:00Z'),
 ];
 
 let target: HTMLElement;
@@ -76,22 +87,45 @@ async function press(...keys: string[]): Promise<void> {
   }
 }
 
-const col = (id: string) => target.querySelector<HTMLElement>(`[data-testid="col-${id}"]`);
-const rows = (id: string) => Array.from(col(id)?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
-const names = (id: string) => rows(id).map((r) => r.querySelector('.name')!.textContent);
-const cursorName = (id: string) => col(id)?.querySelector('[aria-selected="true"] .name')?.textContent ?? null;
-const crumbs = () =>
-  Array.from(target.querySelectorAll('[data-testid="breadcrumb"] .crumb:not(.back)')).map((b) => b.textContent);
+async function ctrl(key: string): Promise<void> {
+  const ev = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
+  (document.activeElement && document.activeElement !== document.body ? document.activeElement : window).dispatchEvent(ev);
+  await settle();
+}
+
+const fx = () => target.querySelector<HTMLElement>('[data-testid="floating-explorer"]');
+const fxRows = () => Array.from(target.querySelectorAll('[data-testid="col-fx-cur"] [role="option"] .name')).map((e) => e.textContent);
+const fxCursor = () => target.querySelector('[data-testid="col-fx-cur"] [aria-selected="true"] .name')?.textContent ?? null;
+const home = () => target.querySelector<HTMLElement>('[data-testid="book-home"]');
+const openTitle = () => target.querySelector('.crumb-note')?.textContent ?? null;
+const legend = () => target.querySelector('[data-testid="command-legend"]')?.textContent ?? '';
 
 async function mountView(): Promise<void> {
   cmp = mount(VaultHomeView, { target });
-  await waitFor(() => rows('cur').length > 0, 'current column');
+  await waitFor(() => notes.vaultID === 'v1' && !notes.loadingList && notes.list.length > 0, 'notes');
+  await settle();
+}
+
+/** Open note `name` through the floating explorer (rows by title). */
+async function openThroughExplorer(...path: string[]): Promise<void> {
+  if (!fx()) await press('-');
+  await waitFor(fx, 'explorer');
+  await press('g', 'h');
+  for (const name of path) {
+    const i = fxRows().indexOf(name);
+    expect(i, `row ${name} in ${fxRows().join(',')}`).toBeGreaterThanOrEqual(0);
+    await press('g', 'g');
+    for (let k = 0; k < i; k++) await press('j');
+    await press('l');
+  }
+  await waitFor(() => !fx() && notes.content, 'note open');
 }
 
 beforeEach(async () => {
+  try { localStorage.clear(); } catch { /* none */ }
   serve(VAULT);
   vi.mocked(api.getNoteContent).mockImplementation(async (_v, id) => ({
-    id, vault_id: 'v1', path: `${id}.md`, frontmatter: {}, body: `# body of ${id}`,
+    id, vault_id: 'v1', path: VAULT.find((n) => n.id === id)?.path ?? `${id}.md`, frontmatter: {}, body: `# body of ${id}\n\nsee [one](/one.md)`,
   }));
   await accounts.add(
     { server_url: 'https://lumi.work.com', username: 'ana', user_id: 'u1', display_name: 'Ana', added_at: '2026-01-01T00:00:00Z', expires_at: null, remember: false },
@@ -111,154 +145,199 @@ afterEach(async () => {
   books.clear();
   for (const a of [...accounts.list]) await accounts.forget(a.key);
   vaults.clear();
+  toasts.clear();
+  uiState.pendingNote = null;
+  uiState.helpOpen = false;
 });
 
-describe('miller browser — layout', () => {
-  it('derives parent | current | preview from note paths', async () => {
+describe('opening a book', () => {
+  it('no last note: a calm home (name, recent notes, sync) with the explorer floating on top', async () => {
     await mountView();
-    expect(names('cur')).toEqual(['alpha', 'beta', 'One', 'Two']);
-    expect(col('parent')).toBeNull(); // at the book root
-    expect(cursorName('cur')).toBe('alpha');
-    expect(names('preview')).toEqual(['nested', 'Inner']); // folder preview
-    expect(crumbs()).toEqual(['Vault']);
+    expect(home()).not.toBeNull();
+    expect(home()!.querySelector('.home-title')!.textContent).toBe('Vault');
+    // Recent notes, most recently updated first.
+    const recent = Array.from(home()!.querySelectorAll('.recent-title')).map((e) => e.textContent);
+    expect(recent).toEqual(['Inner', 'Deep', 'B1', 'Two', 'One']);
+    expect(home()!.querySelector('.sync-dot-wrap')).not.toBeNull();
+    // No explorer column, no books sidebar: only the floating overlay.
+    expect(target.querySelector('[data-testid="miller"]')).toBeNull();
+    expect(target.querySelector('.col-parent, .col-current')).toBeNull();
+    await waitFor(fx, 'auto-opened explorer');
+    expect(fx()!.getAttribute('data-level')).toBe('files');
+    expect(fxRows()).toEqual(['alpha', 'beta', 'One', 'Two']);
+    expect(fx()!.contains(document.activeElement)).toBe(true);
   });
 
-  it('ARIA: the current column is a focusable listbox whose active descendant exists', async () => {
+  it('opening a note remembers it; the book reopens on it (per book, per device)', async () => {
     await mountView();
-    const lb = col('cur')!;
-    expect(lb.getAttribute('role')).toBe('listbox');
-    expect(lb.tabIndex).toBe(0);
-    const id = lb.getAttribute('aria-activedescendant')!;
-    const opt = document.getElementById(id)!;
-    expect(opt.getAttribute('aria-selected')).toBe('true');
-    expect(opt.getAttribute('aria-setsize')).toBe('4');
-    expect(opt.getAttribute('aria-posinset')).toBe('1');
-    expect(col('preview')!.tabIndex).toBe(-1);
-    await press('j');
-    expect(lb.getAttribute('aria-activedescendant')).toBe('cur-1');
-    expect(target.querySelector('[data-testid="nav-live"]')!.textContent).toMatch(/Vault root, 4 items/);
+    await openThroughExplorer('alpha', 'Inner');
+    expect(openTitle()).toBe('Inner');
+    expect(localStorage.getItem(LAST_NOTE_KEY + 'v1')).toBe('inner');
+    unmount(cmp!);
+    cmp = null;
+    await notes.openVault(null);
+    await mountView();
+    await waitFor(() => notes.selectedID === 'inner' && openTitle() === 'Inner', 'restored note');
+    expect(home()).toBeNull();
+    expect(fx()).toBeNull();
+  });
+
+  it('a last note that no longer exists falls back to the home + explorer', async () => {
+    localStorage.setItem(LAST_NOTE_KEY + 'v1', 'gone');
+    await mountView();
+    expect(home()).not.toBeNull();
+    await waitFor(fx, 'explorer');
+  });
+
+  it('an empty book: home says so, the explorer still floats', async () => {
+    serve([]);
+    cmp = mount(VaultHomeView, { target });
+    await waitFor(() => notes.vaultID === 'v1' && !notes.loadingList, 'list');
+    await settle();
+    expect(home()!.textContent).toContain('This book is empty');
+    await waitFor(fx, 'explorer');
+    expect(fx()!.textContent).toContain('Empty folder');
+  });
+
+  it('a deep link opens its note directly (no overlay)', async () => {
+    uiState.pendingNote = { vault: 'v1', note: 'deep' };
+    await mountView();
+    await waitFor(() => openTitle() === 'Deep', 'deep link');
+    expect(fx()).toBeNull();
+    expect(window.location.hash).toBe('#/b/v1/n/deep');
   });
 });
 
-describe('miller browser — keyboard', () => {
-  it('l/h walk columns, cursor lands on the folder we came from', async () => {
+describe('the floating explorer is the only navigation', () => {
+  it('- in the reader opens it at the note folder; Esc closes it back to the note', async () => {
     await mountView();
-    await press('l');
-    expect(crumbs()).toEqual(['Vault', 'alpha']);
-    expect(names('cur')).toEqual(['nested', 'Inner']);
-    expect(names('parent')).toEqual(['alpha', 'beta', 'One', 'Two']);
-    expect(cursorName('parent')).toBe('alpha');
-    await press('l');
-    expect(crumbs()).toEqual(['Vault', 'alpha', 'nested']);
-    await press('h', 'h');
-    expect(crumbs()).toEqual(['Vault']);
-    expect(cursorName('cur')).toBe('alpha');
-    await press('h'); // no-op at the root (does not leave the book)
-    expect(books.pickerOpen ?? false).toBe(false);
-    expect(names('cur')).toEqual(['alpha', 'beta', 'One', 'Two']);
-  });
-
-  it('H/L history, gh and zh go home, gg/G ends', async () => {
-    await mountView();
-    await press('l', 'l');
-    await press('H');
-    expect(crumbs()).toEqual(['Vault', 'alpha']);
-    await press('L');
-    expect(crumbs()).toEqual(['Vault', 'alpha', 'nested']);
-    await press('g', 'h');
-    expect(crumbs()).toEqual(['Vault']);
-    await press('l', 'z', 'h');
-    expect(crumbs()).toEqual(['Vault']);
-    await press('G');
-    expect(cursorName('cur')).toBe('Two');
-    await press('g', 'g');
-    expect(cursorName('cur')).toBe('alpha');
-  });
-
-  it('j onto a note previews it (debounced); Enter opens it; h/Esc returns', async () => {
-    await mountView();
-    await press('j', 'j'); // beta → One
-    expect(cursorName('cur')).toBe('One');
-    await waitFor(() => notes.selectedID === 'one', 'debounced preview');
-    await waitFor(() => target.querySelector('.rendered'), 'rendered preview');
-    expect(api.getNoteContent).toHaveBeenCalledWith('v1', 'one', expect.anything());
-    // The intermediate folder row never fetched anything.
-    expect(vi.mocked(api.getNoteContent).mock.calls.map((c) => c[1])).toEqual(['one']);
-
-    await press('Enter');
-    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(true);
-    expect(document.activeElement?.classList.contains('col-preview')).toBe(true);
-    expect(target.querySelector('.crumb-note')?.textContent).toBe('One');
-
+    await openThroughExplorer('alpha', 'nested', 'Deep');
+    await press('-');
+    await waitFor(fx, 'explorer');
+    expect(fxRows()).toEqual(['Deep']);
+    expect(fxCursor()).toBe('Deep');
     await press('Escape');
-    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(false);
-    expect(document.activeElement).toBe(col('cur'));
-    expect(cursorName('cur')).toBe('One');
+    expect(fx()).toBeNull();
+    expect(openTitle()).toBe('Deep');
   });
 
-  it('zp toggles the preview column', async () => {
+  it('h in the reader and the top-bar Explorer button open it too', async () => {
     await mountView();
-    const m = () => target.querySelector('[data-testid="miller"]')!;
-    await press('z', 'p');
-    expect(m().classList.contains('no-preview')).toBe(true);
-    await press('z', 'p');
-    expect(m().classList.contains('no-preview')).toBe(false);
+    await openThroughExplorer('Two');
+    await press('h');
+    await waitFor(fx, 'explorer via h');
+    await press('q');
+    target.querySelector<HTMLButtonElement>('[data-testid="explorer-button"]')!.click();
+    await waitFor(fx, 'explorer via button');
+    expect(target.querySelector('[data-testid="explorer-button"]')!.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('/ filters the current column; Enter hands keys back; Esc clears', async () => {
+  it('the palette: "Open explorer" and :explore', async () => {
     await mountView();
-    await press('/');
-    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.filter-input'), 'filter input');
-    expect(document.activeElement).toBe(input);
-    input.value = 'o';
+    await openThroughExplorer('One');
+    await press(' ');
+    const input = await waitFor(() => target.querySelector<HTMLInputElement>('[data-testid="palette"] input'), 'palette');
+    input.value = 'open explorer';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    expect(names('cur')).toEqual(['One', 'Two']);
-    // Typing "j" in the filter is text, not navigation.
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-    expect(document.activeElement).toBe(col('cur'));
-    await press('j');
-    expect(cursorName('cur')).toBe('Two');
+    await waitFor(fx, 'explorer from palette');
     await press('Escape');
-    expect(names('cur')).toEqual(['alpha', 'beta', 'One', 'Two']);
-    expect(target.querySelector('.filter-input')).toBeNull();
+    await press(':');
+    const ex = await waitFor(() => target.querySelector<HTMLInputElement>('[data-testid="palette"] input'), 'ex line');
+    ex.value = 'explore';
+    ex.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    ex.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitFor(fx, 'explorer from :explore');
   });
 
-  it('book chords are preserved: g1 opens a book, gb the picker', async () => {
+  it('home: j/k walk the recent notes, Enter opens one; q closes the note back to the home', async () => {
     await mountView();
-    const open = vi.spyOn(books, 'openShortcut');
-    const picker = vi.spyOn(books, 'openPicker');
-    await press('g', '1');
-    expect(open).toHaveBeenCalledWith(1);
+    await waitFor(fx, 'explorer');
+    await press('Escape');
+    expect(fx()).toBeNull();
+    await press('j');
+    expect((document.activeElement as HTMLElement).dataset.recent).toBe('0');
+    await press('j');
+    expect(document.activeElement!.textContent).toContain('Deep');
+    (document.activeElement as HTMLButtonElement).click();
+    await waitFor(() => openTitle() === 'Deep', 'opened recent');
+    await press('q');
+    await waitFor(home, 'home again');
+    expect(notes.selectedID).toBeNull();
+    expect(localStorage.getItem(LAST_NOTE_KEY + 'v1')).toBeNull();
+  });
+
+  it('H / L walk the notes opened before', async () => {
+    await mountView();
+    await openThroughExplorer('One');
+    await openThroughExplorer('Two');
+    await press('H');
+    await waitFor(() => openTitle() === 'One', 'back');
+    await press('L');
+    await waitFor(() => openTitle() === 'Two', 'forward');
+  });
+
+  it('the legend follows: home, explorer, books level', async () => {
+    await mountView();
+    await waitFor(fx, 'explorer');
+    expect(legend()).toMatch(/split right/);
+    await press('Escape');
+    expect(legend()).toMatch(/explorer/);
+    expect(legend()).toMatch(/new note/);
     await press('g', 'b');
-    expect(picker).toHaveBeenCalled();
+    await waitFor(() => fx()?.getAttribute('data-level') === 'books', 'books');
+    expect(legend()).toMatch(/open book/);
+  });
+
+  it('narrow screens: the overlay is a full-height sheet', async () => {
+    const mm = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q.includes('max-width: 720px'), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    try {
+      await mountView();
+      await waitFor(fx, 'explorer');
+      expect(fx()!.classList.contains('sheet')).toBe(true);
+      expect(target.querySelector<HTMLElement>('[data-testid="col-fx-cur"] [role="option"]')!.style.height).toBe('44px');
+    } finally {
+      window.matchMedia = mm;
+    }
   });
 });
 
-describe('miller browser — mouse', () => {
-  it('click a folder enters it; dblclick a note opens it; click parent/crumb navigates', async () => {
+describe('books float too', () => {
+  beforeEach(() => {
+    books.addCreated({ id: 'v2', name: 'Other', slug: 'other', created_by: 'u1', created_at: '', owner_user_id: 'u1' }, 'https://lumi.work.com#ana');
+    books.setActive('v1');
+  });
+
+  it('gb opens the explorer at the books level; Enter switches the book', async () => {
     await mountView();
-    rows('cur')[0].click(); // alpha
-    await settle();
-    expect(crumbs()).toEqual(['Vault', 'alpha']);
-    rows('cur')[1].dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); // Inner
-    await settle();
-    expect(notes.selectedID).toBe('inner');
-    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(true);
-    // Breadcrumb root.
-    (target.querySelector('[data-testid="breadcrumb"] .crumb:not(.back)') as HTMLElement).click();
-    await settle();
-    expect(crumbs()).toEqual(['Vault']);
-    rows('cur')[1].click(); // beta
-    await settle();
-    rows('parent')[0].click(); // alpha in the parent column
-    await settle();
-    expect(crumbs()).toEqual(['Vault', 'alpha']);
+    await openThroughExplorer('One');
+    await press('g', 'b');
+    await waitFor(() => fx()?.getAttribute('data-level') === 'books', 'books level');
+    const names = Array.from(target.querySelectorAll('[data-testid="fx-books-list"] .fx-row-name')).map((e) => e.textContent);
+    expect(names).toEqual(['Vault', 'Other']);
+    await press('j', 'Enter');
+    await waitFor(() => books.activeID === 'v2', 'switched');
+    expect(books.pickerOpen).toBe(false);
+  });
+
+  it('the book button opens the books level; [ and ] still cycle', async () => {
+    await mountView();
+    await waitFor(fx, 'explorer');
+    await press('Escape');
+    target.querySelector<HTMLButtonElement>('[data-testid="book-switcher"]')!.click();
+    await waitFor(() => fx()?.getAttribute('data-level') === 'books', 'books level');
+    await press('Escape');
+    await press(']');
+    expect(books.activeID).toBe('v2');
+    await press('[');
+    expect(books.activeID).toBe('v1');
   });
 });
 
-describe('miller browser — file operations (a / r / d / y / p)', () => {
+describe('file operations run inside the overlay', () => {
   function serveMutable(): NoteSummary[] {
     const served = [...VAULT];
     serve(served);
@@ -282,288 +361,64 @@ describe('miller browser — file operations (a / r / d / y / p)', () => {
   }
 
   async function typePrompt(text: string): Promise<void> {
-    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.prompt-input'), 'prompt input');
+    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.fx-input'), 'prompt input');
     expect(document.activeElement).toBe(input);
     input.value = text;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    target.querySelector<HTMLFormElement>('.prompt-form')!.requestSubmit();
+    input.form!.requestSubmit();
     await settle();
   }
 
-  it('a: creates at root then moves into the current folder', async () => {
+  it('a in the reader: the explorer opens at the note folder with the new-note prompt', async () => {
     serveMutable();
     await mountView();
-    await press('l', 'a');
+    await openThroughExplorer('alpha', 'Inner');
+    await press('a');
+    await waitFor(fx, 'explorer');
     await typePrompt('Fresh');
     await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'move into folder');
     expect(api.createNote).toHaveBeenCalledWith('v1', { title: 'Fresh', body: '' });
     expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'alpha/new1.md' });
-    await waitFor(() => names('cur').includes('Fresh'), 'fresh note in alpha');
-    expect(crumbs()).toEqual(['Vault', 'alpha']);
-    expect(cursorName('cur')).toBe('Fresh');
   });
 
-  it('a with a path creates the folders on the way', async () => {
+  it('r in the reader renames the open note', async () => {
     serveMutable();
     await mountView();
-    await press('a');
-    await typePrompt('projects/2026/Plan');
-    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'moved');
-    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'projects/2026/new1.md' });
-    await waitFor(() => crumbs().join('/') === 'Vault/projects/2026', 'revealed in its folder');
-    expect(cursorName('cur')).toBe('Plan');
-  });
-
-  it('a dir/ makes a client-side folder and enters it; a note inside makes it real', async () => {
-    serveMutable();
-    await mountView();
-    await press('a');
-    await typePrompt('journal/');
-    expect(api.createNote).not.toHaveBeenCalled();
-    expect(crumbs()).toEqual(['Vault', 'journal']);
-    expect(names('parent')).toContain('journal');
-    await press('a');
-    await typePrompt('Day one');
-    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'moved');
-    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'journal/new1.md' });
-  });
-
-  it('a rejects dot segments inline without a request', async () => {
-    serveMutable();
-    await mountView();
-    await press('a');
-    await typePrompt('.secret');
-    expect(api.createNote).not.toHaveBeenCalled();
-    expect(target.querySelector('.prompt-preview')!.textContent).toMatch(/dot/);
-  });
-
-  it('r renames the title, r dir/name moves the note', async () => {
-    serveMutable();
-    await mountView();
-    await press('G'); // Two
+    await openThroughExplorer('One');
     await press('r');
-    await typePrompt('Second');
-    expect(api.updateNote).toHaveBeenLastCalledWith('v1', 'two', { title: 'Second' });
-    await waitFor(() => names('cur').includes('Second'), 'renamed');
-    await press('r');
-    await typePrompt('beta/Second');
-    expect(api.updateNote).toHaveBeenLastCalledWith('v1', 'two', { path: 'beta/two.md' });
+    await typePrompt('Uno');
+    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'rename');
+    expect(api.updateNote).toHaveBeenCalledWith('v1', 'one', { title: 'Uno' });
   });
 
-  it('r on a folder moves every note under it', async () => {
+  it('the reader context menu: Delete asks in the overlay; y deletes and the home returns', async () => {
     serveMutable();
     await mountView();
-    await press('r'); // alpha
-    await typePrompt('archive');
-    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length === 2, 'two notes moved');
-    expect(vi.mocked(api.updateNote).mock.calls.map((c) => c[2])).toEqual([
-      { path: 'archive/inner.md' },
-      { path: 'archive/nested/deep.md' },
-    ]);
-  });
-
-  it('d asks inline; n cancels, y deletes', async () => {
-    serveMutable();
-    await mountView();
-    await press('G'); // Two
-    await press('d');
-    expect(target.querySelector('[data-testid="delete-confirm"]')).not.toBeNull();
-    await press('n');
-    expect(target.querySelector('[data-testid="delete-confirm"]')).toBeNull();
-    expect(api.deleteNote).not.toHaveBeenCalled();
-    await press('d', 'y');
-    await waitFor(() => vi.mocked(api.deleteNote).mock.calls.length > 0, 'deleted');
+    await openThroughExplorer('Two');
+    const reader = target.querySelector<HTMLElement>('.rendered')!;
+    reader.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    await settle();
+    const del = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((b) => b.textContent?.includes('Delete'))!;
+    del.click();
+    await waitFor(() => target.querySelector('[data-testid="delete-confirm"]'), 'confirm');
+    await press('y');
+    await waitFor(() => vi.mocked(api.deleteNote).mock.calls.length > 0, 'delete');
     expect(api.deleteNote).toHaveBeenCalledWith('v1', 'two');
-    await waitFor(() => !names('cur').includes('Two'), 'row gone');
-  });
-
-  it('y then p pastes a copy into the current folder', async () => {
-    serveMutable();
-    await mountView();
-    await press('G', 'y'); // yank Two
-    await press('l'); // Two is a note: opens reader; go back
-    await press('Escape', 'g', 'g', 'l', 'p'); // into alpha, paste
-    await waitFor(() => vi.mocked(api.updateNote).mock.calls.length > 0, 'pasted copy moved');
-    expect(api.createNote).toHaveBeenCalledWith('v1', { title: 'Two copy', body: '# body of two' });
-    expect(api.updateNote).toHaveBeenCalledWith('v1', 'new1', { path: 'alpha/new1.md' });
-  });
-});
-
-describe('miller browser — yazi extras', () => {
-  it('counts multiply moves', async () => {
-    await mountView();
-    await press('3', 'j');
-    expect(cursorName('cur')).toBe('Two');
-    await press('2', 'k');
-    expect(cursorName('cur')).toBe('beta');
-  });
-
-  it('n / N walk the matches of the last filter', async () => {
-    await mountView();
-    await press('/');
-    const input = await waitFor(() => target.querySelector<HTMLInputElement>('.filter-input'), 'filter input');
-    input.value = 'o';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    await settle();
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-    expect(cursorName('cur')).toBe('One');
-    await press('n');
-    expect(cursorName('cur')).toBe('Two');
-    await press('n');
-    expect(cursorName('cur')).toBe('One'); // wraps
-    await press('N');
-    expect(cursorName('cur')).toBe('Two');
-  });
-
-  it('[ and ] cycle books', async () => {
-    books.addCreated({ id: 'v2', name: 'Other', slug: 'other', created_by: 'u1', created_at: '', owner_user_id: 'u1' }, 'https://lumi.work.com#ana');
-    books.setActive('v1');
-    await mountView();
-    await press(']');
-    expect(books.activeID).toBe('v2');
-  });
-
-  it('the legend follows the context and shows chord completions', async () => {
-    await mountView();
-    const legend = () => target.querySelector('[data-testid="command-legend"]')!.textContent!;
-    expect(legend()).toMatch(/files/i);
-    expect(legend()).toMatch(/rename/);
-    await press('g');
-    expect(legend()).toMatch(/gh/);
-    expect(legend()).toMatch(/book root/);
-    await press('g');
-    expect(legend()).not.toMatch(/book root/);
-    await press('G', 'd');
-    expect(legend()).toMatch(/confirm/);
-    await press('Escape');
-  });
-
-  it('space opens the palette; a note result opens it', async () => {
-    await mountView();
-    await press(' ');
-    const input = await waitFor(() => target.querySelector<HTMLInputElement>('[data-testid="palette"] input'), 'palette');
-    input.value = 'deep';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    await settle();
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await waitFor(() => notes.selectedID === 'deep', 'opened deep');
-    expect(crumbs()).toEqual(['Vault', 'alpha', 'nested']);
-  });
-
-  it('? opens the keymap help; any key closes it', async () => {
-    await mountView();
-    await press('?');
-    expect(document.querySelector('[data-testid="help"]')).not.toBeNull();
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }));
-    await settle();
-    expect(document.querySelector('[data-testid="help"]')).toBeNull();
-  });
-});
-
-describe('pane navigation (Ctrl-h/j/k/l, Ctrl-w)', () => {
-  async function ctrl(key: string): Promise<KeyboardEvent> {
-    const ev = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
-    (document.activeElement && document.activeElement !== document.body ? document.activeElement : window).dispatchEvent(ev);
-    await settle();
-    return ev;
-  }
-  const main = () => target.querySelector<HTMLElement>('.col-preview')!;
-
-  it('reader: Ctrl-h to the explorer, Ctrl-l back; the focused pane is marked', async () => {
-    await mountView();
-    await press('G'); // Two
-    await waitFor(() => target.querySelector('.rendered'), 'preview');
-    await press('Enter');
-    expect(document.activeElement).toBe(main());
-    expect(main().classList.contains('pane-focus')).toBe(true);
-
-    const h = await ctrl('h');
-    expect(h.defaultPrevented).toBe(true); // no browser history
-    expect(document.activeElement).toBe(col('cur'));
-    expect(target.querySelector('.col-current')!.classList.contains('pane-focus')).toBe(true);
-    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(true);
-    // Explorer keys there: j/k move the cursor, Esc returns to the note.
-    await press('k');
-    expect(cursorName('cur')).toBe('One');
-    await press('Escape');
-    expect(document.activeElement).toBe(main());
-
-    await ctrl('h');
-    expect(document.activeElement).toBe(col('cur'));
-    await ctrl('l');
-    expect(document.activeElement).toBe(main());
-    // No pane to the right: consumed, focus stays.
-    expect((await ctrl('l')).defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(main());
-  });
-
-  it('Ctrl-w w cycles and Ctrl-w p returns', async () => {
-    await mountView();
-    await press('G');
-    await waitFor(() => target.querySelector('.rendered'), 'preview');
-    await press('Enter');
-    await ctrl('w');
-    await press('w');
-    expect(document.activeElement).toBe(col('cur'));
-    await ctrl('w');
-    await press('w');
-    expect(document.activeElement).toBe(main());
-    await ctrl('w');
-    await press('p');
-    expect(document.activeElement).toBe(col('cur'));
-  });
-
-  it('browsing: Ctrl-l focuses the note preview, where j scrolls instead of moving the cursor', async () => {
-    await mountView();
-    await press('G'); // Two (a note)
-    await waitFor(() => target.querySelector('.rendered'), 'preview');
-    await ctrl('l');
-    expect(document.activeElement).toBe(main());
-    expect(target.querySelector('[data-testid="miller"]')!.classList.contains('note-mode')).toBe(false);
-    await press('k');
-    expect(cursorName('cur')).toBe('Two');
-    await ctrl('h');
-    expect(document.activeElement).toBe(col('cur'));
-  });
-
-  it('a folder preview is not a pane; the setting turns Ctrl-hjkl off', async () => {
-    await mountView(); // cursor on the alpha folder
-    col('cur')!.focus();
-    await ctrl('l');
-    expect(document.activeElement).toBe(col('cur'));
-    const { editorSettings } = await import('../lib/editor-settings.svelte.ts');
-    editorSettings.update({ paneNav: false });
-    try {
-      expect((await ctrl('h')).defaultPrevented).toBe(false);
-    } finally {
-      editorSettings.update({ paneNav: true });
-    }
+    await waitFor(home, 'home');
   });
 });
 
 describe('note splits (SPEC-PARTE2 §3)', () => {
-  beforeEach(() => {
-    try { localStorage.clear(); } catch { /* none */ }
-  });
   const panes = () => target.querySelectorAll('[data-testid="note-pane"]');
-  async function ctrl(key: string): Promise<void> {
-    const ev = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
-    (document.activeElement && document.activeElement !== document.body ? document.activeElement : window).dispatchEvent(ev);
-    await settle();
-  }
 
   it('Ctrl-w v splits the note, Ctrl-w l/h move between panes, Ctrl-w q closes', async () => {
     await mountView();
-    await press('G'); // Two
-    await waitFor(() => target.querySelector('.rendered'), 'preview');
-    await press('Enter');
+    await openThroughExplorer('Two');
     await ctrl('w');
     await press('v');
     await waitFor(() => panes().length === 1 && target.querySelector('[data-testid="pane-host"]'), 'split');
     expect(target.querySelector('[data-testid="primary-pane"]')).not.toBeNull();
-    // The new pane is focused and holds the same note.
     await waitFor(() => panes()[0].querySelector('.md-body')?.textContent?.includes('body of two'), 'pane body');
     await ctrl('w');
     await press('h');
@@ -577,21 +432,22 @@ describe('note splits (SPEC-PARTE2 §3)', () => {
     expect(target.querySelector('[data-testid="pane-host"]')).toBeNull();
   });
 
-  it('the layout is remembered per book', async () => {
+  it('Ctrl-v in the explorer opens in a vertical split; the layout is remembered per book', async () => {
     await mountView();
-    await press('G');
-    await waitFor(() => target.querySelector('.rendered'), 'preview');
-    await press('Enter');
-    await ctrl('w');
-    await press('s');
+    await openThroughExplorer('Two');
+    await press('-');
+    await waitFor(fx, 'explorer');
+    await press('k'); // One
+    await ctrl('v');
     await waitFor(() => panes().length === 1, 'split');
+    expect(fx()).toBeNull();
     const saved = JSON.parse(localStorage.getItem('lumi.panes.v1:v1') ?? 'null');
-    expect(saved?.state?.root?.dir).toBe('col');
+    expect(saved?.state?.root?.dir).toBe('row');
   });
 });
 
-describe('miller browser — 10k notes performance smoke', () => {
-  it('loads all pages, renders a bounded window, and jumps to the end quickly', async () => {
+describe('a 10k-note book', () => {
+  it('the explorer renders a bounded window and jumps to the end quickly', async () => {
     const many: NoteSummary[] = [];
     for (let i = 0; i < 10_000; i++) {
       // 8000 in the root, the rest spread over 20 folders.
@@ -601,26 +457,24 @@ describe('miller browser — 10k notes performance smoke', () => {
     const t0 = performance.now();
     cmp = mount(VaultHomeView, { target });
     await waitFor(() => notes.list.length === 10_000 && !notes.loadingList, 'all pages');
-    await waitFor(() => rows('cur').length > 0, 'rows');
+    await waitFor(() => fxRows().length > 0, 'rows');
     const mountMs = performance.now() - t0;
 
-    // 20 folders + 8000 notes in the root column, but only a window in the DOM.
-    expect(col('cur')!.querySelector('[role="option"]')!.getAttribute('aria-setsize')).toBe('8020');
-    expect(rows('cur').length).toBeLessThan(100);
+    const lb = target.querySelector<HTMLElement>('[data-testid="col-fx-cur"]')!;
+    expect(lb.querySelector('[role="option"]')!.getAttribute('aria-setsize')).toBe('8020');
+    expect(fxRows().length).toBeLessThan(100);
+    // The home lists only a handful of recent notes.
+    expect(home()!.querySelectorAll('.recent').length).toBe(8);
 
     const t1 = performance.now();
     await press('G');
     const jumpMs = performance.now() - t1;
-    const lb = col('cur')!;
-    expect(lb.getAttribute('aria-activedescendant')).toBe('cur-8019');
-    expect(document.getElementById('cur-8019')).not.toBeNull();
-    expect(rows('cur').length).toBeLessThan(100);
-
+    expect(lb.getAttribute('aria-activedescendant')).toBe('fx-cur-8019');
+    expect(document.getElementById('fx-cur-8019')).not.toBeNull();
     for (let i = 0; i < 20; i++) await press('k');
-    expect(lb.getAttribute('aria-activedescendant')).toBe('cur-7999');
+    expect(lb.getAttribute('aria-activedescendant')).toBe('fx-cur-7999');
 
-    // Generous bounds: this is a smoke test against O(n²) regressions,
-    // not a benchmark (CI machines vary).
+    // Smoke bounds against O(n²) regressions, not a benchmark.
     expect(mountMs).toBeLessThan(5000);
     expect(jumpMs).toBeLessThan(1000);
   });

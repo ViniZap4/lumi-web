@@ -34,6 +34,8 @@
     oncontext?: (index: number, entry: Entry, ev: MouseEvent) => void;
     /** A note row (by key) was dropped onto a folder row. */
     ondropnote?: (noteKey: string, target: Entry) => void;
+    /** Row height in px (touch sheets use taller rows). */
+    rowHeight?: number;
     element?: HTMLElement | null;
   }
 
@@ -50,6 +52,7 @@
     onopen,
     oncontext,
     ondropnote,
+    rowHeight = ROW_HEIGHT,
     element = $bindable(null),
   }: Props = $props();
 
@@ -57,13 +60,13 @@
   let viewH = $state(0);
 
   const view = $derived(viewH > 0 ? viewH : FALLBACK_VIEW);
-  const start = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN));
-  const end = $derived(Math.min(entries.length, Math.ceil((scrollTop + view) / ROW_HEIGHT) + OVERSCAN));
+  const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN));
+  const end = $derived(Math.min(entries.length, Math.ceil((scrollTop + view) / rowHeight) + OVERSCAN));
   const visible = $derived(entries.slice(start, end));
 
   /** Rows that fit in the viewport (page size for PgUp/PgDn). */
   export function pageRows(): number {
-    return Math.max(1, Math.floor(view / ROW_HEIGHT) - 1);
+    return Math.max(1, Math.floor(view / rowHeight) - 1);
   }
 
   /** Rows kept between the cursor and the viewport edge (scrolloff). */
@@ -83,18 +86,18 @@
   // back. Short hops animate; long jumps (G, ⌃d) are instant so the
   // virtual window never shows blank rows mid-animation.
   $effect(() => {
-    const max = Math.max(0, entries.length * ROW_HEIGHT - view);
+    const max = Math.max(0, entries.length * rowHeight - view);
     const prev = untrack(() => scrollTop);
     let top = Math.min(prev, max);
     if (cursor >= 0) {
-      const margin = Math.min(SCROLLOFF * ROW_HEIGHT, Math.max(0, (view - ROW_HEIGHT) / 2));
-      const rowTop = cursor * ROW_HEIGHT;
+      const margin = Math.min(SCROLLOFF * rowHeight, Math.max(0, (view - rowHeight) / 2));
+      const rowTop = cursor * rowHeight;
       if (rowTop - margin < top) top = Math.max(0, rowTop - margin);
-      else if (rowTop + ROW_HEIGHT + margin > top + view) top = Math.min(max, rowTop + ROW_HEIGHT + margin - view);
+      else if (rowTop + rowHeight + margin > top + view) top = Math.min(max, rowTop + rowHeight + margin - view);
     }
     if (top !== scrollTop) scrollTop = top;
     if (element && element.scrollTop !== top) {
-      const near = Math.abs(element.scrollTop - top) <= ROW_HEIGHT * 4;
+      const near = Math.abs(element.scrollTop - top) <= rowHeight * 4;
       if (near && typeof element.scrollTo === 'function' && !reducedMotion()) element.scrollTo({ top, behavior: 'smooth' });
       else element.scrollTop = top;
     }
@@ -146,7 +149,12 @@
   {#if entries.length === 0}
     <div class="empty" role="presentation">{emptyText}</div>
   {:else}
-    <div class="spacer" style="height: {entries.length * ROW_HEIGHT}px">
+    <div class="spacer" style="height: {entries.length * rowHeight}px">
+      {#if active && cursor >= 0}
+        <!-- The cursor highlight glides between rows (spring); rows keep
+             their own .cursor styling as the static fallback. -->
+        <div class="glide" aria-hidden="true" style="transform: translateY({cursor * rowHeight}px); height: {rowHeight}px"></div>
+      {/if}
       {#each visible as e, j (e.key)}
         {@const i = start + j}
         <!-- Keyboard is handled by the view's dispatcher on the listbox
@@ -166,7 +174,7 @@
           aria-selected={i === cursor}
           aria-setsize={entries.length}
           aria-posinset={i + 1}
-          style="top: {i * ROW_HEIGHT}px; height: {ROW_HEIGHT}px"
+          style="top: {i * rowHeight}px; height: {rowHeight}px"
           data-key={e.key}
           data-hint-target
           draggable={e.kind === 'note' && !!ondropnote ? 'true' : undefined}
@@ -230,10 +238,21 @@
   .row:hover { background: var(--tint-hover); }
   .row.cursor { background: var(--tint-hover); }
   .miller-col.active .row.cursor {
+    background: transparent;
+  }
+  .glide {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    border-radius: var(--radius-sm);
     background: var(--tint-active);
     box-shadow: inset 2px 0 0 var(--color-primary);
+    transition: transform var(--dur-1, 140ms) var(--spring-snappy, cubic-bezier(0.2, 0.9, 0.3, 1.1));
+    will-change: transform;
+    pointer-events: none;
   }
-  .miller-col.active:focus-visible .row.cursor { box-shadow: inset 2px 0 0 var(--color-primary), inset 0 0 0 1px var(--ring); }
+  .miller-col.active:focus-visible .glide { box-shadow: inset 2px 0 0 var(--color-primary), inset 0 0 0 1px var(--ring); }
   .row.open .name { color: var(--color-primary); font-weight: 550; }
   .row.yanked .name { text-decoration: underline dashed var(--color-warning); text-underline-offset: 3px; }
   .row.virtual { opacity: 0.75; }

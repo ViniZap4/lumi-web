@@ -13,10 +13,11 @@
 
 import type { PlannedMap } from './vim-config.ts';
 
-/** explorer = the miller columns, main = reader / note preview column,
- *  editor = CodeMirror, split = the rendered preview beside Source,
- *  leaf = a secondary note pane of a split layout (lib/pane-tree.ts). */
-export type PaneId = 'explorer' | 'main' | 'editor' | 'split' | 'leaf';
+/** main = the reader of the primary note, editor = CodeMirror,
+ *  split = the rendered preview beside Source, leaf = a secondary note
+ *  pane of a split layout (lib/pane-tree.ts). The explorer is not a
+ *  pane: it floats (SPEC-PARTE2 §2). */
+export type PaneId = 'main' | 'editor' | 'split' | 'leaf';
 export type PaneDir = 'h' | 'j' | 'k' | 'l' | 'w' | 'p';
 
 export interface PaneLayout {
@@ -27,37 +28,21 @@ export interface PaneLayout {
 }
 
 export interface LayoutInput {
-  /** ≤720px: the miller collapses to a single column. */
-  narrow: boolean;
   /** ≤860px: Source | Preview become tabs. */
   splitNarrow: boolean;
-  pane: 'browse' | 'note';
   editing: boolean;
   /** Split preview on (Source mode + preview). */
   split: boolean;
-  /** The main column shows a note (reader / preview of a note). */
+  /** A note is open in the reader. */
   mainHasNote: boolean;
 }
 
 export function paneLayout(x: LayoutInput): PaneLayout {
-  const main: PaneId[] = [];
-  let stack: [PaneId, PaneId] | null = null;
   if (x.editing) {
-    main.push('editor');
-    if (x.split) {
-      if (x.splitNarrow) stack = ['editor', 'split'];
-      else main.push('split');
-    }
-  } else if (x.mainHasNote) {
-    main.push('main');
+    if (!x.split) return { order: ['editor'], stack: null };
+    return x.splitNarrow ? { order: ['editor'], stack: ['editor', 'split'] } : { order: ['editor', 'split'], stack: null };
   }
-  if (x.narrow) {
-    // One column at a time: the explorer while browsing, the note
-    // (reader or editor + split) once it is open.
-    if (x.pane === 'browse' && !x.editing) return { order: ['explorer'], stack: null };
-    return { order: main.length ? main : ['explorer'], stack };
-  }
-  return { order: ['explorer', ...main], stack };
+  return { order: x.mainHasNote ? ['main'] : [], stack: null };
 }
 
 /** All panes reachable in the layout (tabs included), in cycle order. */

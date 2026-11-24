@@ -1,10 +1,16 @@
 <script lang="ts">
+  // The book shell. The floating explorer (SPEC-PARTE2 §2) is the only
+  // navigation: there is no explorer column and no books sidebar. A
+  // book opens on its last note (per book, per device) or on a calm
+  // empty home with the explorer floating on top; `-`, <leader>e,
+  // :explore, the top bar's Explorer button and the palette open it;
+  // `gb` / the book button open it at the books level.
   import { onMount, onDestroy, untrack, tick } from 'svelte';
   import { vaults } from '../lib/vaults.svelte.ts';
   import { notes } from '../lib/notes.svelte.ts';
   import { renderBlocks, taskToggle, startsWithTitle } from '../lib/markdown.ts';
   import { keyLabel } from '../lib/platform.ts';
-  import { ApiError } from '../lib/types.ts';
+  import { ApiError, type NoteSummary } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
   import { flushPending, toggleTaskHeadless, acquireEditorSession, editorPool } from '../lib/editor-boot.ts';
@@ -15,14 +21,14 @@
   import { serverLabel } from '../lib/serverurl.ts';
   import { isEditableTarget } from '../lib/shortcuts.ts';
   import { ShellKeymap, CHORD_TIMEOUT_MS, type ShellAction } from '../lib/shell-keymap.ts';
-  import { MillerNav } from '../lib/miller.svelte.ts';
-  import { breadcrumb, parentDir, dirOf, normalizePath, type Entry } from '../lib/notetree.ts';
-  import { planCreate, planRename, planFolderRename, movedPath, copyTitle, type CreatePlan, type RenamePlan, type FolderRenamePlan } from '../lib/fileops.ts';
-  import { findNoteByHref, markdownLink } from '../lib/links.ts';
+  import type { MillerNav } from '../lib/miller.svelte.ts';
+  import { dirOf, normalizePath, type Entry, type NoteEntry } from '../lib/notetree.ts';
+  import { movedPath, copyTitle } from '../lib/fileops.ts';
+  import { markdownLink } from '../lib/links.ts';
   import { legendFor, contextForVimMode, type LegendContext, type LegendItem } from '../lib/legend.ts';
-  import { PaneKeys, paneLayout, paneTarget, fallsThroughWithoutTarget, PANE_CHORD_MS, type PaneId, type PaneDir, type WinCmd } from '../lib/pane-nav.ts';
+  import { PaneKeys, paneLayout, paneTarget, panesOf, fallsThroughWithoutTarget, PANE_CHORD_MS, type PaneId, type PaneDir, type WinCmd } from '../lib/pane-nav.ts';
   import {
-    single, splitPane, closePane, onlyPane, equalize, setNote, setView, focus as focusLeafState, resizeSplit, nudgePane,
+    single, splitPane, closePane, equalize, setNote, setView, focus as focusLeafState, resizeSplit, nudgePane,
     neighbor, cycle, leaves, findLeaf, paneCount, parsePaneState, pruneNotes, newPaneId,
     type PaneState, type PaneLeaf, type SplitDir,
   } from '../lib/pane-tree.ts';
@@ -37,15 +43,20 @@
   import { linkCandidates } from '../lib/links.ts';
   import { PreviewKeymap, type PreviewAction } from '../lib/preview-keys.ts';
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
-  import { withViewTransition, animate } from '../lib/motion.ts';
+  import { withViewTransition, sharedTransition, animate, scrollBehavior } from '../lib/motion.ts';
+  import { toasts } from '../lib/toasts.svelte.ts';
+  import ToastStack from '../components/ToastStack.svelte';
+  import ModePill from '../components/ModePill.svelte';
   import { effectiveSettings, appliedMappings, LEADER_TOKEN } from '../lib/vim-config.ts';
   import { selectorOrder } from '../lib/books-model.ts';
+  import { rememberLastNote, lastNote, planBookOpen, recentNotes, NoteHistory } from '../lib/book-home.ts';
+  import { peekNote } from '../lib/note-content.ts';
+  import { updatedLabel } from '../lib/hover-preview.ts';
   import type { PaletteCommand } from '../lib/palette.ts';
-  import MillerColumn from '../components/MillerColumn.svelte';
   import VaultSettingsModal from '../components/VaultSettingsModal.svelte';
   import VaultCreateModal from '../components/VaultCreateModal.svelte';
-  import BookSwitcher from '../components/BookSwitcher.svelte';
   import SyncStatusPopover from '../components/SyncStatusPopover.svelte';
+  import SyncDot from '../components/SyncDot.svelte';
   import CommandLegend from '../components/CommandLegend.svelte';
   import CommandPalette from '../components/CommandPalette.svelte';
   import HelpOverlay from '../components/HelpOverlay.svelte';
@@ -58,7 +69,7 @@
   import NotePane from '../components/NotePane.svelte';
   import NoteViewHost from '../components/NoteViewHost.svelte';
   import HoverCard from '../components/HoverCard.svelte';
-  import FloatingExplorer, { type FxOps, type FxPrompt, type FxPlan } from '../components/FloatingExplorer.svelte';
+  import FloatingExplorer, { type FxOps, type FxPrompt, type FxPlan, type FxLevel, type FxInitial } from '../components/FloatingExplorer.svelte';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { countWords, readingTime, type EditorStats } from '../lib/textstats.ts';
 
@@ -69,25 +80,12 @@
 
   type NoteEditorComp = typeof import('../components/NoteEditor.svelte').default;
 
-  // Yazi/miller browser: parent | current | preview columns derived
-  // from note paths. Keymap: lib/shell-keymap.ts (Apple parity).
-  const nav = new MillerNav(() => notes.list);
-  /** 'browse' = walking columns; 'note' = the open note owns the main
-   *  pane (Enter/l on a note), parent column hidden. */
-  let pane = $state<'browse' | 'note'>('browse');
-  let showPreview = $state(true); // zp
-  let filterOpen = $state(false);
-  let filterFocused = $state(false);
-  let filterInput = $state<HTMLInputElement | null>(null);
-  let currentColEl = $state<HTMLElement | null>(null);
-  let currentCol = $state<{ pageRows(): number } | null>(null);
+  /** 'home' = the book's calm empty home; 'note' = a note (reader,
+   *  editor or a split layout) fills the stage. */
+  let pane = $state<'home' | 'note'>('home');
   let previewEl = $state<HTMLElement | null>(null);
-  const crumbs = $derived(breadcrumb(nav.dir));
-  const openKey = $derived(notes.selectedID ? 'n:' + notes.selectedID : null);
-  const liveMsg = $derived(
-    `${nav.dir === '' ? (vaults.selected?.name ?? 'Book') + ' root' : nav.dir}, ${nav.entries.length} items` +
-      (nav.filter ? `, filtered by “${nav.filter}”` : ''),
-  );
+  let homeEl = $state<HTMLElement | null>(null);
+  const noteHistory = new NoteHistory();
 
   // ---- keymap + legend state ----------------------------------------------
   const keymap = new ShellKeymap();
@@ -97,7 +95,7 @@
   let paletteMode = $state<null | 'all' | 'command'>(null);
   let hintsOpen = $state(false);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; entry: Entry | null; title: string } | null>(null);
-  let homeEl = $state<HTMLElement | null>(null);
+  let rootEl = $state<HTMLElement | null>(null);
   let noteEditorRef = $state<{ editorView(): import('@codemirror/view').EditorView | null; run(a: string): boolean; gotoLine(n: number): void; focus(): void } | null>(null);
   let splitRef = $state<{ focusPreview(): Promise<boolean>; revealSource(): void; previewElement(): HTMLElement | null; topLine(): number | null; run(a: PreviewAction): boolean; clearFind(): boolean } | null>(null);
   /** Hint mode scope (the split preview's `f` labels only its links). */
@@ -113,44 +111,10 @@
   let narrowView = $state(false);
   let splitNarrow = $state(false);
 
-  // ---- explorer prompt (a / r), inline delete confirm, yank -----------------
-  type Prompt = { kind: 'create'; text: string } | { kind: 'rename'; text: string; entry: Entry };
-  let prompt = $state<Prompt | null>(null);
-  let promptInput = $state<HTMLInputElement | null>(null);
-  let promptErr = $state<string | null>(null);
-  let busy = $state(false);
-  let pendingDelete = $state<Entry | null>(null);
-  let yanked = $state<Entry | null>(null);
-  let toast = $state<{ text: string; tone: 'info' | 'warn' | 'error' } | null>(null);
-  let toastTimer: ReturnType<typeof setTimeout> | null = null;
-
+  /** Short notices slide in as stacked toasts (lib/toasts). */
   function flash(text: string, tone: 'info' | 'warn' | 'error' = 'info'): void {
-    toast = { text, tone };
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toast = null), tone === 'error' ? 6000 : 3500);
+    toasts.push(text, tone);
   }
-
-  const promptPlan: CreatePlan | RenamePlan | FolderRenamePlan | null = $derived.by(() => {
-    const p = prompt;
-    if (!p || !p.text.trim()) return null;
-    if (p.kind === 'create') return planCreate(nav.dir, p.text);
-    if (p.entry.kind === 'folder') return planFolderRename(p.entry.path, p.text);
-    return planRename(p.entry.path, p.entry.note.title ?? p.entry.name, p.text);
-  });
-  const promptPreview = $derived.by(() => {
-    const pl = promptPlan;
-    if (!pl) return prompt?.kind === 'create' ? 'name · a/b/name · dir/' : 'new name · dir/name · dir/';
-    switch (pl.kind) {
-      case 'error': return pl.message;
-      case 'none': return 'unchanged';
-      case 'folder':
-        return 'path' in pl ? `folder ${pl.path}/` : `move folder → ${pl.to}/`;
-      case 'note':
-        if ('folder' in pl) return `note “${pl.title}” in ${pl.folder ? pl.folder + '/' : 'book root'}`;
-        return [pl.title ? `title “${pl.title}”` : '', pl.path ? `→ ${pl.path}` : ''].filter(Boolean).join(' · ');
-    }
-    return '';
-  });
 
   // Slice 4.4 — Yjs+CM6 editor session. EditorSession owns the Y.Doc
   // and provider; reactive `status` + `peers` flow into the bar.
@@ -168,12 +132,6 @@
   let hintTimer: ReturnType<typeof setTimeout> | null = null;
   const OFFLINE_HINT = 'Indisponível offline: criar, renomear e apagar notas precisam do servidor.';
   const structuralOffline = $derived(sync.isOffline(books.active));
-
-  function showOfflineHint(): void {
-    offlineHint = OFFLINE_HINT;
-    if (hintTimer) clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => (offlineHint = null), 4000);
-  }
 
   // Conflict copies (lineage mismatch / deleted note) of this book.
   $effect(() => {
@@ -226,8 +184,6 @@
     if (items.length) downloadText(exportFilename(items), bundleMarkdown(items));
   }
 
-  let creating = false;
-
   // Reset edit state whenever the focused note changes. ONLY
   // notes.selectedID is a dependency: the body runs untracked, because
   // reading editMode/editSession here (directly or via exitEdit) made
@@ -244,6 +200,9 @@
     });
   });
 
+  /** The book whose opening (last note / home) was decided. */
+  let plannedFor = $state<string | null>(null);
+
   // Hydrate notes whenever the active vault changes. The notes store
   // is idempotent on a no-op vaultID transition so this is safe. The
   // full list fetched here is the book's catch-up baseline (cursor =
@@ -252,12 +211,13 @@
     const vid = vaults.selectedID;
     untrack(() => {
       if (notes.vaultID !== vid) {
-        nav.reset();
-        pane = 'browse';
-        filterOpen = false;
-        prompt = null;
-        pendingDelete = null;
+        pane = 'home';
+        fx = null;
+        fxDir = '';
         yanked = null;
+        panes = null;
+        plannedFor = null;
+        noteHistory.reset();
       }
       if (editSession && editSession.vaultID !== vid) exitEdit();
       const b = vid ? books.bookForVault(vid) : null;
@@ -274,55 +234,23 @@
     if (activeRevoked) untrack(() => exitEdit());
   });
 
-  // The preview follows the cursor (yazi): a note under the cursor is
-  // loaded into the preview column, a folder clears the selection.
-  // Rapid j/k is debounced so holding a key does not fire one content
-  // request per row; clicks and jumps select immediately.
-  const PREVIEW_DEBOUNCE_MS = 120;
-  let debounceNext = false;
-  let selTimer: ReturnType<typeof setTimeout> | null = null;
-  // A primitive, so the effect below re-runs when the cursor moves to
-  // another row — not when the tree is merely re-derived (refresh,
-  // feed changes) with the cursor still on the same row.
-  const cursorNoteID = $derived(nav.current?.kind === 'note' ? nav.current.note.id : null);
-  const cursorKey = $derived(nav.current?.key ?? null);
+  // A note that no longer exists (deleted here or elsewhere) returns to
+  // the book's home.
   $effect(() => {
-    void cursorKey;
-    const id = cursorNoteID;
-    untrack(() => {
-      if (selTimer) clearTimeout(selTimer);
-      selTimer = null;
-      if (id === notes.selectedID) return;
-      // Never yank the note out from under an active editor or a note
-      // being created.
-      if (editSession || creating) return;
-      if (debounceNext) {
-        selTimer = setTimeout(() => {
-          selTimer = null;
-          if (!editSession) void notes.select(id);
-        }, PREVIEW_DEBOUNCE_MS);
-      } else {
-        void notes.select(id);
-      }
-      debounceNext = false;
-    });
+    if (pane === 'note' && !notes.selectedID) untrack(() => (pane = 'home'));
+  });
+  // A note selected from elsewhere (just created, a store-level select)
+  // opens: the home never sits on top of a selected note.
+  $effect(() => {
+    if (pane === 'home' && notes.selectedID) untrack(() => (pane = 'note'));
   });
 
-  // A note selected from elsewhere (created, opened via a link) is
-  // revealed in its folder.
+  // The last opened note, per book, per device.
   $effect(() => {
-    const id = notes.selectedID;
-    void notes.list; // re-run once a just-created note reaches the list
-    untrack(() => {
-      // A pending debounced preview means the user is moving away; a
-      // note being created is revealed once it reached its folder.
-      if (id && !selTimer && !creating) nav.reveal(id);
-    });
-  });
-
-  // Leaving a note that no longer exists returns to browsing.
-  $effect(() => {
-    if (pane === 'note' && !notes.selectedID) untrack(() => (pane = 'browse'));
+    const vid = vaults.selectedID;
+    const id = pane === 'note' ? notes.selectedID : null;
+    if (!vid || !id || plannedFor !== vid) return;
+    untrack(() => rememberLastNote(vid, id));
   });
 
   onMount(() => {
@@ -359,28 +287,24 @@
 
   const layout = $derived(
     paneLayout({
-      narrow: narrowView,
       splitNarrow,
-      pane,
       editing: editMode && !!editSession,
       split: editMode && editorSettings.value.editMode === 'source' && editorSettings.value.previewSplit && !!editSession?.editable,
-      mainHasNote: !!notes.selectedID && !!notes.content && !(pane === 'browse' && (nav.current?.kind === 'folder' || !showPreview)),
+      mainHasNote: pane === 'note' && !!notes.selectedID && !!notes.content,
     }),
   );
   /** The focused pane when it is on screen; else the pane the current
    *  mode implies. */
   const activePane: PaneId = $derived.by(() => {
     if (focusedPane === 'leaf' && activeIsSecondary) return 'leaf';
-    const all = [...layout.order, ...(layout.stack ?? [])];
-    if (focusedPane && all.includes(focusedPane)) return focusedPane;
+    if (focusedPane && panesOf(layout).includes(focusedPane)) return focusedPane;
     if (editMode && editSession) return 'editor';
-    return pane === 'note' ? 'main' : 'explorer';
+    return 'main';
   });
 
   /** Move focus `dir`; false when no pane lies that way. With several
-   *  note panes, h/j/k/l follow the pane tree's geometry; the explorer
-   *  is left of everything, the editor | preview pair of the primary
-   *  pane moves inside first. */
+   *  note panes, h/j/k/l follow the pane tree's geometry; the editor |
+   *  preview pair of the primary pane moves inside first. */
   function navigatePane(dir: PaneDir): boolean {
     if (multi && panes) return navigateTree(dir);
     const from = activePane;
@@ -393,17 +317,11 @@
   function navigateTree(dir: PaneDir): boolean {
     const t = panes!;
     const cur = activeLeafId;
-    const inExplorer = activePane === 'explorer' && !activeIsSecondary;
     if (dir === 'w' || dir === 'p') {
       const to = dir === 'w' ? cycle(t, cur, 1) : (prevLeaf && findLeaf(t.root, prevLeaf) ? prevLeaf : null);
       if (!to || to === cur) return false;
       prevLeaf = cur;
       focusLeaf(to);
-      return true;
-    }
-    if (inExplorer) {
-      if (dir !== 'l') return false;
-      focusLeaf(cur);
       return true;
     }
     // Inside the primary pane: editor ⇄ split preview first.
@@ -413,25 +331,15 @@
       if (dir === 'h' && inner === 'split') return void focusPaneEl('editor', 'split'), true;
     }
     const to = neighbor(t, cur, dir);
-    if (to) {
-      prevLeaf = cur;
-      focusLeaf(to, dir);
-      return true;
-    }
-    if (dir === 'h' && !narrowView) {
-      prevLeaf = cur;
-      void focusPaneEl('explorer');
-      return true;
-    }
-    return false;
+    if (!to) return false;
+    prevLeaf = cur;
+    focusLeaf(to, dir);
+    return true;
   }
   let prevLeaf: string | null = null;
 
   async function focusPaneEl(to: PaneId, from: PaneId | null = activePane): Promise<void> {
     switch (to) {
-      case 'explorer':
-        await focusColumn(true);
-        return;
       case 'main':
         readerEl()?.focus({ preventScroll: true });
         return;
@@ -452,9 +360,7 @@
   }
 
   onDestroy(() => {
-    if (selTimer) clearTimeout(selTimer);
     if (hintTimer) clearTimeout(hintTimer);
-    if (toastTimer) clearTimeout(toastTimer);
     if (pendingTimer) clearTimeout(pendingTimer);
     hoverIntent.cancel();
     void offline.watchConflicts(null);
@@ -468,10 +374,6 @@
     // Drop the per-vault cache so the next vault load starts clean.
     void notes.openVault(null);
   });
-
-  function back(): void {
-    books.openPicker();
-  }
 
   function overlayOpen(): boolean {
     return !!(uiState.accountModal || uiState.createBookOpen || showSettings || uiState.settings || uiState.helpOpen || uiState.themePickerOpen || paletteMode || hintsOpen || menu || fx || hover?.keyboard);
@@ -516,14 +418,6 @@
     // the reader keys keep working around it.
     const taskBox = (e.target as HTMLElement | null)?.matches?.('input[type="checkbox"][data-task]') ?? false;
     if (isEditableTarget(e.target) && !taskBox) return;
-
-    // Inline delete confirmation owns y/n/Enter/Esc.
-    if (pendingDelete) {
-      e.preventDefault();
-      if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') void confirmDelete();
-      else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape' || e.key === 'q') pendingDelete = null;
-      return;
-    }
 
     // Pane navigation: Ctrl-h/j/k/l, Ctrl-w h/j/k/l/w/p. (The editor
     // routes its own, vim-mode aware, see NoteEditor.)
@@ -580,23 +474,19 @@
     }
 
     // In edit mode, leaving is an explicit command only (Done button,
-    // Mod-Enter, Mod-E, vim :q) — never a stray Esc. The explorer
-    // column keeps its keys while the editor is open.
-    if (editMode && activePane !== 'explorer' && activePane !== 'leaf') return;
+    // Mod-Enter, Mod-E, vim :q) — never a stray Esc.
+    if (editMode && activePane !== 'leaf') return;
 
-    const action = keymap.feed(e, shellContext());
+    // Enter / Space on a focused button or link keep their meaning.
+    const t = e.target as HTMLElement | null;
+    if ((e.key === 'Enter' || e.key === ' ') && t?.matches?.('button, a[href], [role="button"]')) return;
+
+    const action = keymap.feed(e, 'reader');
     syncPending();
     if (!action) return;
     e.preventDefault();
     if (action.kind === 'pending') return;
     runAction(action);
-  }
-
-  /** Explorer keys or reader keys, by the focused pane. */
-  function shellContext(): 'explorer' | 'reader' {
-    if (activePane === 'explorer') return 'explorer';
-    if (activePane === 'main' || activePane === 'leaf') return 'reader';
-    return pane === 'note' ? 'reader' : 'explorer';
   }
 
   function handlePreviewKey(e: KeyboardEvent): void {
@@ -654,13 +544,9 @@
     }
   }
 
-  /** Note id the next action applies to: the open note in the reader,
-   *  else the note under the browser cursor. */
+  /** The note an action applies to: the open note, if any. */
   function noteUnderFocus(): string | null {
-    if (pane === 'note' && activePane !== 'explorer') return notes.selectedID;
-    if (activePane === 'main' && notes.selectedID) return notes.selectedID;
-    const cur = nav.current;
-    return cur?.kind === 'note' ? cur.note.id : null;
+    return pane === 'note' ? notes.selectedID : null;
   }
 
   /** Reader keys in a secondary pane; false = not pane-specific. */
@@ -669,9 +555,7 @@
     if (!h) return false;
     switch (a.kind) {
       case 'edit': void h.enterEdit(); return true;
-      case 'close':
-      case 'parent':
-      case 'clearOrBack': closeLeaf(activeLeafId); return true;
+      case 'close': closeLeaf(activeLeafId); return true;
       case 'yank': {
         const el = h.element()?.querySelector('.md-body');
         const sel = window.getSelection?.()?.toString();
@@ -679,7 +563,6 @@
         return true;
       }
       case 'rename':
-      case 'delete':
       case 'open':
         return true;
       default:
@@ -689,66 +572,53 @@
 
   function runAction(a: ShellAction): void {
     if (activePane === 'leaf' && runLeafAction(a)) return;
-    const reader = shellContext() === 'reader';
-    const page = currentCol?.pageRows() ?? 10;
+    const home = pane === 'home';
     switch (a.kind) {
       case 'move':
-        if (reader) scrollNote(60 * a.n);
-        else { debounceNext = Math.abs(a.n) === 1; nav.move(a.n); }
+        if (home) homeMove(a.n);
+        else scrollNote(60 * a.n);
         return;
       case 'halfPage':
-        if (reader) scrollNote(a.dir > 0 ? 'half' : '-half');
-        else { debounceNext = true; nav.move(a.dir * Math.ceil(page / 2)); }
+        if (home) homeMove(a.dir * 4);
+        else scrollNote(a.dir > 0 ? 'half' : '-half');
         return;
       case 'page':
-        if (reader) scrollNote(a.dir > 0 ? 'page' : '-page');
-        else { debounceNext = true; nav.move(a.dir * page); }
+        if (home) homeMove(a.dir * 8);
+        else scrollNote(a.dir > 0 ? 'page' : '-page');
         return;
       case 'top':
-        if (reader) scrollNote('top');
-        else nav.top();
+        if (home) homeFocus(0);
+        else scrollNote('top');
         return;
       case 'bottom':
-        if (reader) scrollNote('bottom');
-        else nav.bottom();
+        if (home) homeFocus(recents.length - 1);
+        else scrollNote('bottom');
         return;
+      // h / ← / ⌫ / -: the explorer, at this note (vim-vinegar's `-`).
       case 'parent':
-        if (reader) leaveNote();
-        else { nav.left(); void focusColumn(); }
+      case 'floatExplorer':
+        openFloating();
         return;
       case 'open':
-        if (!reader) activate();
+        if (home) openFloating();
         return;
       case 'historyBack':
-        if (reader) leaveNote();
-        nav.historyBack();
-        void focusColumn();
+      case 'historyForward': {
+        const id = a.kind === 'historyBack' ? noteHistory.goBack() : noteHistory.goForward();
+        if (id) openIn(id, 'current', primaryLeaf, { history: false });
+        else flash(a.kind === 'historyBack' ? 'no earlier note' : 'no later note');
         return;
-      case 'historyForward':
-        if (reader) leaveNote();
-        nav.historyForward();
-        void focusColumn();
-        return;
+      }
       case 'home':
-        goHome();
+        openFloating({ root: true });
         return;
       case 'filter':
-        void openFilter();
-        return;
-      case 'nextMatch':
-      case 'prevMatch':
-        debounceNext = true;
-        if (!nav.findNext(a.kind === 'nextMatch' ? 1 : -1)) flash('no filter yet — / to filter');
-        return;
-      case 'clearOrBack':
-        if (reader) leaveNote();
-        else if (nav.filter) { nav.setFilter(''); filterOpen = false; }
-        // Explorer beside an open note / editor: back to the note.
-        else if (pane === 'note') void focusPaneEl(editMode && editSession ? 'editor' : 'main');
-        else back();
+        openFloating({ initial: 'filter' });
         return;
       case 'close':
-        leaveNote();
+        if (!home) closeLeaf();
+        return;
+      case 'clearOrBack':
         return;
       case 'create':
         beginCreate();
@@ -760,18 +630,10 @@
         beginDelete();
         return;
       case 'yank':
-        if (reader) void copyNoteText();
-        else yank();
+        if (!home) void copyNoteText();
         return;
       case 'paste':
-        void paste();
-        return;
-      case 'toggleHidden':
-        nav.toggleHidden();
-        flash(nav.showHidden ? 'showing hidden files' : 'hiding dot-files');
-        return;
-      case 'togglePreview':
-        showPreview = !showPreview;
+        openFloating({ initial: 'paste' });
         return;
       case 'refresh':
         void notes.refresh();
@@ -781,6 +643,7 @@
         const target = noteUnderFocus();
         if (target && editMode && editSession?.noteID === target) void focusPaneEl('editor');
         else if (target) void editNote(target);
+        else if (home) openFloating();
         return;
       }
       case 'palette':
@@ -799,7 +662,7 @@
         books.openShortcut(a.n);
         return;
       case 'picker':
-        books.openPicker();
+        openBooks();
         return;
       case 'prevBook':
       case 'nextBook':
@@ -811,9 +674,6 @@
         return;
       case 'menu':
         openMenuAtCursor();
-        return;
-      case 'floatExplorer':
-        openFloating();
         return;
       case 'hover':
         hoverKey(readerLinkTarget(), null, leafPath());
@@ -834,71 +694,42 @@
     books.setActive(order[(i + dir + order.length) % order.length].id);
   }
 
-  // ---- browser actions ---------------------------------------------------
+  // ---- the book's home ------------------------------------------------------
 
-  /** l / Enter / → : descend into a folder, or open the note. */
-  function activate(): void {
-    const note = nav.right();
-    if (note) void openNote(note.note.id);
-    else focusColumn();
+  const recents = $derived(recentNotes(notes.list, 8));
+  let homeIndex = $state(-1);
+
+  function homeFocus(i: number): void {
+    if (recents.length === 0) return;
+    homeIndex = Math.max(0, Math.min(recents.length - 1, i));
+    homeEl?.querySelector<HTMLElement>(`[data-recent="${homeIndex}"]`)?.focus({ preventScroll: false });
   }
 
-  async function openNote(id: string): Promise<void> {
-    // Per-device preference: open straight into the editor.
-    if (editorSettings.value.openIn === 'editing') return editNote(id);
-    if (notes.selectedID !== id) void notes.select(id);
-    await withViewTransition(async () => {
-      pane = 'note';
-      await tick();
-    });
-    readerEl()?.focus();
-  }
-
-  function leaveNote(): void {
-    if (pane === 'browse') return void focusColumn();
-    void withViewTransition(async () => {
-      pane = 'browse';
-      await tick();
-    });
-    void focusColumn();
-  }
-
-  function goHome(): void {
-    pane = 'browse';
-    nav.home();
-    void focusColumn();
-  }
-
-  async function focusColumn(force = false): Promise<void> {
-    await tick();
-    // Do not steal focus from a dialog or form control.
+  function homeMove(d: number): void {
     const a = document.activeElement as HTMLElement | null;
-    if (!force && a && a !== document.body && isEditableTarget(a)) return;
-    currentColEl?.focus({ preventScroll: true });
+    const at = a?.dataset?.recent != null ? Number(a.dataset.recent) : homeIndex;
+    homeFocus(at < 0 ? (d > 0 ? 0 : recents.length - 1) : at + d);
   }
 
-  async function openFilter(): Promise<void> {
-    filterOpen = true;
-    await tick();
-    filterInput?.focus();
-    filterInput?.select();
+  /** Close the open note: back to the book's home. */
+  function closeNote(): void {
+    if (editMode) exitEdit();
+    const vid = vaults.selectedID;
+    if (vid) rememberLastNote(vid, null);
+    void withViewTransition(async () => {
+      pane = 'home';
+      panes = null;
+      await tick();
+    });
+    void notes.select(null);
+    homeIndex = -1;
+    void tick().then(() => homeEl?.focus({ preventScroll: true }));
   }
 
-  function onFilterKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      nav.setFilter('');
-      filterOpen = false;
-      void focusColumn(true);
-    } else if (e.key === 'Enter') {
-      // Keep the filter, hand the keys back to the column.
-      e.preventDefault();
-      filterOpen = nav.filter !== '';
-      void focusColumn(true);
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      nav.move(e.key === 'ArrowDown' ? 1 : -1);
-    }
+  // ---- opening notes ----------------------------------------------------------
+
+  function openNote(id: string): void {
+    openIn(id, 'current', primaryLeaf);
   }
 
   function scrollNote(by: number | 'top' | 'bottom' | 'half' | '-half' | 'page' | '-page'): void {
@@ -907,7 +738,7 @@
     if (!el) return;
     const h = el.clientHeight;
     const smooth = (top: number) => {
-      if (typeof el.scrollTo === 'function') el.scrollTo({ top, behavior: reducedMotion() ? 'auto' : 'smooth' });
+      if (typeof el.scrollTo === 'function') el.scrollTo({ top, behavior: scrollBehavior() });
       else el.scrollTop = top;
     };
     if (by === 'top') smooth(0);
@@ -919,167 +750,63 @@
     else el.scrollTop += by;
   }
 
-  function reducedMotion(): boolean {
-    try {
-      return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    } catch {
-      return false;
-    }
-  }
-
   async function editNote(id: string): Promise<void> {
-    if (notes.selectedID !== id) await notes.select(id);
+    if (notes.selectedID !== id) {
+      noteHistory.visit(id);
+      await notes.select(id);
+    }
     if (notes.selectedID !== id) return;
     pane = 'note';
     await enterEdit();
   }
 
-  // Pointer: current column — folder enters, note previews; double
-  // click opens. Parent column — jump there. Preview column (folder
-  // children) — enter the folder with that child selected.
-  function pickCurrent(i: number, e: Entry): void {
-    nav.setCursor(i);
-    if (e.kind === 'folder') nav.right();
-    void focusColumn();
-  }
-
-  function openCurrent(i: number, e: Entry): void {
-    nav.setCursor(i);
-    if (e.kind === 'note') void openNote(e.note.id);
-  }
-
-  function pickParent(_i: number, e: Entry): void {
-    pane = 'browse';
-    if (e.kind === 'folder') nav.goTo(e.path);
-    else nav.goTo(parentDir(nav.dir) ?? '', e.key);
-    void focusColumn();
-  }
-
-  function pickPreview(_i: number, e: Entry): void {
-    const cur = nav.current;
-    if (cur?.kind !== 'folder') return;
-    nav.goTo(cur.path, e.key);
-    void focusColumn();
-  }
-
-  function pickCrumb(path: string): void {
-    pane = 'browse';
-    nav.goTo(path);
-    void focusColumn();
-  }
-
-  // ---- file operations (a / r / d / y / p) -------------------------------
+  // ---- file operations (run by the floating explorer) ---------------------------
 
   function errText(e: unknown): string {
     return e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
   }
 
-  async function openPrompt(p: Prompt, caretAtStart = false): Promise<void> {
-    prompt = p;
-    promptErr = null;
-    await tick();
-    promptInput?.focus();
-    if (caretAtStart) promptInput?.setSelectionRange(0, 0);
-    else promptInput?.select();
-  }
-
   function beginCreate(): void {
     if (structuralOffline) return showOfflineHint();
-    if (pane === 'note') leaveNote();
-    void openPrompt({ kind: 'create', text: '' });
+    openFloating({ initial: 'create' });
   }
 
   /** `a` prompt prefilled with `.canvas` (POST kind:"canvas"). */
   function beginCreateCanvas(): void {
     if (structuralOffline) return showOfflineHint();
-    if (pane === 'note') leaveNote();
-    void openPrompt({ kind: 'create', text: '.canvas' }, true);
+    openFloating({ initial: 'createCanvas' });
   }
 
   function beginRename(): void {
-    const cur = pane === 'note' ? nav.entries.find((x) => x.kind === 'note' && x.note.id === notes.selectedID) : nav.current;
-    if (!cur) return;
-    if (structuralOffline && !(cur.kind === 'folder' && cur.virtual)) return showOfflineHint();
-    void openPrompt({ kind: 'rename', entry: cur, text: cur.kind === 'folder' ? cur.name : (cur.note.title ?? cur.name) });
+    if (structuralOffline) return showOfflineHint();
+    openFloating({ initial: 'rename' });
   }
 
   function beginDelete(): void {
-    const cur = pane === 'note' ? nav.entries.find((x) => x.kind === 'note' && x.note.id === notes.selectedID) : nav.current;
-    if (!cur) return;
-    if (cur.kind === 'folder') {
-      if (cur.virtual) {
-        nav.removeFolder(cur.path);
-        flash(`removed empty folder ${cur.name}/`);
-      } else {
-        flash('delete the notes inside to remove a folder', 'warn');
-      }
-      return;
-    }
     if (structuralOffline) return showOfflineHint();
-    pendingDelete = cur;
+    openFloating({ initial: 'delete' });
   }
 
-  function cancelPrompt(): void {
-    prompt = null;
-    promptErr = null;
-    void focusColumn(true);
-  }
-
-  function onPromptKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      cancelPrompt();
-    }
-  }
-
-  async function submitPrompt(): Promise<void> {
-    const p = prompt;
-    const plan = promptPlan;
-    if (!p || !plan || busy) return;
-    if (plan.kind === 'error') {
-      promptErr = plan.message;
-      return;
-    }
-    if (plan.kind === 'none') return cancelPrompt();
-    busy = true;
-    promptErr = null;
-    try {
-      await runPlan(p, plan, nav);
-      prompt = null;
-      void focusColumn(true);
-    } catch (e) {
-      promptErr = errText(e);
-    } finally {
-      busy = false;
-    }
+  function showOfflineHint(): void {
+    offlineHint = OFFLINE_HINT;
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => (offlineHint = null), 4000);
   }
 
   /** POST (always at the book root), then PATCH the path into `folder`. */
-  async function createNote(title: string, folder: string, body = '', kind?: 'canvas'): Promise<void> {
-    return createNoteIn(nav, title, folder, body, kind);
-  }
-
   async function createNoteIn(n: MillerNav, title: string, folder: string, body = '', kind?: 'canvas'): Promise<void> {
-    creating = true;
-    try {
-      const created = await notes.create(kind ? { title, body, kind } : { title, body });
-      if (!created) return;
-      let final = created;
-      if (folder) {
-        const file = normalizePath(created.path || created.id + '.md').split('/').pop()!;
-        final = (await notes.patch(created.id, { path: `${folder}/${file}` })) ?? created;
-        nav.removeFolder(folder); // real now
-        if (n !== nav) n.removeFolder(folder);
-      }
-      n.reveal(final.id);
-      if (n !== nav) nav.reveal(final.id);
-    } finally {
-      creating = false;
+    const created = await notes.create(kind ? { title, body, kind } : { title, body });
+    if (!created) return;
+    let final = created;
+    if (folder) {
+      const file = normalizePath(created.path || created.id + '.md').split('/').pop()!;
+      final = (await notes.patch(created.id, { path: `${folder}/${file}` })) ?? created;
+      n.removeFolder(folder); // real now
     }
+    n.reveal(final.id);
   }
 
-  async function moveFolder(from: string, to: string, ex: MillerNav = nav): Promise<void> {
+  async function moveFolder(from: string, to: string, ex: MillerNav): Promise<void> {
     if (ex.extraDirs.has(from) && !notes.list.some((n) => movedPath(n.path, from, to))) {
       ex.removeFolder(from);
       ex.addFolder(to);
@@ -1098,44 +825,6 @@
     flash(`moved ${moves.length} ${moves.length === 1 ? 'note' : 'notes'} to ${to}/`);
   }
 
-  async function confirmDelete(): Promise<void> {
-    const entry = pendingDelete;
-    pendingDelete = null;
-    if (!entry || entry.kind !== 'note') return;
-    try {
-      if (notes.selectedID !== entry.note.id) await notes.select(entry.note.id);
-      await notes.deleteSelected();
-      flash(`deleted ${entry.name}`);
-      if (pane === 'note') leaveNote();
-    } catch (e) {
-      flash(errText(e), 'error');
-    }
-  }
-
-  function yank(): void {
-    const cur = nav.current;
-    if (cur?.kind !== 'note') return flash('y works on notes', 'warn');
-    yanked = cur;
-    flash(`yanked ${cur.name} — p to paste a copy`);
-  }
-
-  async function paste(): Promise<void> {
-    const y = yanked;
-    if (!y || y.kind !== 'note') return flash('nothing yanked — y on a note first');
-    if (structuralOffline) return showOfflineHint();
-    const vid = vaults.selectedID;
-    if (!vid) return;
-    try {
-      const src = await api.getNoteContent(vid, y.note.id);
-      const taken = new Set(notes.list.map((n) => n.title));
-      const isCanvas = noteViewKind({ path: y.note.path, kind: y.note.kind ?? src.kind }) === 'canvas';
-      await createNote(copyTitle(y.note.title ?? y.name, taken), nav.dir, src.body ?? '', isCanvas ? 'canvas' : undefined);
-      flash(`pasted a copy of ${y.name}`);
-    } catch (e) {
-      flash(errText(e), 'error');
-    }
-  }
-
   async function copyNoteText(): Promise<void> {
     const sel = window.getSelection?.()?.toString();
     const text = sel || notes.content?.body || '';
@@ -1145,6 +834,11 @@
     } catch {
       flash('clipboard unavailable', 'warn');
     }
+  }
+
+  function copyLinkTo(e: NoteEntry, fromPath: string): void {
+    const link = markdownLink(e.note.title ?? e.name, fromPath, e.note.path || e.note.id + '.md');
+    void navigator.clipboard?.writeText(link).then(() => flash('copied ' + link), () => flash('clipboard unavailable', 'warn'));
   }
 
   // ---- links -----------------------------------------------------------------
@@ -1193,115 +887,62 @@
     if (ch) v.dispatch({ changes: ch, userEvent: 'input.toggle-task' });
   }
 
-  // ---- context menu, hints, drag & drop ------------------------------------------
+  // ---- context menu (the open note) ----------------------------------------------
 
-  function entryForOpenNote(): Entry | null {
-    return nav.entries.find((x) => x.kind === 'note' && x.note.id === notes.selectedID) ?? null;
+  function entryFor(n: NoteSummary | null | undefined): NoteEntry | null {
+    if (!n) return null;
+    const path = normalizePath(n.path || n.id + '.md');
+    return { kind: 'note', key: 'n:' + n.id, name: n.title ?? path.split('/').pop() ?? n.id, path, note: n };
   }
 
-  function openMenu(x: number, y: number, entry: Entry | null, reader = false): void {
-    const items = menuFor(entry, { offline: structuralOffline, canPaste: !!yanked, reader });
-    const title = entry ? (entry.kind === 'note' ? (entry.note.title ?? entry.name) : entry.name + '/') : (nav.dir || (vaults.selected?.name ?? 'book'));
+  function openMenu(x: number, y: number, entry: Entry | null): void {
+    const items = menuFor(entry, { offline: structuralOffline, canPaste: !!yanked, reader: true });
+    const title = entry ? (entry.kind === 'note' ? (entry.note.title ?? entry.name) : entry.name + '/') : (vaults.selected?.name ?? 'book');
     menu = { x, y, items, entry, title };
-  }
-
-  function onRowContext(i: number, e: Entry, ev: MouseEvent): void {
-    pane = 'browse';
-    nav.setCursor(i);
-    openMenu(ev.clientX, ev.clientY, e);
   }
 
   function onReaderContext(ev: MouseEvent): void {
     const t = ev.target as HTMLElement | null;
     // Keep the browser menu on links, images, selections and fields.
     if (pane !== 'note' || editMode || t?.closest('a, img, input, textarea, [contenteditable]') || window.getSelection?.()?.toString()) return;
-    const entry = entryForOpenNote();
+    const entry = entryFor(notes.selected);
     if (!entry) return;
     ev.preventDefault();
-    openMenu(ev.clientX, ev.clientY, entry, true);
-  }
-
-  function onColumnContext(ev: MouseEvent): void {
-    // Empty space in the current column (rows handle their own).
-    if ((ev.target as HTMLElement | null)?.closest('[role="option"]')) return;
-    ev.preventDefault();
-    openMenu(ev.clientX, ev.clientY, null);
+    openMenu(ev.clientX, ev.clientY, entry);
   }
 
   function openMenuAtCursor(): void {
-    if (pane === 'note') {
-      const entry = entryForOpenNote();
-      const r = readerEl()?.getBoundingClientRect();
-      if (entry) openMenu((r?.left ?? 0) + 48, (r?.top ?? 0) + 48, entry, true);
-      return;
-    }
-    const row = currentColEl?.querySelector<HTMLElement>('.row.cursor');
-    const r = row?.getBoundingClientRect() ?? currentColEl?.getBoundingClientRect();
-    openMenu((r?.left ?? 0) + 24, (r?.bottom ?? 0) + 2, nav.current ?? null);
+    if (pane !== 'note') return;
+    const entry = entryFor(notes.selected);
+    const r = readerEl()?.getBoundingClientRect();
+    if (entry) openMenu((r?.left ?? 0) + 48, (r?.top ?? 0) + 48, entry);
   }
 
   function runMenu(it: MenuItem): void {
-    const reader = pane === 'note';
     switch (it.action) {
       case 'copyLink': {
-        const e = menu?.entry ?? (reader ? entryForOpenNote() : nav.current);
-        if (e?.kind !== 'note') return;
-        const from = reader ? (notes.selected?.path ?? '') : '';
-        const link = markdownLink(e.note.title ?? e.name, from, e.note.path || e.note.id + '.md');
-        void navigator.clipboard?.writeText(link).then(() => flash('copied ' + link), () => flash('clipboard unavailable', 'warn'));
+        const e = menu?.entry ?? entryFor(notes.selected);
+        if (e?.kind === 'note') copyLinkTo(e, notes.selected?.path ?? '');
         return;
       }
       case 'newFolder':
         if (structuralOffline) return showOfflineHint();
-        void openPrompt({ kind: 'create', text: '/' }, true);
+        openFloating({ initial: 'newFolder' });
         return;
       default:
         runAction({ kind: it.action } as ShellAction);
     }
   }
 
-  /** Drag a note onto a folder row: move it there (PATCH path). */
-  async function dropNote(noteKey: string, target: Entry): Promise<void> {
-    if (target.kind !== 'folder') return;
-    if (structuralOffline) return showOfflineHint();
-    const note = notes.list.find((n) => 'n:' + n.id === noteKey);
-    if (!note) return;
-    const file = normalizePath(note.path || note.id + '.md').split('/').pop()!;
-    const path = `${target.path}/${file}`;
-    if (normalizePath(note.path) === path) return;
-    try {
-      const updated = await notes.patch(note.id, { path });
-      if (updated) {
-        nav.removeFolder(target.path);
-        flash(`moved ${file} → ${target.path}/`);
-      }
-    } catch (e) {
-      flash(errText(e), 'error');
-    }
-  }
-
-  // Miller columns slide a little in the direction of travel.
-  let lastDir = untrack(() => nav.dir);
-  $effect(() => {
-    const d = nav.dir;
-    untrack(() => {
-      if (d === lastDir) return;
-      const deeper = d.length > lastDir.length && d.startsWith(lastDir);
-      lastDir = d;
-      animate(currentColEl, [{ transform: `translateX(${deeper ? 14 : -14}px)`, opacity: 0.55 }, { transform: 'none', opacity: 1 }], 170);
-    });
-  });
-
   // ---- panes: splits of notes (SPEC-PARTE2 §3) ------------------------------
   //
   // The note area is a tree of panes (lib/pane-tree.ts). `panes` is null
   // while there is a single pane (the classic reader/editor). The
-  // *primary* leaf renders the note the explorer previews (notes.selected
-  // + this view's editor session); every other leaf is a NotePane with
-  // its own note, reader and editor. Live sessions are shared through
-  // editorPool, so two panes on one note edit one Y.Doc. A pane renders
-  // the note view its kind picks (lib/note-views.ts): markdown today,
-  // kanban / canvas when registered.
+  // *primary* leaf renders the open note (notes.selected + this view's
+  // editor session); every other leaf is a NotePane with its own note,
+  // reader and editor. Live sessions are shared through editorPool, so
+  // two panes on one note edit one Y.Doc. A pane renders the note view
+  // its kind picks (lib/note-views.ts): markdown, kanban, canvas.
 
   type NotePaneHandle = {
     focus(): void;
@@ -1348,17 +989,22 @@
 
   /** Open `note` in a new pane beside (`row`) or below (`col`) leaf `at`. */
   async function splitWith(dir: SplitDir, note: string | null, at: string = activeLeafId): Promise<void> {
+    // From the home, the first note simply opens.
+    if (pane === 'home' || !notes.selectedID) {
+      if (note) openNote(note);
+      else flash('open a note first', 'warn');
+      return;
+    }
     const base = ensureTree();
     if (!base) return flash('open a note first', 'warn');
     const target = note ?? findLeaf(base.root, at)?.note ?? notes.selectedID;
     if (!target) return;
     const next = splitPane(base, findLeaf(base.root, at) ? at : base.active, dir, target);
     if (!next) return flash('too many panes — close one first (⌃w q)', 'warn');
-    if (pane !== 'note') pane = 'note';
     panes = next;
     await tick();
-    const el = homeEl?.querySelector<HTMLElement>(`[data-leaf="${next.active}"]`);
-    animate(el, [{ opacity: 0, transform: dir === 'row' ? 'translateX(14px)' : 'translateY(12px)' }, { opacity: 1, transform: 'none' }], 200);
+    const el = rootEl?.querySelector<HTMLElement>(`[data-leaf="${next.active}"]`);
+    animate(el, [{ opacity: 0, transform: dir === 'row' ? 'translateX(18px) scale(0.985)' : 'translateY(14px) scale(0.985)' }, { opacity: 1, transform: 'none' }], 240);
     focusedPane = 'leaf';
     paneRefs[next.active]?.focus();
     requestAnimationFrame(() => {
@@ -1366,7 +1012,7 @@
     });
   }
 
-  /** Make leaf `id` the primary one (it shows the explorer's note). */
+  /** Make leaf `id` the primary one (it shows notes.selected). */
   function promote(id: string): void {
     if (!panes || id === primaryLeaf) return;
     const l = findLeaf(panes.root, id);
@@ -1375,7 +1021,6 @@
     if (editSession) exitEdit();
     primaryLeaf = id;
     void notes.select(l.note).then(() => {
-      nav.reveal(l.note);
       // The secondary pane released its session with a grace period:
       // the primary picks the same live doc up.
       if (wasEditing) void enterEdit();
@@ -1385,7 +1030,7 @@
   function closeLeaf(id: string = activeLeafId): void {
     if (!panes || paneCount(panes) < 2) {
       if (editMode) exitEditAnimated();
-      else leaveNote();
+      else closeNote();
       return;
     }
     const next = closePane(panes, id);
@@ -1437,8 +1082,6 @@
           const hit = linkCandidates(notes.list, o.arg, { limit: 1 })[0];
           if (!hit) return flash(`no note matches “${o.arg}”`, 'warn');
           note = hit.id;
-        } else if (pane === 'browse' && nav.current?.kind === 'note') {
-          note = nav.current.note.id;
         }
         void splitWith(cmd === 'vsplit' ? 'row' : 'col', note);
         return;
@@ -1463,7 +1106,7 @@
     }
   }
 
-  // The primary leaf follows the note the explorer previews / opens.
+  // The primary leaf follows the open note.
   $effect(() => {
     const id = notes.selectedID;
     untrack(() => {
@@ -1478,12 +1121,14 @@
     });
   });
 
-  // Notes deleted elsewhere close their panes.
+  // Notes deleted elsewhere close their panes and leave the history.
   $effect(() => {
     const list = notes.list;
     untrack(() => {
-      if (!panes || notes.loadingList || notes.stale) return;
+      if (notes.loadingList || notes.stale) return;
       const ids = new Set(list.map((n) => n.id));
+      noteHistory.prune((n) => ids.has(n));
+      if (!panes) return;
       const pruned = pruneNotes(panes, (n) => ids.has(n));
       if (pruned === panes) return;
       if (!pruned || paneCount(pruned) < 2) panes = null;
@@ -1500,7 +1145,7 @@
     const s = panes;
     const prim = primaryLeaf;
     untrack(() => {
-      if (!vid || !restoredFor.has(vid)) return;
+      if (!vid || plannedFor !== vid) return;
       try {
         if (s && paneCount(s) > 1) localStorage.setItem(PANES_KEY + vid, JSON.stringify({ v: 1, state: s, primary: prim }));
         else localStorage.removeItem(PANES_KEY + vid);
@@ -1510,11 +1155,8 @@
     });
   });
 
-  const restoredFor = new Set<string>();
-  /** Restore the book's last layout once its notes are known. */
-  function restoreLayout(vid: string): void {
-    if (restoredFor.has(vid)) return;
-    restoredFor.add(vid);
+  /** The book's saved split layout (pruned to existing notes), or null. */
+  function savedLayout(vid: string): { state: PaneState; primary: string } | null {
     let raw: unknown = null;
     try {
       raw = JSON.parse(localStorage.getItem(PANES_KEY + vid) ?? 'null');
@@ -1523,42 +1165,94 @@
     }
     const o = raw as { state?: unknown; primary?: unknown } | null;
     const parsed = o ? parsePaneState(o.state) : null;
-    if (!parsed) return;
+    if (!parsed) return null;
     const ids = new Set(notes.list.map((n) => n.id));
     const pruned = pruneNotes(parsed, (n) => ids.has(n));
-    if (!pruned || paneCount(pruned) < 2) return;
+    if (!pruned || paneCount(pruned) < 2) return null;
     const prim = typeof o?.primary === 'string' && findLeaf(pruned.root, o.primary) ? o.primary : pruned.active;
-    primaryLeaf = prim;
-    panes = pruned;
-    const note = findLeaf(pruned.root, prim)!.note;
-    void notes.select(note).then(() => {
-      nav.reveal(note);
-      pane = 'note';
-    });
+    return { state: pruned, primary: prim };
   }
+
+  // ---- opening a book (SPEC-PARTE2 §2) ---------------------------------------
+  //
+  // Once the book's list is in: its saved split layout, else its last
+  // note (per device), else the calm home with the explorer floating.
+  $effect(() => {
+    const vid = vaults.selectedID;
+    const ready = !!vid && notes.vaultID === vid && !notes.loadingList;
+    if (!ready || plannedFor === vid) return;
+    untrack(() => {
+      if (uiState.pendingNote?.vault === vid) return; // the deep link decides
+      const saved = savedLayout(vid!);
+      const plan = planBookOpen({
+        notes: notes.list,
+        layoutNote: saved ? findLeaf(saved.state.root, saved.primary)!.note : null,
+        last: lastNote(vid!),
+      });
+      plannedFor = vid;
+      if (plan.kind === 'note') {
+        if (plan.source === 'layout' && saved) {
+          primaryLeaf = saved.primary;
+          panes = saved.state;
+        }
+        noteHistory.visit(plan.note);
+        pane = 'note';
+        void notes.select(plan.note);
+        void tick().then(() => readerEl()?.focus({ preventScroll: true }));
+      } else {
+        pane = 'home';
+        if (plan.explore && !fx && !overlayOpen()) openFloating({ auto: true });
+      }
+    });
+  });
 
   // ---- links: one routing table (SPEC-PARTE2 §3) -----------------------------
 
+  type OpenOpts = {
+    /** The explorer row's name: it morphs into the note title. */
+    from?: HTMLElement | null;
+    /** false for H / L (walking the history itself). */
+    history?: boolean;
+    /** Close the floating explorer as part of the transition. */
+    closeFx?: boolean;
+  };
+
   /** Open note `id` in the current pane, or in a new split. */
-  function openIn(id: string, where: OpenWhere, leaf: string = activeLeafId): void {
+  function openIn(id: string, where: OpenWhere, leaf: string = activeLeafId, o: OpenOpts = {}): void {
     // The layout moves under a still pointer: no card for a moment.
     hoverQuietUntil = Date.now() + 700;
     hoverIntent.hide();
     if (where !== 'current') {
+      if (o.closeFx) fx = null;
       void splitWith(where === 'vsplit' ? 'row' : 'col', id, leaf);
       return;
     }
     if (multi && leaf !== primaryLeaf && panes) {
+      if (o.closeFx) fx = null;
       panes = setNote(panes, leaf, id);
       return;
     }
     if (editMode) exitEdit();
-    void withViewTransition(async () => {
-      await notes.select(id);
-      nav.reveal(id);
+    if (o.history !== false) noteHistory.visit(id);
+    if (editorSettings.value.openIn === 'editing') {
+      if (o.closeFx) fx = null;
+      void editNote(id);
+      return;
+    }
+    // Never wait for the network inside a transition: a body the
+    // explorer preview already fetched paints at once, anything else
+    // shows the reader skeleton until it arrives.
+    const vid = vaults.selectedID;
+    const hit = vid ? peekNote(vid, id) : null;
+    const seed = hit && !hit.stale ? hit.content : null;
+    const update = async () => {
+      if (o.closeFx) fx = null;
+      void notes.select(id, seed);
       pane = 'note';
       await tick();
-    }).then(() => readerEl()?.focus({ preventScroll: true }));
+    };
+    const run = o.from && seed ? sharedTransition('note-title', o.from, update) : withViewTransition(update);
+    void run.then(() => readerEl()?.focus({ preventScroll: true }));
   }
 
   /** Follow an href found in the note at `fromPath`. */
@@ -1647,7 +1341,7 @@
     if (!target) return;
     const el = rect ? null : linkElFor(activeReaderRoot(), l.href);
     const b = rect ?? el?.getBoundingClientRect() ?? { left: 80, top: 80, bottom: 96 };
-    hoverIntent.showNow({ href: l.href, fromPath, leaf, el: el ?? homeEl!, wiki: l.wiki }, 'k:' + l.href);
+    hoverIntent.showNow({ href: l.href, fromPath, leaf, el: el ?? rootEl!, wiki: l.wiki }, 'k:' + l.href);
     hover = { target, anchor: { left: b.left, top: b.top, bottom: b.bottom }, keyboard: true, leaf, returnTo: document.activeElement as HTMLElement | null };
   }
 
@@ -1693,23 +1387,58 @@
     if (!hover?.keyboard) hoverIntent.leave();
   }
 
-  // ---- floating explorer (SPEC-PARTE2 §2) -------------------------------------
+  // ---- floating explorer (SPEC-PARTE2 §2) — the only navigation -------------------
 
-  let fx = $state<{ startNote: string | null; startDir: string } | null>(null);
+  type FxState = { startNote: string | null; startDir: string; level: FxLevel; initial: FxInitial; key: number };
+  let fx = $state<FxState | null>(null);
+  /** The overlay's level as it walks (h at the book root → books). */
+  let fxLevel = $state<FxLevel>('files');
+  /** Folder the explorer last showed (it reopens there with no note). */
+  let fxDir = '';
+  let fxKey = 0;
   let fxLeaf: string | null = null;
+  let yanked = $state<Entry | null>(null);
 
-  function openFloating(): void {
+  /** Open the floating explorer: at the open note's folder, the last
+   *  folder it showed, or the book root (`root`); at the books level
+   *  with `level: 'books'`; running `initial` (a prompt) once open. */
+  function openFloating(o: { level?: FxLevel; initial?: FxInitial; root?: boolean; dir?: string; auto?: boolean } = {}): void {
     hoverIntent.hide();
     fxLeaf = activeLeafId;
     const l = panes ? findLeaf(panes.root, activeLeafId) : null;
-    const note = l?.note ?? notes.selectedID;
-    fx = { startNote: note, startDir: nav.dir };
+    const note = o.root || o.dir != null || pane !== 'note' ? null : (l?.note ?? notes.selectedID);
+    fxLevel = o.level ?? 'files';
+    fx = { startNote: note, startDir: o.root ? '' : (o.dir ?? fxDir), level: fxLevel, initial: o.initial ?? null, key: ++fxKey };
   }
 
-  function fxOpen(id: string, where: OpenWhere): void {
-    const leaf = fxLeaf ?? activeLeafId;
+  /** `gb`, the book button, palette "Switch book": books level. */
+  function openBooks(): void {
+    openFloating({ level: 'books' });
+  }
+
+  function closeFloating(dir?: string): void {
+    if (dir != null) fxDir = dir;
     fx = null;
-    openIn(id, where, leaf);
+    fxLevel = 'files';
+    // Focus returns to the note, or to the home.
+    void tick().then(() => {
+      const a = document.activeElement;
+      if (a && a !== document.body && rootEl?.contains(a)) return;
+      if (pane === 'note') focusLeaf(activeLeafId);
+      else homeEl?.focus({ preventScroll: true });
+    });
+  }
+
+  function fxOpen(id: string, where: OpenWhere, from?: HTMLElement | null): void {
+    const leaf = fxLeaf ?? activeLeafId;
+    const d = notes.list.find((n) => n.id === id);
+    if (d) fxDir = dirOf(d.path);
+    openIn(id, where, leaf, { from, closeFx: true });
+  }
+
+  function fxApp(a: ShellAction): void {
+    closeFloating();
+    runAction(a);
   }
 
   const fxOps: FxOps = {
@@ -1717,10 +1446,16 @@
     run: (p, plan, n) => runPlan(p, plan, n),
     remove: async (entry) => {
       if (entry.kind !== 'note') return;
-      const wasSelected = notes.selectedID === entry.note.id;
-      if (!wasSelected) await notes.select(entry.note.id);
-      await notes.deleteSelected();
-      if (pane === 'note' && wasSelected && !multi) leaveNote();
+      const wasOpen = pane === 'note' && notes.selectedID === entry.note.id;
+      if (multi && wasOpen) closeLeaf(primaryLeaf);
+      const vid = vaults.selectedID;
+      if (!vid) return;
+      if (notes.selectedID === entry.note.id) await notes.deleteSelected();
+      else {
+        await api.deleteNote(vid, entry.note.id);
+        await notes.refresh();
+      }
+      if (wasOpen) rememberLastNote(vid, null);
     },
     paste: async (src, n) => {
       if (src.kind !== 'note') return;
@@ -1732,31 +1467,44 @@
       const isCanvas = noteViewKind({ path: src.note.path, kind: src.note.kind ?? c.kind }) === 'canvas';
       await createNoteIn(n, copyTitle(src.note.title ?? src.name, taken), n.dir, c.body ?? '', isCanvas ? 'canvas' : undefined);
     },
+    move: async (key, folder) => {
+      const note = notes.list.find((n) => 'n:' + n.id === key);
+      if (!note) return null;
+      const file = normalizePath(note.path || note.id + '.md').split('/').pop()!;
+      const path = `${folder.path}/${file}`;
+      if (normalizePath(note.path) === path) return null;
+      const updated = await notes.patch(note.id, { path });
+      return updated ? `moved ${file} → ${folder.path}/` : null;
+    },
+    copyLink: (e) => copyLinkTo(e, pane === 'note' ? (notes.selected?.path ?? '') : ''),
+    refresh: () => void notes.refresh(),
   };
 
-  /** Run a create / rename / move plan against explorer state `n`
-   *  (the main explorer or the floating one). */
-  async function runPlan(p: Prompt | FxPrompt, plan: FxPlan, n: MillerNav): Promise<void> {
+  /** Run a create / rename / move plan against the explorer's state `n`. */
+  async function runPlan(p: FxPrompt, plan: FxPlan, n: MillerNav): Promise<void> {
     if (plan.kind === 'error') throw new Error(plan.message);
     if (plan.kind === 'none') return;
-    if (plan.kind === 'folder' && 'path' in plan) {
-      n.addFolder(plan.path);
-      if (n !== nav) nav.addFolder(plan.path);
-      n.goTo(plan.path);
-      flash(`folder ${plan.path}/ — create a note in it to keep it (a)`);
-    } else if (plan.kind === 'folder') {
-      await moveFolder(plan.from, plan.to, n);
-    } else if (plan.kind === 'note' && 'folder' in plan) {
-      await createNoteIn(n, plan.title, plan.folder, '', plan.noteKind);
-    } else if (plan.kind === 'note' && p.kind === 'rename' && p.entry.kind === 'note') {
-      const input: { title?: string; path?: string } = {};
-      if (plan.title) input.title = plan.title;
-      if (plan.path) input.path = plan.path;
-      const updated = await notes.patch(p.entry.note.id, input);
-      if (updated && plan.path) {
-        n.reveal(updated.id);
-        flash(`moved to ${updated.path}`);
+    try {
+      if (plan.kind === 'folder' && 'path' in plan) {
+        n.addFolder(plan.path);
+        n.goTo(plan.path);
+        flash(`folder ${plan.path}/ — create a note in it to keep it (a)`);
+      } else if (plan.kind === 'folder') {
+        await moveFolder(plan.from, plan.to, n);
+      } else if (plan.kind === 'note' && 'folder' in plan) {
+        await createNoteIn(n, plan.title, plan.folder, '', plan.noteKind);
+      } else if (plan.kind === 'note' && p.kind === 'rename' && p.entry.kind === 'note') {
+        const input: { title?: string; path?: string } = {};
+        if (plan.title) input.title = plan.title;
+        if (plan.path) input.path = plan.path;
+        const updated = await notes.patch(p.entry.note.id, input);
+        if (updated && plan.path) {
+          n.reveal(updated.id);
+          flash(`moved to ${updated.path}`);
+        }
       }
+    } catch (e) {
+      throw new Error(errText(e));
     }
   }
 
@@ -1766,29 +1514,22 @@
   $effect(() => {
     const want = uiState.pendingNote;
     const vid = vaults.selectedID;
-    const ready = notes.vaultID === vid && !notes.loadingList && notes.list.length > 0;
+    const ready = notes.vaultID === vid && !notes.loadingList;
     if (!want || !vid || want.vault !== vid || !ready) return;
     untrack(() => {
       uiState.pendingNote = null;
-      restoredFor.add(vid);
+      plannedFor = vid;
       const n = want.note
         ? notes.list.find((x) => x.id === want.note)
         : notes.list.find((x) => normalizePath(x.path) === normalizePath(want.path ?? ''));
-      if (!n) return flash('that note is not in this book (deleted or moved?)', 'warn');
+      if (!n) {
+        flash('that note is not in this book (deleted or moved?)', 'warn');
+        if (pane === 'home' && !fx) openFloating({ auto: true });
+        return;
+      }
       panes = null;
-      void openNote(n.id);
-      nav.reveal(n.id);
-    });
-  });
-
-  // First list of a book: restore its pane layout.
-  $effect(() => {
-    const vid = vaults.selectedID;
-    const ready = !!vid && notes.vaultID === vid && !notes.loadingList && notes.list.length > 0;
-    if (!ready) return;
-    untrack(() => {
-      if (uiState.pendingNote?.vault === vid) return;
-      restoreLayout(vid!);
+      fx = null;
+      openNote(n.id);
     });
   });
 
@@ -1800,11 +1541,14 @@
     if (!vid || uiState.pendingNote) return;
     const want = formatDeepLink({ vault: vid, note: id ?? undefined });
     try {
-      if (window.location.hash !== want) history.replaceState(history.state, '', want);
+      if (window.location.hash !== want) replaceUrl(want);
     } catch {
       /* sandboxed */
     }
   });
+  function replaceUrl(url: string): void {
+    window.history.replaceState(window.history.state, '', url);
+  }
 
   function copyDeepLink(): void {
     const vid = vaults.selectedID;
@@ -1864,21 +1608,12 @@
       case 'onlyPane': runWin('only'); return;
       case 'equalPanes': runWin('equal'); return;
       case 'explorer': openFloating(); return;
+      case 'books': openBooks(); return;
       case 'readPreview': void focusPaneEl('split'); return;
       case 'menu': openMenuAtCursor(); return;
       case 'reading': exitEditAnimated(); return;
       case 'toggleMode': editorSettings.toggleEditMode(); return;
       case 'settings': uiState.openSettings('editor'); return;
-      case 'confirm': void confirmDelete(); return;
-      case 'submit':
-        if (prompt) void submitPrompt();
-        else if (filterOpen) { filterOpen = nav.filter !== ''; void focusColumn(true); }
-        return;
-      case 'cancel':
-        if (pendingDelete) pendingDelete = null;
-        else if (prompt) cancelPrompt();
-        else if (filterOpen) { nav.setFilter(''); filterOpen = false; void focusColumn(true); }
-        return;
     }
   }
 
@@ -1942,7 +1677,7 @@
       sync.setEditor(vaultID, sess);
       editMode = true;
       vimState = { mode: 'normal', pending: null };
-      pane = 'note'; // the editor gets the wide pane
+      pane = 'note';
     } catch (e) {
       editError = `Failed to load editor: ${(e as Error).message}`;
     } finally {
@@ -2030,15 +1765,13 @@
   }
   const legendCtx: LegendContext = $derived.by(() => {
     if (paletteMode) return 'palette';
-    if (pendingDelete) return 'confirm';
-    if (prompt) return 'prompt';
-    if (filterFocused) return 'filter';
-    if (fx) return 'float';
+    if (fx) return fxLevel === 'books' ? 'books' : 'float';
     if (hover?.keyboard) return 'hover';
+    if (pane === 'home') return 'home';
     if (activePane === 'leaf') return paneInfo[activeLeafId]?.editing ? (eff.vim ? contextForVimMode(vimState.mode) : 'insert') : 'reader';
     if (editMode && editSession && activePane === 'split') return 'preview';
-    if (editMode && editSession && activePane !== 'explorer') return eff.vim ? contextForVimMode(vimState.mode) : 'insert';
-    return shellContextFor(activePane);
+    if (editMode && editSession) return eff.vim ? contextForVimMode(vimState.mode) : 'insert';
+    return 'reader';
   });
   // The Ctrl-w prefix expires like vim's other pending keys.
   $effect(() => {
@@ -2046,16 +1779,11 @@
     const t = setTimeout(() => (panePending = paneKeys.pending), PANE_CHORD_MS + 20);
     return () => clearTimeout(t);
   });
-  function shellContextFor(p: PaneId): 'explorer' | 'reader' {
-    if (p === 'explorer') return 'explorer';
-    if (p === 'main') return 'reader';
-    return pane === 'note' ? 'reader' : 'explorer';
-  }
   const legendPending = $derived.by(() => {
-    if (legendCtx === 'float' || legendCtx === 'hover') return null;
+    if (legendCtx === 'float' || legendCtx === 'books' || legendCtx === 'hover') return null;
     if (panePending) return '⌃w';
     if (legendCtx === 'preview') return previewPending;
-    if (editMode && legendCtx !== 'explorer' && legendCtx !== 'filter') return vimState.pending === eff.leader ? eff.leader : vimState.pending;
+    if (editMode && legendCtx !== 'reader') return vimState.pending === eff.leader ? eff.leader : vimState.pending;
     return shellPending;
   });
   const legendItems = $derived(
@@ -2072,24 +1800,28 @@
         : [],
     }),
   );
-  const legendMode = $derived(
-    legendCtx === 'explorer' ? 'files' : legendCtx === 'float' ? 'explorer' : legendCtx === 'hover' ? 'preview' : legendCtx === 'filter' ? 'filter' : legendCtx === 'prompt' ? (prompt?.kind === 'rename' ? 'rename' : 'new') : legendCtx,
-  );
+  const legendMode = $derived(legendCtx === 'float' ? 'explorer' : legendCtx === 'hover' ? 'preview' : legendCtx);
 
   // ---- palette ------------------------------------------------------------------
 
   const paletteCommands: PaletteCommand[] = $derived([
+    { id: 'explorer', title: 'Open explorer', keys: '-', group: 'files browse yazi floating overlay open navigate', run: () => openFloating() },
+    { id: 'books', title: 'Switch book…', keys: 'gb', group: 'navigate books vault accounts floating', run: openBooks },
+    { id: 'root', title: 'Explorer at book root', keys: 'gh', group: 'navigate home files', run: () => openFloating({ root: true }) },
+    { id: 'filter', title: 'Filter a folder…', keys: '- /', group: 'search files explorer', run: () => openFloating({ initial: 'filter' }) },
     { id: 'new', title: 'New note…', keys: 'a', group: 'create file', run: beginCreate },
     { id: 'new-canvas', title: 'New canvas…', keys: 'a name.canvas', group: 'create canvas json', run: beginCreateCanvas },
-    { id: 'new-folder', title: 'New folder…', keys: 'a dir/', group: 'create directory', run: () => { if (structuralOffline) return showOfflineHint(); void openPrompt({ kind: 'create', text: '/' }, true); } },
-    { id: 'rename', title: 'Rename / move…', keys: 'r', group: 'file', run: beginRename },
-    { id: 'delete', title: 'Delete note', keys: 'd', group: 'file remove', run: beginDelete },
-    { id: 'yank', title: 'Yank (copy) note', keys: 'y', group: 'file duplicate', run: yank },
-    { id: 'paste', title: 'Paste copy here', keys: 'p', group: 'file duplicate', run: () => void paste() },
+    { id: 'new-folder', title: 'New folder…', keys: 'a dir/', group: 'create directory', run: () => { if (structuralOffline) return showOfflineHint(); openFloating({ initial: 'newFolder' }); } },
+    ...(pane === 'note'
+      ? [
+          { id: 'rename', title: 'Rename / move note…', keys: 'r', group: 'file', run: beginRename },
+          { id: 'delete', title: 'Delete note…', keys: '- d', group: 'file remove', run: beginDelete },
+          { id: 'close-note', title: 'Close note', keys: 'q', group: 'home book', run: closeNote },
+        ]
+      : []),
     { id: 'edit', title: editMode ? 'Reading view' : 'Edit note', keys: '⌘E', group: 'editor', run: () => { if (editMode) exitEdit(); else { const t = noteUnderFocus(); if (t) void editNote(t); } } },
     { id: 'live', title: editorSettings.value.editMode === 'live' ? 'Switch to Source mode' : 'Switch to Live Preview', keys: '⌘⇧E', group: 'editor', run: () => editorSettings.toggleEditMode() },
     { id: 'split', title: splitOn ? 'Hide preview beside source' : 'Show preview beside source', keys: '\\p ⌘⌥P', group: 'editor split side by side render', run: toggleSplit },
-    { id: 'explorer', title: 'Floating explorer', keys: '-', group: 'files browse yazi overlay open', run: openFloating },
     { id: 'vsplit', title: 'Split vertically (:vsplit)', keys: '⌃w v', group: 'pane window side by side', run: () => runWin('vsplit') },
     { id: 'hsplit', title: 'Split horizontally (:split)', keys: '⌃w s', group: 'pane window stacked below', run: () => runWin('split') },
     ...(multi
@@ -2099,18 +1831,16 @@
           { id: 'equal-panes', title: 'Equalize panes', keys: '⌃w =', group: 'pane window resize', run: () => runWin('equal') },
         ]
       : []),
+    { id: 'back', title: 'Previous note', keys: 'H', group: 'history back navigate', run: () => runAction({ kind: 'historyBack' }) },
+    { id: 'forward', title: 'Next note', keys: 'L', group: 'history forward navigate', run: () => runAction({ kind: 'historyForward' }) },
     { id: 'hover', title: editorSettings.value.hoverPreview ? 'Turn off hover link previews' : 'Turn on hover link previews', keys: 'K', group: 'preview link card', run: () => editorSettings.update({ hoverPreview: !editorSettings.value.hoverPreview }) },
     { id: 'deeplink', title: 'Copy link to this note', group: 'share url deep link lumi open', run: copyDeepLink },
     { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (hintsOpen = true) },
     { id: 'motion', title: editorSettings.value.reduceMotion ? 'Allow motion' : 'Reduce motion', group: 'view animation accessibility', run: () => editorSettings.update({ reduceMotion: !editorSettings.value.reduceMotion }) },
-    { id: 'filter', title: 'Filter this folder', keys: '/', group: 'search', run: () => void openFilter() },
-    { id: 'preview', title: showPreview ? 'Hide preview column' : 'Show preview column', keys: 'zp', group: 'view', run: () => (showPreview = !showPreview) },
-    { id: 'hidden', title: nav.showHidden ? 'Hide dot-files' : 'Show hidden files', keys: '.', group: 'view', run: () => nav.toggleHidden() },
-    { id: 'root', title: 'Go to book root', keys: 'gh', group: 'navigate home', run: goHome },
     { id: 'refresh', title: 'Refresh notes', keys: 'R', group: 'sync reload', run: () => void notes.refresh() },
-    { id: 'books', title: 'All books', keys: 'gb', group: 'navigate switch', run: () => books.openPicker() },
     { id: 'next-book', title: 'Next book', keys: ']', group: 'navigate switch', run: () => cycleBook(1) },
     { id: 'prev-book', title: 'Previous book', keys: '[', group: 'navigate switch', run: () => cycleBook(-1) },
+    { id: 'manage-books', title: 'Manage books…', group: 'books vault list rename remove', run: () => books.openPicker() },
     { id: 'settings', title: 'Settings', keys: ',', group: 'preferences', run: () => uiState.openSettings('editor') },
     { id: 'vim', title: 'Vim settings & .vimrc', group: 'preferences vimrc keys', run: () => uiState.openSettings('vim') },
     { id: 'appearance', title: 'Theme & appearance', group: 'preferences colour color dark light', run: () => uiState.openSettings('appearance') },
@@ -2120,10 +1850,10 @@
     { id: 'new-book', title: 'New book…', group: 'create vault', run: () => (uiState.createBookOpen = true) },
   ]);
 
-  /** `:` lines typed in the palette (reader / explorer): the pane ex
+  /** `:` lines typed in the palette (reader / home): the pane ex
    *  commands. true = handled. */
   function runExLine(line: string): boolean {
-    const m = /^\s*(vs|vsp|vspl|vspli|vsplit|sp|spl|spli|split|on|onl|only|clo|clos|close|q|quit|exp|expl|explo|explor|explore|Ex)\b\s*(.*)$/.exec(line);
+    const m = /^\s*(vs|vsp|vspl|vspli|vsplit|sp|spl|spli|split|on|onl|only|clo|clos|close|q|quit|exp|expl|explo|explor|explore|Ex|books?)\b\s*(.*)$/.exec(line);
     if (!m) return false;
     const cmd = m[1];
     const arg = m[2].trim();
@@ -2131,51 +1861,48 @@
     else if (cmd.startsWith('sp')) runWin('split', { arg });
     else if (cmd.startsWith('on')) runWin('only');
     else if (cmd.startsWith('clo') || cmd === 'q' || cmd === 'quit') runWin('close');
+    else if (cmd.startsWith('book')) openBooks();
     else openFloating();
     return true;
   }
 
-  function openFromPalette(id: string): void {
-    pane = 'browse';
-    nav.reveal(id);
-    void openNote(id);
-  }
-
   function fmtPath(): string {
     if (pane === 'note' && notes.selected) return normalizePath(notes.selected.path);
-    return nav.dir ? nav.dir + '/' : '/';
+    return '/';
+  }
+
+  /** Top-bar crumb: the explorer at that folder. */
+  function exploreCrumb(i: number): void {
+    openFloating({ dir: noteCrumbs.slice(0, i + 1).join('/') });
   }
 </script>
 
 <!-- Hover previews are delegated: any rendered note link (reader,
      split preview, Live Preview, secondary panes) under this root. -->
-<div class="vault-home" bind:this={homeEl} onpointerover={onHoverOver} onpointerout={onHoverOut} role="presentation">
+<div class="vault-home" bind:this={rootEl} onpointerover={onHoverOver} onpointerout={onHoverOut} role="presentation">
   <header class="topbar">
     <div class="top-left">
-      <button class="home-mark" type="button" onclick={back} title="All books (gb)" aria-label="All books">
+      <button class="book-btn" type="button" onclick={openBooks} title="Switch book (gb)" aria-label="Switch book: {books.active?.name ?? 'Book'}" data-testid="book-switcher">
         <span class="ui-wordmark"><span class="mark"></span></span>
+        {#if activeStatus}<SyncDot state={activeStatus.state} pending={activeStatus.pending} vaultID={vaults.selectedID ?? undefined} />{/if}
+        <span class="book-name">{books.active?.name ?? vaults.selected?.name ?? 'Book'}</span>
+        <svg class="caret" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <div class="switcher-slot"><BookSwitcher /></div>
-      <nav class="breadcrumb" aria-label="Folder path" data-testid="breadcrumb">
-        {#if pane === 'note'}
-          <button class="crumb back" type="button" onclick={leaveNote} aria-label="Back to folder">←</button>
-        {/if}
-        {#each crumbs as c, i (c.path)}
-          {#if i > 0}<span class="sep" aria-hidden="true">/</span>{/if}
-          <button
-            class="crumb"
-            type="button"
-            aria-current={i === crumbs.length - 1 && pane === 'browse' ? 'location' : undefined}
-            onclick={() => pickCrumb(c.path)}
-          >{i === 0 ? (vaults.selected?.name ?? '/') : c.name}</button>
-        {/each}
-        {#if pane === 'note' && notes.selected}
-          <span class="sep" aria-hidden="true">/</span>
+      {#if pane === 'note' && notes.selected}
+        <nav class="breadcrumb" aria-label="Note location" data-testid="breadcrumb">
+          {#each noteCrumbs as c, i (i)}
+            <button class="crumb" type="button" onclick={() => exploreCrumb(i)} title="Explore {noteCrumbs.slice(0, i + 1).join('/')}/">{c}</button>
+            <span class="sep" aria-hidden="true">/</span>
+          {/each}
           <span class="crumb-note" aria-current="page">{notes.selected.title}</span>
-        {/if}
-      </nav>
+        </nav>
+      {/if}
     </div>
     <div class="topbar-right">
+      <button class="ui-btn ghost sm explorer-btn" type="button" onclick={() => openFloating()} aria-label="Explorer" aria-haspopup="dialog" aria-expanded={!!fx} title="Explorer (-, {eff.leader}e, :explore)" data-testid="explorer-button">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.75 4.25a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.75h5a1.5 1.5 0 0 1 1.5 1.5v6.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span class="explorer-label">Explorer</span><kbd>-</kbd>
+      </button>
       <SyncStatusPopover />
       <button class="ui-btn ghost sm icon" onclick={beginCreate} type="button" disabled={structuralOffline}
         title={structuralOffline ? OFFLINE_HINT : 'New note (a)'} aria-label="New note">
@@ -2212,7 +1939,6 @@
       <button class="ui-btn sm ghost" type="button" onclick={() => books.dismissBanner(b.id)}>{b.kind === 'dedupe' ? 'Manter' : 'ok'}</button>
     </div>
   {/each}
-  <div class="ui-sr-only" aria-live="polite" data-testid="nav-live">{liveMsg}</div>
 
   {#if activeRevoked && books.active}
     <div class="placeholder" data-testid="book-revoked">
@@ -2224,8 +1950,6 @@
       <p>Entre em {serverLabel(books.active.server_url)} para sincronizar.</p>
       <button class="ui-btn sm primary" type="button" onclick={() => books.active && uiState.openSignIn(books.active.server_url, books.active.account)}>Entrar</button>
     </div>
-  {:else if notes.loadingList && notes.list.length === 0}
-    <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading…</div>
   {:else if notes.listErrorStatus === 403}
     <!-- The vault IS in our list (we routed here from it) but its
          notes 403 — on a federated replica this usually means the
@@ -2237,89 +1961,23 @@
     </div>
   {:else if notes.listError}
     <div class="error">{notes.listError}</div>
-  {:else if notes.list.length === 0 && nav.extraDirs.size === 0 && !prompt}
-    <div class="placeholder empty-book">
-      <p class="empty-title">This book is empty</p>
-      <p>Press <kbd>a</kbd> to create a note — <span class="mono">ideas</span>, <span class="mono">work/plan</span>, or a folder <span class="mono">journal/</span>.</p>
-      <button class="ui-btn sm primary" type="button" onclick={beginCreate} disabled={structuralOffline}>New note</button>
-    </div>
+  {:else if pane === 'home'}
+    {@render bookHome()}
   {:else}
-  <div
-    class="miller"
-    class:note-mode={pane === 'note'}
-    class:no-preview={!showPreview && pane === 'browse'}
-    data-testid="miller"
-  >
-    <section class="col col-parent" aria-label="Parent folder" data-pane="explorer">
-      {#if nav.parent != null}
-        <MillerColumn
-          entries={nav.parentEntries}
-          cursor={nav.parentCursor}
-          label="Parent folder {nav.parent === '' ? (vaults.selected?.name ?? 'root') : nav.parent}"
-          idPrefix="parent"
-          onpick={pickParent}
-          ondropnote={(k, t) => void dropNote(k, t)}
-        />
-      {:else}
-        <div class="col-empty">
-          <span class="ui-eyebrow">book</span>
-          <span class="col-empty-name">{vaults.selected?.name ?? 'Book'}</span>
-          <span class="col-empty-meta">{notes.list.length} notes</span>
-        </div>
-      {/if}
-    </section>
-
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <section class="col col-current" class:pane-focus={multiPane && activePane === 'explorer'} aria-label="Current folder" data-pane="explorer" oncontextmenu={onColumnContext}>
-      {#if filterOpen || nav.filter}
-        <div class="filter-row">
-          <span class="filter-slash" aria-hidden="true">/</span>
-          <input
-            class="filter-input"
-            type="search"
-            placeholder="filter this folder"
-            aria-label="Filter current folder"
-            value={nav.filter}
-            bind:this={filterInput}
-            oninput={(e) => nav.setFilter(e.currentTarget.value)}
-            onkeydown={onFilterKey}
-            onfocus={() => (filterFocused = true)}
-            onblur={() => (filterFocused = false)}
-          />
-          <span class="filter-count">{nav.entries.length}</span>
-        </div>
-      {/if}
-      <MillerColumn
-        bind:this={currentCol}
-        bind:element={currentColEl}
-        entries={nav.entries}
-        cursor={nav.cursor}
-        label="Folder {nav.dir === '' ? (vaults.selected?.name ?? 'root') : nav.dir}"
-        idPrefix="cur"
-        active
-        {openKey}
-        yankedKey={yanked?.key ?? null}
-        emptyText={nav.filter ? 'No matches' : 'Empty folder — a to create'}
-        onpick={pickCurrent}
-        onopen={openCurrent}
-        oncontext={onRowContext}
-        ondropnote={(k, t) => void dropNote(k, t)}
-      />
-    </section>
-
-    <!-- Right-click on the open note: the same menu as its row. -->
+    <!-- Right-click on the open note: the note's menu. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <main
-      class="col col-preview preview"
+      class="stage preview"
       class:split-host={editMode && splitOn && !multi}
       class:multi
       class:pane-focus={multiPane && activePane === 'main' && !multi}
       data-pane={multi ? undefined : 'main'}
       data-leaf={multi ? undefined : primaryLeaf}
       data-note-path={multi ? undefined : leafPath(primaryLeaf)}
+      data-testid="stage"
       bind:this={previewEl}
       tabindex="-1"
-      aria-label="Preview"
+      aria-label="Note"
       oncontextmenu={multi ? undefined : onReaderContext}
     >
       {#if multi && panes}
@@ -2349,54 +2007,21 @@
         {@render mainContent()}
       {/if}
     </main>
-  </div>
-  {/if}
-
-  {#if prompt}
-    <form class="prompt-form" onsubmit={(e) => { e.preventDefault(); void submitPrompt(); }} data-testid="prompt">
-      <span class="prompt-label">{prompt.kind === 'create' ? 'new' : 'rename'}</span>
-      <span class="prompt-dir mono">{prompt.kind === 'create' ? (nav.dir ? nav.dir + '/' : '/') : ''}</span>
-      <input
-        class="prompt-input mono"
-        bind:this={promptInput}
-        bind:value={prompt.text}
-        onkeydown={onPromptKey}
-        onblur={() => { if (!busy) setTimeout(() => { if (prompt && document.activeElement !== promptInput) cancelPrompt(); }, 120); }}
-        aria-label={prompt.kind === 'create' ? 'New note or folder (end with / for a folder)' : 'New name or path'}
-        autocomplete="off"
-        spellcheck="false"
-        disabled={busy}
-      />
-      <span class="prompt-preview" class:err={promptPlan?.kind === 'error' || !!promptErr}>{promptErr ?? promptPreview}</span>
-    </form>
-  {/if}
-
-  {#if pendingDelete}
-    <div class="confirm-bar" role="alertdialog" aria-label="Confirm delete" data-testid="delete-confirm">
-      <span>Delete <strong>{pendingDelete.name}</strong>? The markdown file is removed from the book.</span>
-      <span class="confirm-actions">
-        <button class="ui-btn sm ghost" type="button" onclick={() => (pendingDelete = null)}>Cancel <kbd>n</kbd></button>
-        <button class="ui-btn sm danger solid" type="button" onclick={() => void confirmDelete()}>Delete <kbd>y</kbd></button>
-      </span>
-    </div>
   {/if}
 
   {#if editorSettings.value.legend}
-    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
+    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim && !fx ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
   {/if}
 
   <footer class="statusbar" data-testid="editor-status">
     {#if editMode && editSession && eff.vim}
-      <span class="sb-mode" data-mode={vimState.mode} data-testid="vim-mode">{vimModeLabel(vimState.mode, vimState.sub)}</span>
+      <ModePill mode={vimState.mode} label={vimModeLabel(vimState.mode, vimState.sub)} />
       {#if vimState.pending && !editorSettings.value.legend}<span class="sb-pending">{vimState.pending}</span>{/if}
     {/if}
     <span class="sb-path mono" title={fmtPath()}>{fmtPath()}</span>
     {#if !editMode}
-      <span class="sb-item" aria-live="off">
-        {notes.list.length} notes{notes.loadingMore ? '…' : ''}{nav.filter ? ` · ${nav.entries.length} match` : ''}
-      </span>
+      <span class="sb-item" aria-live="off">{notes.list.length} notes{notes.loadingMore ? '…' : ''}</span>
       {#if notes.stale}<span class="sb-item stale" data-testid="list-stale" title="Última lista conhecida; atualiza quando a conexão voltar.">lista offline{notes.staleAt ? ` de ${new Date(notes.staleAt).toLocaleString()}` : ''}</span>{/if}
-      {#if nav.showHidden}<span class="sb-item">hidden shown</span>{/if}
       {#if yanked}<span class="sb-item">yanked {yanked.name}</span>{/if}
     {/if}
     {#if editMode && editSession}
@@ -2407,7 +2032,6 @@
       <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}</span>
     {/if}
     <span class="sb-spacer"></span>
-    {#if toast}<span class="sb-toast {toast.tone}" role="status">{toast.text}</span>{/if}
     {#if editMode && editSession}
       <span class="sb-item sync" class:pending={editSession.pending} class:offline={!editSession.pending && !editSession.liveSynced} data-testid="editor-sync-state" title={editSession.persistence
         ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
@@ -2424,14 +2048,16 @@
     <button class="sb-help" type="button" onclick={() => (uiState.helpOpen = true)} title="Keyboard shortcuts (?)">?</button>
   </footer>
 
+  <ToastStack />
+
   {#if paletteMode}
     <CommandPalette
       commands={paletteCommands}
       notes={notes.list}
       commandMode={paletteMode === 'command'}
       onex={runExLine}
-      onnote={openFromPalette}
-      onclose={() => { paletteMode = null; void focusColumn(true); }}
+      onnote={openNote}
+      onclose={() => { paletteMode = null; }}
     />
   {/if}
 
@@ -2440,15 +2066,26 @@
   {/if}
 
   {#if fx && vaults.selectedID}
-    <FloatingExplorer
-      vaultID={vaults.selectedID}
-      bookName={vaults.selected?.name ?? 'Book'}
-      startNote={fx.startNote}
-      startDir={fx.startDir}
-      ops={fxOps}
-      onopen={fxOpen}
-      onclose={() => { fx = null; }}
-    />
+    {#key fx.key}
+      <FloatingExplorer
+        vaultID={vaults.selectedID}
+        bookName={vaults.selected?.name ?? books.active?.name ?? 'Book'}
+        startNote={fx.startNote}
+        startDir={fx.startDir}
+        level={fx.level}
+        initial={fx.initial}
+        ops={fxOps}
+        bind:yanked
+        onopen={fxOpen}
+        onedit={(id) => { closeFloating(); void editNote(id); }}
+        onbook={(id) => { fx = null; books.setActive(id); }}
+        onapp={fxApp}
+        onlevel={(l) => (fxLevel = l)}
+        onnewbook={() => (uiState.createBookOpen = true)}
+        onmanage={() => books.openPicker()}
+        onclose={closeFloating}
+      />
+    {/key}
   {/if}
 
   {#if hover && vaults.selectedID}
@@ -2465,7 +2102,7 @@
   {/if}
 
   {#if hintsOpen}
-    <HintOverlay root={hintRoot ?? (() => homeEl)} onclose={() => { hintsOpen = false; hintRoot = null; }} />
+    <HintOverlay root={hintRoot ?? (() => rootEl)} onclose={() => { hintsOpen = false; hintRoot = null; }} />
   {/if}
 
   {#if uiState.helpOpen}
@@ -2481,6 +2118,54 @@
   {/if}
 </div>
 
+{#snippet bookHome()}
+  <!-- The book's calm home: shown when no note is open (SPEC-PARTE2 §2). -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <section class="stage home" bind:this={homeEl} tabindex="-1" aria-label="{vaults.selected?.name ?? 'Book'} home" data-testid="book-home">
+    <div class="home-inner">
+      <p class="ui-eyebrow home-eyebrow">book</p>
+      <h1 class="home-title">{books.active?.name ?? vaults.selected?.name ?? 'Book'}</h1>
+      <p class="home-meta">
+        {#if activeStatus}<SyncDot state={activeStatus.state} pending={activeStatus.pending} label vaultID={vaults.selectedID ?? undefined} />{/if}
+        <span class="home-dot" aria-hidden="true">·</span>
+        <span data-testid="home-count">{notes.loadingList && notes.list.length === 0 ? '…' : notes.list.length} {notes.list.length === 1 ? 'note' : 'notes'}</span>
+        {#if books.active}<span class="home-dot" aria-hidden="true">·</span><span class="mono">{books.active.account}@{serverLabel(books.active.server_url)}</span>{/if}
+      </p>
+      <div class="home-actions">
+        <button class="ui-btn primary" type="button" onclick={() => openFloating()} data-testid="home-explore">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.75 4.25a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.75h5a1.5 1.5 0 0 1 1.5 1.5v6.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          Explore <kbd class="on-primary">-</kbd>
+        </button>
+        <button class="ui-btn" type="button" onclick={beginCreate} disabled={structuralOffline}>New note <kbd>a</kbd></button>
+        <button class="ui-btn ghost" type="button" onclick={openBooks}>Switch book <kbd>gb</kbd></button>
+      </div>
+      {#if notes.loadingList && notes.list.length === 0}
+        <div class="home-skel" aria-hidden="true" data-testid="home-skeleton">
+          {#each [0, 1, 2, 3, 4] as i (i)}<span class="skeleton" style="width: {88 - i * 9}%"></span>{/each}
+        </div>
+      {:else if recents.length > 0}
+        <h2 class="home-h">Recent</h2>
+        <ul class="home-recent" data-testid="home-recent">
+          {#each recents as n, i (n.id)}
+            <li>
+              <button type="button" class="recent" data-recent={i} data-hint-target onclick={() => openNote(n.id)} onfocus={() => (homeIndex = i)}>
+                <span class="recent-title">{n.title}</span>
+                <span class="recent-dir mono">{dirOf(n.path) || '/'}</span>
+                <span class="recent-when">{updatedLabel(n.updated_at)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <div class="home-empty">
+          <p class="empty-title">This book is empty</p>
+          <p>Press <kbd>a</kbd> to create a note — <span class="mono">ideas</span>, <span class="mono">work/plan</span>, or a folder <span class="mono">journal/</span>.</p>
+        </div>
+      {/if}
+      <p class="home-keys" aria-hidden="true"><kbd>-</kbd> explore · <kbd>j</kbd><kbd>k</kbd> recent · <kbd>space</kbd> commands · <kbd>[</kbd><kbd>]</kbd> books · <kbd>?</kbd> keys</p>
+    </div>
+  </section>
+{/snippet}
 
 {#snippet paneLeaf(l: PaneLeaf)}
   {#if l.id === primaryLeaf}
@@ -2514,7 +2199,7 @@
       onfollow={(href, where, from, wiki) => followLink(href, where, from, wiki, l.id)}
       onlink={(href, e, from) => routeClick(href, e, from, l.id)}
       onhover={(link, rect, from) => hoverKey(link, rect, from, l.id)}
-      onexplore={openFloating}
+      onexplore={() => openFloating()}
       onwin={(cmd, o) => runWin(cmd, o)}
       onpane={navigatePane}
       onpanepending={(p) => (panePending = p)}
@@ -2526,29 +2211,16 @@
 {/snippet}
 
 {#snippet mainContent()}
-      {#if pane === 'browse' && nav.current?.kind === 'folder' && nav.previewEntries}
-        <MillerColumn
-          entries={nav.previewEntries}
-          cursor={nav.previewCursor}
-          label="Contents of {nav.current.path}"
-          idPrefix="preview"
-          emptyText={nav.current.virtual ? 'New folder — a to create a note in it' : 'Empty folder'}
-          onpick={pickPreview}
-          ondropnote={(k, t) => void dropNote(k, t)}
-        />
-      {:else if !notes.selectedID}
-        <div class="placeholder hints">
-          <div class="hint-grid">
-            <span><kbd>j</kbd><kbd>k</kbd> move</span>
-            <span><kbd>h</kbd><kbd>l</kbd> folders</span>
-            <span><kbd>⏎</kbd> open</span>
-            <span><kbd>a</kbd> new</span>
-            <span><kbd>/</kbd> filter</span>
-            <span><kbd>?</kbd> all keys</span>
+      {#if !notes.selectedID}
+        <div class="placeholder">No note open</div>
+      {:else if notes.loadingContent && !notes.content}
+        <!-- Skeleton shimmer while the body loads. -->
+        <article class="rendered lumi-prose" aria-busy="true" data-testid="reader-skeleton">
+          <h1 class="rendered-title" data-vt-target="note-title">{notes.selected?.title ?? ''}</h1>
+          <div class="reader-skel" aria-hidden="true">
+            {#each [94, 88, 97, 62, 0, 91, 85, 73] as w, i (i)}{#if w}<span class="skeleton" style="width: {w}%"></span>{:else}<span class="gap"></span>{/if}{/each}
           </div>
-        </div>
-      {:else if notes.loadingContent}
-        <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading…</div>
+        </article>
       {:else if notes.contentError}
         <div class="error">{notes.contentError}</div>
       {:else if notes.content}
@@ -2591,7 +2263,7 @@
                 {#if noteCrumbs.length > 0}
                   <span class="nb-crumbs" aria-hidden="true">{noteCrumbs.join(' / ')}<span class="nb-sep">/</span></span>
                 {/if}
-                <button type="button" class="nb-title" onclick={beginRename} title="Rename or move (r)">{notes.selected?.title}</button>
+                <button type="button" class="nb-title" data-vt-target="note-title" onclick={beginRename} title="Rename or move (r)">{notes.selected?.title}</button>
                 {#if editSession.peers.length > 0}
                   <span class="peers">
                     {#each editSession.peers as p (p.clientID)}
@@ -2697,7 +2369,9 @@
             {/if}
           </div>
         {:else if editorLoading}
-          <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading editor…</div>
+          <div class="reader-skel editor-skel" aria-busy="true" aria-label="Loading editor">
+            {#each [70, 92, 85, 40, 96, 77] as w, i (i)}<span class="skeleton" style="width: {w}%"></span>{/each}
+          </div>
         {:else}
           <article class="rendered lumi-prose" data-prose={editorSettings.value.proseFont}>
             <header class="reading-head">
@@ -2726,7 +2400,7 @@
                 </button>
               </div>
             </header>
-            {#if !titleInBody}<h1 class="rendered-title">{notes.selected?.title}</h1>{/if}
+            {#if !titleInBody}<h1 class="rendered-title" data-vt-target="note-title">{notes.selected?.title}</h1>{/if}
             <!-- DOMPurify-sanitised blocks, see lib/markdown.ts. -->
             <MarkdownView blocks={previewBlocks} onlink={onMdLink} ontoggletask={(i) => void toggleTaskFromReader(i)} />
           </article>
@@ -2757,19 +2431,29 @@
     flex: none;
   }
   .top-left { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; flex: 1; }
-  .home-mark {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    cursor: pointer;
+  .book-btn {
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 260px;
+    height: 30px;
+    padding: 0 10px 0 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
   }
-  .home-mark:hover { background: var(--tint-hover); }
-  .switcher-slot { flex: none; max-width: 220px; }
+  .book-btn:hover { background: var(--tint-hover); border-color: var(--hairline); }
+  .book-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .book-btn .caret { flex: none; color: var(--color-text-dim); }
+  .explorer-btn { gap: 6px; }
+  .explorer-btn[aria-expanded='true'] { background: var(--tint-active); color: var(--color-primary); }
+  .explorer-btn kbd { margin-left: 2px; }
   .topbar-right { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
   .palette-btn { gap: 6px; color: var(--color-text-dim); border-color: var(--hairline); min-width: 150px; justify-content: flex-start; }
   .palette-btn kbd { margin-left: auto; }
@@ -2797,89 +2481,66 @@
     border-radius: var(--radius-sm);
   }
   .crumb:hover, .crumb:focus-visible { background: var(--tint-hover); color: var(--color-text); }
-  .crumb[aria-current='location'] { color: var(--color-text); font-weight: 550; }
-  .crumb.back { color: var(--color-text); }
   .crumb-note { color: var(--color-text); font-weight: 550; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; }
   .sep { color: var(--color-text-dim); opacity: 0.5; }
 
-  /* ── miller columns ────────────────────────────────────── */
-  .miller {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(150px, 0.9fr) minmax(220px, 1.3fr) minmax(0, 3fr);
-    transition: grid-template-columns 160ms var(--ease);
-  }
-  .miller.no-preview { grid-template-columns: minmax(150px, 1fr) minmax(0, 3fr) 0; }
-  .miller.no-preview .col-preview { display: none; }
-  .miller.note-mode { grid-template-columns: 0 minmax(200px, 0.9fr) minmax(0, 3.6fr); }
-  .miller.note-mode .col-parent { display: none; }
-  /* Explicit tracks: a hidden column must not shift the others. */
-  .col-parent { grid-column: 1; grid-row: 1; }
-  .col-current { grid-column: 2; grid-row: 1; }
-  /* Focused pane (Ctrl-h/j/k/l): a quiet accent line along the top. */
-  .col.pane-focus { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 50%, transparent); }
-  .col-preview { grid-column: 3; grid-row: 1; }
-  .col {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid var(--hairline);
-  }
-  /* Block (not flex): the article centres itself with max-width. */
-  .col-preview { border-right: none; display: block; }
-  .col-parent { background: color-mix(in srgb, var(--color-overlay-bg) 35%, var(--color-background)); }
-  .col-empty {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: var(--sp-4) var(--sp-3);
-  }
-  .col-empty-name { font-weight: 600; font-size: var(--text-md); }
-  .col-empty-meta { font-size: var(--text-xs); color: var(--color-text-dim); }
-  .filter-row {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    height: 34px;
-    padding: 0 var(--sp-3);
-    border-bottom: 1px solid var(--hairline);
-    background: var(--tint-primary);
-  }
-  .filter-slash { font-family: var(--font-mono); color: var(--color-primary); font-weight: 700; }
-  .filter-input {
-    flex: 1;
-    min-width: 0;
-    background: transparent;
-    border: none;
-    outline: none;
-    color: var(--color-text);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-  .filter-input::-webkit-search-cancel-button { display: none; }
-  .filter-count { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-dim); }
+  /* ── stage: the note (or the book's home) fills it ─────── */
+  .stage { flex: 1; min-height: 0; min-width: 0; }
+  .stage.preview { view-transition-name: lumi-pane; }
 
-  /* Narrow screens: one column at a time + breadcrumb. */
+  /* ── the book's home ───────────────────────────────────── */
+  .home { overflow-y: auto; outline: none; display: flex; justify-content: center; }
+  .home-inner { width: min(640px, 100%); padding: clamp(28px, 9vh, 96px) var(--sp-5) var(--sp-7); animation: home-in var(--dur-3, 280ms) var(--spring-gentle, var(--ease)) both; }
+  @keyframes home-in { from { opacity: 0; transform: translateY(8px); } }
+  .home-eyebrow { margin: 0 0 var(--sp-1); }
+  .home-title { margin: 0; font-size: clamp(1.7rem, 3.4vw, 2.3rem); line-height: 1.12; letter-spacing: -0.025em; font-weight: 700; color: var(--md-heading, var(--color-text)); text-wrap: balance; }
+  .home-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: var(--sp-3) 0 0; font-size: var(--text-sm); color: var(--color-text-dim); }
+  .home-dot { opacity: 0.5; }
+  .home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-5) 0 var(--sp-6); }
+  .home-actions .ui-btn { gap: 6px; }
+  .home-h { margin: 0 0 var(--sp-2); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-dim); }
+  .home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .recent {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: baseline;
+    gap: var(--sp-3);
+    padding: 9px 12px;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .recent:hover, .recent:focus-visible { background: var(--tint-hover); outline: none; }
+  .recent:focus-visible { box-shadow: inset 2px 0 0 var(--color-primary); background: var(--tint-active); }
+  .recent-title { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-dir { font-size: var(--text-2xs); color: var(--color-text-dim); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-when { font-size: var(--text-xs); color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+  .home-empty { padding: var(--sp-4) 0; color: var(--color-text-dim); font-size: var(--text-sm); }
+  .home-keys { margin-top: var(--sp-6); font-size: var(--text-xs); color: var(--color-text-dim); }
+  .home-keys kbd { margin: 0 1px; }
+  .home-skel, .reader-skel { display: flex; flex-direction: column; gap: 12px; padding-top: var(--sp-2); }
+  .home-skel .skeleton { height: 30px; border-radius: var(--radius); }
+  .reader-skel .skeleton { height: 12px; border-radius: 6px; }
+  .reader-skel .gap { height: 8px; }
+  .editor-skel { max-width: calc(var(--md-measure) + 2px); margin: var(--sp-6) auto; padding: 0 var(--sp-5); }
+
   @media (max-width: 720px) {
-    .home-mark { display: none; }
-    .switcher-slot { max-width: 34vw; }
-    /* Keep the trail (it is the only "up" affordance on touch); at the
-       root it would only repeat the switcher's book name. */
-    .breadcrumb > .crumb:only-of-type { display: none; }
+    .book-btn { max-width: 46vw; }
+    .book-btn .ui-wordmark { display: none; }
+    .breadcrumb .crumb { display: none; }
+    .breadcrumb .sep { display: none; }
     .palette-btn { min-width: 0; }
-    .palette-label, .palette-btn kbd { display: none; }
-    .miller,
-    .miller.no-preview,
-    .miller.note-mode { grid-template-columns: minmax(0, 1fr); }
-    .miller .col-parent { display: none; }
-    .col-current, .col-preview { grid-column: 1; }
-    .miller:not(.note-mode) .col-preview { display: none; }
-    .miller.note-mode .col-current { display: none; }
-    .miller.note-mode .col-preview { display: block; }
+    .palette-label, .palette-btn kbd, .explorer-label, .explorer-btn kbd { display: none; }
     .preview { padding: var(--sp-5) var(--sp-4); }
     .sb-item:not(.sync):not(.stale) { display: none; }
+    .recent { grid-template-columns: minmax(0, 1fr) auto; padding: 12px; }
+    .recent-dir { display: none; }
+    .home-keys { display: none; }
   }
 
   .preview {
@@ -2887,7 +2548,6 @@
     padding: var(--sp-6) var(--sp-6) var(--sp-7);
     outline: none;
   }
-  .miller:not(.note-mode) .col-preview:has(> :global(.miller-col)) { padding: 0; }
 
   /* ── split note panes (SPEC-PARTE2 §3) ─────────────────── */
   .preview.multi { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -2955,8 +2615,6 @@
     margin: 0 auto;
     padding-bottom: 20vh;
   }
-  /* The pane that changes between explorer / reader / editor. */
-  .col-preview { view-transition-name: lumi-pane; }
   .split-btn[aria-pressed='true'] { color: var(--color-primary); background: var(--tint-active); }
   .reading-head {
     display: flex;
@@ -3009,26 +2667,7 @@
     gap: var(--sp-3);
   }
   .error { color: var(--color-error); }
-  .empty-book { margin: auto; max-width: 420px; }
   .empty-title { color: var(--color-text); font-weight: 600; font-size: var(--text-lg); }
-  .hints { height: 100%; justify-content: center; }
-  .hint-grid {
-    display: grid;
-    grid-template-columns: repeat(3, auto);
-    gap: var(--sp-3) var(--sp-5);
-    font-size: var(--text-xs);
-  }
-  .hint-grid span { display: inline-flex; gap: 4px; align-items: center; }
-  .spinner {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    border: 2px solid var(--hairline);
-    border-top-color: var(--color-primary);
-    animation: spin 0.7s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
   .stale { color: var(--color-warning); font-size: var(--text-xs); }
   .banner {
     display: flex;
@@ -3145,54 +2784,6 @@
     .nb-seg button { padding: 0 8px; }
   }
 
-  /* ── prompt / confirm bars ─────────────────────────────── */
-  .prompt-form, .confirm-bar {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    height: 38px;
-    padding: 0 var(--sp-3);
-    border-top: 1px solid var(--hairline);
-    background: color-mix(in srgb, var(--color-overlay-bg) 60%, var(--color-background));
-    animation: ui-rise 120ms var(--ease);
-  }
-  .prompt-label {
-    flex: none;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: var(--text-2xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    background: var(--color-primary);
-    color: var(--color-background);
-  }
-  .prompt-dir { color: var(--color-text-dim); font-size: var(--text-sm); flex: none; }
-  .prompt-input {
-    flex: 1;
-    min-width: 80px;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--color-text);
-    font-size: var(--text-sm);
-  }
-  .prompt-preview {
-    flex: none;
-    max-width: 45%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-xs);
-    color: var(--color-text-dim);
-  }
-  .prompt-preview.err { color: var(--color-error); }
-  .confirm-bar { justify-content: space-between; font-size: var(--text-sm); background: color-mix(in srgb, var(--color-error) 8%, var(--color-background)); }
-  .confirm-actions { display: inline-flex; gap: var(--sp-2); flex: none; }
-  .confirm-bar kbd { background: transparent; border-color: currentColor; color: inherit; opacity: 0.8; }
-
   /* ── status bar ────────────────────────────────────────── */
   .statusbar {
     flex: none;
@@ -3209,24 +2800,6 @@
     overflow: hidden;
     font-variant-numeric: tabular-nums;
   }
-  .sb-mode {
-    flex: none;
-    align-self: center;
-    margin-left: calc(-1 * var(--sp-1));
-    padding: 1px 7px;
-    border-radius: 4px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: color-mix(in srgb, var(--m) 16%, transparent);
-    color: var(--m);
-    --m: var(--color-primary);
-    transition: background 120ms var(--ease), color 120ms var(--ease);
-  }
-  .sb-mode[data-mode='insert'] { --m: var(--color-accent); }
-  .sb-mode[data-mode='visual'] { --m: var(--color-secondary); }
-  .sb-mode[data-mode='replace'] { --m: var(--color-error); }
-  .sb-mode[data-mode='plain'] { display: none; }
   .sb-pending { color: var(--color-warning); font-weight: 600; }
   .sync::before {
     content: '';
@@ -3242,9 +2815,6 @@
   .sync.offline::before { background: var(--color-text-dim); }
   .sb-path { color: var(--color-text); overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 40%; }
   .sb-spacer { flex: 1; }
-  .sb-toast { padding: 1px 8px; border-radius: 4px; background: var(--tint-active); color: var(--color-text); overflow: hidden; text-overflow: ellipsis; }
-  .sb-toast.warn { background: color-mix(in srgb, var(--color-warning) 16%, transparent); }
-  .sb-toast.error { background: color-mix(in srgb, var(--color-error) 18%, transparent); }
   .sb-help {
     align-self: stretch;
     width: 28px;

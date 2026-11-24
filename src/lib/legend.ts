@@ -11,7 +11,8 @@
 // keys would (`shell:<action>`, `vim:<keys>`, `ex:<cmd>`, `app:<id>`).
 
 export type LegendContext =
-  | 'explorer'
+  /** The book's empty home (no note open). */
+  | 'home'
   | 'reader'
   /** The split preview, focused: a keyboard reader. */
   | 'preview'
@@ -20,11 +21,9 @@ export type LegendContext =
   | 'visual'
   | 'replace'
   | 'palette'
-  | 'prompt'
-  | 'confirm'
-  | 'filter'
+  /** The floating explorer at the books level (accounts → books). */
   | 'books'
-  /** The floating explorer overlay (SPEC-PARTE2 §2). */
+  /** The floating explorer overlay (SPEC-PARTE2 §2), files level. */
   | 'float'
   /** A hover preview card opened with `K` (§4). */
   | 'hover';
@@ -69,10 +68,10 @@ export const PANE_W: LegendItem[] = [
   { keys: 'Esc', label: 'cancel' },
 ];
 
-/** Floating explorer keys. */
+/** Floating explorer keys (files level) — the only navigation. */
 export const FLOAT_ITEMS: LegendItem[] = [
   { keys: 'j k', label: 'move' },
-  { keys: 'h l', label: 'folders' },
+  { keys: 'h l', label: 'folders', tip: 'h at the book root climbs to the books' },
   { keys: '⏎', label: 'open here' },
   { keys: '⌃v', label: 'split right' },
   { keys: '⌃s', label: 'split below' },
@@ -80,9 +79,26 @@ export const FLOAT_ITEMS: LegendItem[] = [
   { keys: 'a r d', label: 'new/rename/delete' },
   { keys: 'y p', label: 'copy' },
   { keys: 'Esc q', label: 'close' },
+  { keys: 'f', label: 'hints' },
+  { keys: 'gb', label: 'books' },
+  { keys: 'e', label: 'edit' },
+  { keys: '⇧F10', label: 'menu' },
   { keys: 'gg G', label: 'top/end' },
   { keys: 'H L', label: 'history' },
   { keys: '.', label: 'hidden' },
+  { keys: 'zp', label: 'preview' },
+];
+
+/** Floating explorer, books level. */
+export const BOOKS_ITEMS: LegendItem[] = [
+  { keys: 'j k', label: 'move' },
+  { keys: '⏎ l', label: 'open book' },
+  { keys: 'h', label: 'accounts' },
+  { keys: 'g1–9', label: 'book n' },
+  { keys: 'a', label: 'new book' },
+  { keys: 'gh', label: 'this book' },
+  { keys: 'R', label: 'refresh' },
+  { keys: 'Esc q', label: 'close' },
 ];
 
 /** Hover card keys (opened with `K`). */
@@ -108,7 +124,7 @@ const PREVIEW_ITEMS: LegendItem[] = [
   { keys: 'n N', label: 'next match', do: 'preview:findNext' },
   { keys: '⏎ gf', label: 'open link', tip: 'Tab to a link, then Enter or gf; ⌃w f opens it in a split' },
   { keys: 'K', label: 'preview link', tip: 'Preview the focused link in a card' },
-  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'Floating explorer at this note' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer at this note' },
   { keys: 'space b', label: 'page' },
   { keys: '⌃w w', label: 'next pane', do: 'app:panes' },
 ];
@@ -121,7 +137,6 @@ const SHELL_G: LegendItem[] = [
   { keys: 'g1–9', label: 'book n' },
 ];
 const SHELL_Z: LegendItem[] = [
-  { keys: 'zp', label: 'preview', do: 'shell:togglePreview' },
   { keys: 'zh', label: 'book root', do: 'shell:home' },
 ];
 const VIM_G: LegendItem[] = [
@@ -211,6 +226,7 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
   const leader = x.leader ?? '\\';
   const pend = pending ?? '';
   if (ctx === 'float') return FLOAT_ITEMS;
+  if (ctx === 'books') return BOOKS_ITEMS;
   if (ctx === 'hover') return HOVER_ITEMS;
   if (pend === '⌃w') return PANE_W;
 
@@ -223,65 +239,53 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
     return PREVIEW_ITEMS;
   }
 
-  if (ctx === 'explorer' || ctx === 'reader') {
+  if (ctx === 'home' || ctx === 'reader') {
     const count = /^(\d+)/.exec(pend)?.[1];
     const chord = pend.replace(/^\d+/, '');
     if (chord === 'g') return ctx === 'reader' ? [...SHELL_G.slice(0, 4), { keys: 'gf', label: 'follow link', do: 'shell:follow' }, ...SHELL_G.slice(4)] : SHELL_G;
     if (chord === 'z') return SHELL_Z;
     if (count) {
-      return ctx === 'explorer'
+      return ctx === 'home'
         ? [{ keys: `${count}j`, label: `down ${count}` }, { keys: `${count}k`, label: `up ${count}` }, { keys: 'Esc', label: 'cancel' }]
         : [{ keys: `${count}j`, label: `scroll ${count}` }, { keys: `${count}k`, label: `scroll ${count} up` }];
     }
-    if (ctx === 'explorer') {
+    if (ctx === 'home') {
       return [
-        { keys: 'j k', label: 'move', do: 'shell:down' },
-        { keys: 'h l', label: 'folder', do: 'shell:parent' , tip: 'h: parent folder · l: open folder / note' },
-        { keys: '⏎', label: 'open', do: 'shell:open' },
-        { keys: 'e', label: 'edit', do: 'shell:edit' },
-        { keys: '/', label: 'filter', do: 'shell:filter' },
-        { keys: 'a', label: 'new', do: 'shell:create' },
-        { keys: 'r', label: 'rename', do: 'shell:rename' },
-        { keys: 'd', label: 'delete', do: 'shell:delete' },
-        { keys: 'y p', label: 'copy', do: 'shell:yank', tip: 'y: yank the note · p: paste a copy here' },
-        { keys: 'f', label: 'hints', do: 'app:hints', tip: 'Label everything clickable; type a label to click it' },
-        ...(x.panes ? [PANES_ITEM] : []),
+        { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer: the only navigation (also l, ⏎, <leader>e, :explore)' },
+        { keys: 'a', label: 'new note', do: 'shell:create' },
+        { keys: 'j k', label: 'recent', do: 'shell:down' },
+        { keys: 'gb', label: 'books', do: 'app:books', tip: 'Switch book in the floating explorer (accounts → books)' },
+        { keys: '[ ]', label: 'prev/next book', do: 'shell:nextBook' },
         { keys: 'space', label: 'commands', do: 'shell:palette' },
         { keys: '?', label: 'keys', do: 'shell:help' },
-        { keys: 'gg G', label: 'top/end', do: 'shell:top' },
+        { keys: 'F', label: 'hints', do: 'app:hints', tip: 'Label everything clickable; type a label to click it' },
         { keys: 'H L', label: 'history', do: 'shell:historyBack' },
         { keys: ':', label: 'command', do: 'shell:command' },
-        { keys: '⇧F10', label: 'menu', do: 'app:menu', tip: 'Context menu for the row (or right-click)' },
-        { keys: 'zp', label: 'preview col', do: 'shell:togglePreview' },
-        { keys: '⌃d ⌃u', label: 'half page' },
-        { keys: '.', label: 'hidden', do: 'shell:toggleHidden' },
         { keys: 'R', label: 'refresh', do: 'shell:refresh' },
-        { keys: '[ ]', label: 'prev/next book', do: 'shell:nextBook' },
-        { keys: 'gb', label: 'books', do: 'shell:picker' },
         { keys: ',', label: 'settings', do: 'shell:settings' },
       ];
     }
     return [
       { keys: 'j k', label: 'scroll', do: 'shell:down' },
       { keys: 'd u', label: 'half page', do: 'shell:halfDown' },
-      { keys: 'gg G', label: 'top/end', do: 'shell:top' },
+      { keys: '- h', label: 'explorer', do: 'shell:floatExplorer', tip: 'The floating explorer at this note (yazi) — also <leader>e, :explore' },
       { keys: 'e i', label: 'edit', do: 'shell:edit' },
-      { keys: 'q h', label: 'back', do: 'shell:parent' },
-      { keys: '-', label: 'explorer', do: 'shell:floatExplorer', tip: 'Floating explorer at this note (yazi)' },
+      { keys: 'gg G', label: 'top/end', do: 'shell:top' },
+      { keys: 'q', label: 'close', do: 'shell:close', tip: 'Close the note (back to the book home); in a split, close the pane' },
       { keys: '⌃w v', label: 'split', do: 'app:vsplit', tip: 'Ctrl-w v / s split · q close · o only · = equalize' },
       { keys: 'K', label: 'preview link', do: 'shell:hover', tip: 'Preview the focused (or first visible) link' },
       { keys: 'gf', label: 'follow link', do: 'shell:follow', tip: 'gf / Enter: this pane · Ctrl-w f: split · ⌘-click: split' },
+      { keys: 'H L', label: 'back/forward', do: 'shell:historyBack', tip: 'Previous / next note opened here' },
       { keys: 'y', label: 'copy', do: 'shell:yank' },
       { keys: 'F', label: 'hints', do: 'app:hints', tip: 'Label links, tasks and buttons; type a label to click it' },
       ...(x.panes ? [PANES_ITEM] : []),
       { keys: 'space', label: 'commands', do: 'shell:palette' },
       { keys: '?', label: 'keys', do: 'shell:help' },
-      { keys: 'r', label: 'rename', do: 'shell:rename' },
-      { keys: 'H L', label: 'history', do: 'shell:historyBack' },
+      { keys: 'a r', label: 'new/rename', do: 'shell:rename', tip: 'a: new note, r: rename / move — in the explorer' },
+      { keys: 'gb', label: 'books', do: 'app:books' },
       { keys: '⌘E', label: 'edit', do: 'shell:edit' },
       { keys: ':', label: 'command', do: 'shell:command' },
       { keys: '[ ]', label: 'prev/next book', do: 'shell:nextBook' },
-      { keys: 'gh', label: 'book root', do: 'shell:home' },
       { keys: ',', label: 'settings', do: 'shell:settings' },
     ];
   }
@@ -369,33 +373,6 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
         { keys: 'Esc', label: 'close' },
         { keys: ':', label: 'commands only' },
         { keys: 'Tab', label: 'next' },
-      ];
-    case 'prompt':
-      return [
-        { keys: '⏎', label: 'confirm', do: 'app:submit' },
-        { keys: 'Esc', label: 'cancel', do: 'app:cancel' },
-        { keys: 'a/b/name', label: 'in folders' },
-        { keys: 'dir/', label: 'folder' },
-      ];
-    case 'filter':
-      return [
-        { keys: '⏎', label: 'keep filter', do: 'app:submit' },
-        { keys: '↑ ↓', label: 'move' },
-        { keys: 'Esc', label: 'clear', do: 'app:cancel' },
-        { keys: 'n N', label: 'next/prev (after ⏎)' },
-      ];
-    case 'confirm':
-      return [
-        { keys: 'y ⏎', label: 'confirm', do: 'app:confirm' },
-        { keys: 'n Esc', label: 'cancel', do: 'app:cancel' },
-      ];
-    case 'books':
-      return [
-        { keys: 'j k', label: 'move' },
-        { keys: '⏎ l', label: 'open' },
-        { keys: 'g1–9', label: 'book n' },
-        { keys: 'R', label: 'refresh' },
-        { keys: 'Esc', label: 'back' },
       ];
   }
   return [];

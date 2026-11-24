@@ -609,7 +609,7 @@
           {/if}
           {#if show('paneNav')}
             <label class="row">
-              <div class="row-text"><span class="row-title">Ctrl-h/j/k/l moves between panes</span><span class="row-desc">Explorer, note, editor and the split preview, like vim windows or vim-tmux-navigator. In the editor only in Normal/Visual; Insert keeps <kbd>Ctrl-h</kbd> backspace and <kbd>Ctrl-j</kbd> newline. <kbd>Ctrl-w h/j/k/l/w/p</kbd> always work, and your .vimrc maps of these keys win.</span></div>
+              <div class="row-text"><span class="row-title">Ctrl-h/j/k/l moves between panes</span><span class="row-desc">Note panes, the editor and the split preview, like vim windows or vim-tmux-navigator. In the editor only in Normal/Visual; Insert keeps <kbd>Ctrl-h</kbd> backspace and <kbd>Ctrl-j</kbd> newline. <kbd>Ctrl-w h/j/k/l/w/p</kbd> always work, and your .vimrc maps of these keys win.</span></div>
               <input type="checkbox" class="ui-switch" checked={s.paneNav} onchange={(e) => editorSettings.update({ paneNav: checked(e) })} data-testid="pane-nav-toggle" />
             </label>
           {/if}

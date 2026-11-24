@@ -4,15 +4,18 @@ import { legendFor, describeRhs, contextForVimMode, fitLegend } from './legend.t
 const keys = (items: { keys: string }[]) => items.map((i) => i.keys);
 
 describe('legendFor', () => {
-  it('explorer and reader basics', () => {
-    expect(keys(legendFor('explorer'))).toEqual(expect.arrayContaining(['j k', 'a', 'r', 'd', '/', '?']));
-    expect(keys(legendFor('reader'))).toEqual(expect.arrayContaining(['j k', 'e i', 'q h']));
+  it('home and reader basics: the floating explorer is the way to navigate', () => {
+    expect(keys(legendFor('home')).slice(0, 4)).toEqual(['-', 'a', 'j k', 'gb']);
+    expect(legendFor('home')[0].do).toBe('app:explorer');
+    expect(keys(legendFor('reader'))).toEqual(expect.arrayContaining(['j k', 'e i', '- h', 'q']));
+    expect(keys(legendFor('float'))).toEqual(expect.arrayContaining(['j k', 'h l', '⏎', '⌃v', '⌃s', '/', 'a r d', 'y p', 'f', 'gb']));
+    expect(keys(legendFor('books'))).toEqual(expect.arrayContaining(['⏎ l', 'h', 'g1–9', 'a']));
   });
   it('pending chords and counts in the shell', () => {
-    expect(keys(legendFor('explorer', 'g'))).toEqual(['gg', 'ge', 'gh', 'gb', 'g1–9']);
-    expect(keys(legendFor('reader', 'z'))).toEqual(['zp', 'zh']);
-    expect(keys(legendFor('explorer', '5'))).toEqual(['5j', '5k', 'Esc']);
-    expect(keys(legendFor('explorer', '5g'))).toEqual(['gg', 'ge', 'gh', 'gb', 'g1–9']);
+    expect(keys(legendFor('home', 'g'))).toEqual(['gg', 'ge', 'gh', 'gb', 'g1–9']);
+    expect(keys(legendFor('reader', 'z'))).toEqual(['zh']);
+    expect(keys(legendFor('home', '5'))).toEqual(['5j', '5k', 'Esc']);
+    expect(keys(legendFor('home', '5g'))).toEqual(['gg', 'ge', 'gh', 'gb', 'g1–9']);
   });
   it('vim modes', () => {
     expect(keys(legendFor('normal'))).toContain(':q');
@@ -30,9 +33,6 @@ describe('legendFor', () => {
   });
   it('overlays', () => {
     expect(keys(legendFor('palette'))).toContain('⏎');
-    expect(keys(legendFor('confirm'))).toEqual(['y ⏎', 'n Esc']);
-    expect(keys(legendFor('prompt'))).toContain('dir/');
-    expect(keys(legendFor('filter'))).toContain('Esc');
     expect(keys(legendFor('books'))).toContain('g1–9');
   });
 });
@@ -50,13 +50,12 @@ describe('legendFor — panes and the split preview reader', () => {
     expect(keys(legendFor('preview', '3'))).toEqual(['3j', '3}', 'Esc']);
   });
   it('Ctrl-w pending lists the window commands in any context', () => {
-    for (const ctx of ['explorer', 'reader', 'normal', 'visual', 'preview'] as const) {
+    for (const ctx of ['home', 'reader', 'normal', 'visual', 'preview'] as const) {
       expect(keys(legendFor(ctx, '⌃w'))).toEqual(['v', 's', 'h j k l', 'q', 'o', '=', 'f ⏎', 'F', 'w', 'p', '< > + -', 'Esc']);
     }
   });
   it('a panes hint only when there is more than one pane', () => {
-    expect(keys(legendFor('explorer'))).not.toContain('⌃h ⌃l');
-    expect(keys(legendFor('explorer', null, { panes: true }))).toContain('⌃h ⌃l');
+    expect(keys(legendFor('reader'))).not.toContain('⌃h ⌃l');
     expect(keys(legendFor('reader', null, { panes: true }))).toContain('⌃h ⌃l');
     expect(keys(legendFor('normal', null, { panes: true }))).toContain('⌃h ⌃l');
     // With the split preview showing, normal mode points at it.
@@ -110,7 +109,7 @@ describe('fitLegend', () => {
     expect(narrow.shown.length).toBeLessThan(items.length);
   });
   it('items with actions are clickable in every main context', () => {
-    for (const ctx of ['explorer', 'reader', 'normal', 'insert', 'visual'] as const) {
+    for (const ctx of ['home', 'reader', 'normal', 'insert', 'visual'] as const) {
       expect(legendFor(ctx).filter((i) => i.do).length).toBeGreaterThan(3);
     }
   });
@@ -118,11 +117,11 @@ describe('fitLegend', () => {
 
 describe('settings key labels', () => {
   it('no context advertises ⌘, / Ctrl+, (browser preferences); settings is `,`', () => {
-    const ctxs = ['explorer', 'reader', 'normal', 'insert', 'visual', 'palette', 'books'] as const;
+    const ctxs = ['home', 'reader', 'normal', 'insert', 'visual', 'palette', 'books', 'float'] as const;
     for (const c of ctxs) {
       for (const it of legendFor(c, null, {})) expect(it.keys).not.toMatch(/[⌘⌃]⇧?,|Ctrl\+,/);
     }
-    expect(legendFor('explorer', null, {}).some((i) => i.keys === ',' && i.label === 'settings')).toBe(true);
+    expect(legendFor('home', null, {}).some((i) => i.keys === ',' && i.label === 'settings')).toBe(true);
   });
 });
 

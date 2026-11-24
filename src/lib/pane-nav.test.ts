@@ -13,77 +13,67 @@ import {
   type LayoutInput,
 } from './pane-nav.ts';
 
-const base: LayoutInput = { narrow: false, splitNarrow: false, pane: 'browse', editing: false, split: false, mainHasNote: false };
+const base: LayoutInput = { splitNarrow: false, editing: false, split: false, mainHasNote: false };
 const ctrl = (key: string, extra: Partial<KeyboardEvent> = {}) => ({ key, ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, ...extra });
 const plain = (key: string) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
 
-describe('paneLayout', () => {
-  it('browsing a folder: the explorer alone', () => {
-    expect(paneLayout(base)).toEqual({ order: ['explorer'], stack: null });
+describe('paneLayout (the explorer floats: never a pane)', () => {
+  it('no note: no pane', () => {
+    expect(paneLayout(base)).toEqual({ order: [], stack: null });
   });
-  it('browsing with a note preview: explorer | main', () => {
-    expect(paneLayout({ ...base, mainHasNote: true }).order).toEqual(['explorer', 'main']);
+  it('reading: main', () => {
+    expect(paneLayout({ ...base, mainHasNote: true }).order).toEqual(['main']);
   });
-  it('reading: explorer | main', () => {
-    expect(paneLayout({ ...base, pane: 'note', mainHasNote: true }).order).toEqual(['explorer', 'main']);
-  });
-  it('editing: explorer | editor, plus the split preview', () => {
-    expect(paneLayout({ ...base, pane: 'note', editing: true }).order).toEqual(['explorer', 'editor']);
-    expect(paneLayout({ ...base, pane: 'note', editing: true, split: true })).toEqual({ order: ['explorer', 'editor', 'split'], stack: null });
+  it('editing: editor, plus the split preview', () => {
+    expect(paneLayout({ ...base, editing: true }).order).toEqual(['editor']);
+    expect(paneLayout({ ...base, editing: true, split: true })).toEqual({ order: ['editor', 'split'], stack: null });
   });
   it('narrow split: Source | Preview tabs stack vertically', () => {
-    expect(paneLayout({ ...base, pane: 'note', editing: true, split: true, splitNarrow: true })).toEqual({ order: ['explorer', 'editor'], stack: ['editor', 'split'] });
-  });
-  it('phone width: one column at a time', () => {
-    expect(paneLayout({ ...base, narrow: true, mainHasNote: true }).order).toEqual(['explorer']);
-    expect(paneLayout({ ...base, narrow: true, pane: 'note', mainHasNote: true }).order).toEqual(['main']);
-    expect(paneLayout({ ...base, narrow: true, splitNarrow: true, pane: 'note', editing: true, split: true })).toEqual({ order: ['editor'], stack: ['editor', 'split'] });
+    expect(paneLayout({ ...base, editing: true, split: true, splitNarrow: true })).toEqual({ order: ['editor'], stack: ['editor', 'split'] });
   });
   it('panesOf lists stacked panes after their column', () => {
-    expect(panesOf({ order: ['explorer', 'editor'], stack: ['editor', 'split'] })).toEqual(['explorer', 'editor', 'split']);
+    expect(panesOf({ order: ['editor'], stack: ['editor', 'split'] })).toEqual(['editor', 'split']);
   });
 });
 
 describe('paneTarget (focus graph)', () => {
-  const three = paneLayout({ ...base, pane: 'note', editing: true, split: true });
-  const tabs = paneLayout({ ...base, pane: 'note', editing: true, split: true, splitNarrow: true });
+  const two = paneLayout({ ...base, editing: true, split: true });
+  const tabs = paneLayout({ ...base, editing: true, split: true, splitNarrow: true });
 
   it('Ctrl-h / Ctrl-l walk left/right without wrapping', () => {
-    expect(paneTarget(three, 'explorer', 'l')).toBe('editor');
-    expect(paneTarget(three, 'editor', 'l')).toBe('split');
-    expect(paneTarget(three, 'split', 'l')).toBeNull();
-    expect(paneTarget(three, 'split', 'h')).toBe('editor');
-    expect(paneTarget(three, 'editor', 'h')).toBe('explorer');
-    expect(paneTarget(three, 'explorer', 'h')).toBeNull();
+    expect(paneTarget(two, 'editor', 'l')).toBe('split');
+    expect(paneTarget(two, 'split', 'l')).toBeNull();
+    expect(paneTarget(two, 'split', 'h')).toBe('editor');
+    expect(paneTarget(two, 'editor', 'h')).toBeNull();
   });
   it('Ctrl-j / Ctrl-k have no target side by side', () => {
-    expect(paneTarget(three, 'editor', 'j')).toBeNull();
-    expect(paneTarget(three, 'editor', 'k')).toBeNull();
+    expect(paneTarget(two, 'editor', 'j')).toBeNull();
+    expect(paneTarget(two, 'editor', 'k')).toBeNull();
   });
   it('tabs: j/k switch, h from the preview returns to the editor', () => {
     expect(paneTarget(tabs, 'editor', 'j')).toBe('split');
     expect(paneTarget(tabs, 'split', 'k')).toBe('editor');
     expect(paneTarget(tabs, 'split', 'h')).toBe('editor');
     expect(paneTarget(tabs, 'editor', 'l')).toBe('split');
-    expect(paneTarget(tabs, 'editor', 'h')).toBe('explorer');
-    expect(paneTarget(tabs, 'explorer', 'l')).toBe('editor');
+    expect(paneTarget(tabs, 'editor', 'h')).toBeNull();
   });
   it('Ctrl-w w cycles with wrap; Ctrl-w p returns to the previous pane', () => {
-    expect(paneTarget(three, 'explorer', 'w')).toBe('editor');
-    expect(paneTarget(three, 'split', 'w')).toBe('explorer');
+    expect(paneTarget(two, 'editor', 'w')).toBe('split');
+    expect(paneTarget(two, 'split', 'w')).toBe('editor');
     expect(paneTarget(tabs, 'editor', 'w')).toBe('split');
-    expect(paneTarget(three, 'split', 'p', 'explorer')).toBe('explorer');
-    expect(paneTarget(three, 'split', 'p', null)).toBeNull();
-    expect(paneTarget(three, 'split', 'p', 'main')).toBeNull(); // not on screen
+    expect(paneTarget(two, 'split', 'p', 'editor')).toBe('editor');
+    expect(paneTarget(two, 'split', 'p', null)).toBeNull();
+    expect(paneTarget(two, 'split', 'p', 'main')).toBeNull(); // not on screen
   });
   it('single pane: nothing to move to', () => {
-    const one = paneLayout(base);
-    expect(paneTarget(one, 'explorer', 'l')).toBeNull();
-    expect(paneTarget(one, 'explorer', 'w')).toBeNull();
+    const one = paneLayout({ ...base, mainHasNote: true });
+    expect(paneTarget(one, 'main', 'l')).toBeNull();
+    expect(paneTarget(one, 'main', 'w')).toBeNull();
+    expect(paneTarget(paneLayout(base), null, 'l')).toBeNull();
   });
   it('unknown / hidden origin starts at the first pane', () => {
-    expect(paneTarget(three, null, 'l')).toBe('explorer');
-    expect(paneTarget(three, 'main', 'h')).toBe('explorer');
+    expect(paneTarget(two, null, 'l')).toBe('editor');
+    expect(paneTarget(two, 'main', 'h')).toBe('editor');
   });
 });
 

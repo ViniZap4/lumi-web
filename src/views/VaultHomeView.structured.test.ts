@@ -141,8 +141,8 @@ describe('VaultHomeView structured notes', () => {
   it('a .canvas file opens as a canvas', async () => {
     cmp = mount(VaultHomeView, { target });
     await settle();
-    // The explorer cursor starts on the first note; then open the canvas.
-    await waitFor(() => notes.selectedID === 'n1', 'initial selection');
+    // The book opens on its home (no note yet); then open the canvas.
+    await waitFor(() => notes.list.length > 0 && !notes.loadingList, 'notes');
     await notes.select('c1');
     await waitFor(() => target.querySelector('[data-testid="canvas-view"]'), 'canvas');
     expect(target.textContent).toContain('Hello canvas');

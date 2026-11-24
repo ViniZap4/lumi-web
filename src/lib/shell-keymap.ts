@@ -1,4 +1,5 @@
-// Yazi-style keymap for the book shell (explorer + reader).
+// Yazi-style keymap for the book shell: the floating explorer
+// ('explorer' context) and the note / empty home ('reader' context).
 //
 // Mirrors the Apple client's ShellKeymap (LumiKit/Explorer) so the two
 // clients share one muscle memory: j/k/h/l, gg/G, ⌃d/⌃u, counts (5j),
@@ -208,6 +209,8 @@ export class ShellKeymap {
     switch (ch) {
       case 'q': return { kind: 'close' };
       case 'r': return { kind: 'rename' };
+      // The floating explorer opens with its `a` prompt at this note.
+      case 'a': return { kind: 'create' };
       case 'd': return { kind: 'halfPage', dir: 1 };
       case 'u': return { kind: 'halfPage', dir: -1 };
       case 'f': return { kind: 'page', dir: 1 };

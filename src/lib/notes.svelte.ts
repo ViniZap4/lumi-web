@@ -205,7 +205,10 @@ class NotesStore {
     return out.filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
   }
 
-  async select(id: string | null): Promise<void> {
+  /** Select a note and load its body. `seed` (a body already cached,
+   *  e.g. by the floating explorer's preview) paints at once; the
+   *  server copy replaces it when it arrives. */
+  async select(id: string | null, seed?: NoteContent | null): Promise<void> {
     if (this.selectedID === id) return;
     const vaultID = this.vaultID;
     const seq = ++this.contentSeq;
@@ -220,13 +223,17 @@ class NotesStore {
     }
     const ctrl = new AbortController();
     this.contentAbort = ctrl;
-    this.loadingContent = true;
+    const seeded = !!seed && seed.id === id && seed.vault_id === vaultID;
+    if (seeded) this.content = seed!;
+    this.loadingContent = !seeded;
     try {
       const content = await api.getNoteContent(vaultID, id, ctrl.signal);
       if (seq !== this.contentSeq || vaultID !== this.vaultID) return;
       this.content = content;
     } catch (e) {
       if (seq !== this.contentSeq || vaultID !== this.vaultID || isAbort(e)) return;
+      // A seeded body stays on screen when the refresh fails.
+      if (seeded && isNetworkError(e)) return;
       if (isNetworkError(e)) {
         // Offline: the note's persisted replica (if any) is the best
         // local copy. Read-only preview here; editing restores the

@@ -61,7 +61,8 @@
   import { selectorOrder } from '../lib/books-model.ts';
   import { STATE_LABEL } from '../lib/bookstatus.ts';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
-  import { stagger, animate, SPRING } from '../lib/motion.ts';
+  import { springIn, cascade, exitGhost } from '../lib/motion.ts';
+  import { carousel, takeOrigin } from '../lib/motion-actions.ts';
   import type { OpenWhere } from '../lib/link-open.ts';
   import MillerColumn from './MillerColumn.svelte';
   import MarkdownView from './MarkdownView.svelte';
@@ -274,6 +275,7 @@
     }
     void tick().then(() => {
       focusCurrent();
+      flyIn();
       entrance();
       runInitial();
     });
@@ -286,10 +288,39 @@
     restoreFocus();
   });
 
-  /** Rows stagger in when the overlay opens (and on a level change). */
+  /** Rows ripple in when the overlay opens (and on a level change). */
   function entrance(): void {
     const host = level === 'books' ? booksEl : colEl;
-    if (host) stagger(Array.from(host.querySelectorAll<HTMLElement>('[role="option"], .fx-acct')).slice(0, 14), level === 'books' ? { step: 22, y: 10 } : {});
+    if (host) cascade(Array.from(host.querySelectorAll<HTMLElement>('[role="option"], .fx-acct')), { y: 14, opacity: 0 }, { step: 22, max: 220, spring: 'gentle' });
+  }
+
+  /** Motion v2 — the panel GROWS from its trigger (the explorer button
+   *  or whatever the pointer just used) on the bouncy spring, its
+   *  columns slide in one after another like cards dealt from the left,
+   *  and the scrim's depth blur eases in (CSS). */
+  function flyIn(): void {
+    if (!rootEl || !motionAllowed()) return;
+    const r = rootEl.getBoundingClientRect();
+    const t = takeOrigin(document.querySelector('[data-testid="explorer-button"]'));
+    const ox = t ? Math.max(0, Math.min(r.width, t.left + t.width / 2 - r.left)) : r.width / 2;
+    const oy = t ? Math.max(0, Math.min(r.height, t.top + t.height / 2 - r.top)) : r.height * 0.35;
+    if (sheet) springIn(rootEl, { y: r.height * 0.6 }, { spring: 'gentle' });
+    else springIn(rootEl, { scale: 0.8, opacity: 0 }, { spring: 'bouncy', origin: `${ox.toFixed(0)}px ${oy.toFixed(0)}px` });
+    cascade(rootEl.querySelectorAll<HTMLElement>('.fx-cols > .fx-col, .fx-cols > section'), { x: -26, opacity: 0 }, { step: 55, max: 165, spring: 'glide' });
+  }
+
+  /** Close is quick but VISIBLE: a snapshot of the panel collapses
+   *  toward `to` (the opened row → its note title; else the trigger) and
+   *  the scrim fades, while the real overlay is already gone. */
+  function flyOut(to?: Element | null): void {
+    if (!rootEl || !motionAllowed()) return;
+    const scrim = rootEl.parentElement;
+    const r = rootEl.getBoundingClientRect();
+    const t = to?.getBoundingClientRect() ?? document.querySelector('[data-testid="explorer-button"]')?.getBoundingClientRect() ?? null;
+    const ox = t ? t.left + t.width / 2 - r.left : r.width / 2;
+    const oy = t ? t.top + t.height / 2 - r.top : r.height / 2;
+    if (scrim) exitGhost(scrim, { opacity: 0 }, { spring: 'snappy', shallow: true });
+    exitGhost(rootEl, { scale: to ? 0.5 : 0.86, opacity: 0 }, { spring: 'snappy', origin: `${ox.toFixed(0)}px ${oy.toFixed(0)}px` });
   }
 
   // Folder travel (l / h): the columns shift like a camera moving one
@@ -303,15 +334,17 @@
     lastDir = d;
     if (prev == null || prev === d || level !== 'files') return;
     const deeper = d.length > prev.length && d.startsWith(prev);
-    const s = SPRING.gentle;
     void tick().then(() => {
       const cols = rootEl?.querySelectorAll<HTMLElement>('.fx-col');
       if (!cols || cols.length < 3) return;
-      const dx = deeper ? 14 : -14;
-      animate(cols[0], [{ opacity: 0.5, transform: `translateX(${dx * 0.6}px)` }, { opacity: 1, transform: 'none' }], s.ms, s.easing);
-      animate(cols[1], [{ opacity: 0.35, transform: `translateX(${dx}px)` }, { opacity: 1, transform: 'none' }], s.ms, s.easing);
-      animate(cols[2], [{ opacity: 0 }, { opacity: 1 }], s.ms, s.easing, 40);
-      if (colEl) stagger(Array.from(colEl.querySelectorAll<HTMLElement>('[role="option"]')).slice(0, 12), { step: 14, max: 120, y: 0 });
+      // A carousel with momentum: the columns are pushed one column-
+      // width-ish toward where you came from and spring home (glide,
+      // 6 % overshoot). Repeated l / h ADD to the motion in flight.
+      const dx = deeper ? 90 : -90;
+      carousel(cols[0], dx * 0.7);
+      carousel(cols[1], dx);
+      springIn(cols[2], { x: dx * 1.3, opacity: 0 }, { spring: 'glide', delay: 45 });
+      if (colEl) cascade(Array.from(colEl.querySelectorAll<HTMLElement>('[role="option"]')), { x: deeper ? 16 : -16, opacity: 0 }, { step: 16, max: 160, limit: 12, spring: 'glide' });
     });
   });
 
@@ -340,6 +373,7 @@
   }
 
   function close(): void {
+    flyOut(null);
     onclose(nav.dir);
   }
 
@@ -349,7 +383,10 @@
 
   function open(where: OpenWhere): void {
     const c = nav.current;
-    if (c?.kind === 'note') onopen(c.note.id, where, rowNameEl());
+    if (c?.kind === 'note') {
+      flyOut(rowNameEl());
+      onopen(c.note.id, where, rowNameEl());
+    }
     else if (c?.kind === 'folder' && where === 'current') nav.right();
   }
 
@@ -380,17 +417,16 @@
   function scopeChange(dir: 'out' | 'in'): void {
     if (!motionAllowed() || !rootEl) return;
     const cols = rootEl.querySelector<HTMLElement>('.fx-cols');
-    const g = SPRING.gentle;
-    const from = dir === 'out' ? 1.04 : 0.96;
-    animate(cols, [{ opacity: 0, transform: `scale(${from})`, filter: 'blur(3px)' }, { opacity: 1, transform: 'none', filter: 'none' }], g.ms, g.easing);
-    if (!sheet) animate(rootEl, [{ transform: 'scale(1)' }, { transform: `scale(${dir === 'out' ? 0.96 : 1.015})`, offset: 0.35 }, { transform: 'none' }], SPRING.bouncy.ms + 60, 'cubic-bezier(.3,.7,.3,1)');
+    // The content arrives from a different depth (shelf = further away)
+    // and the panel itself takes the hit like a camera pulling back.
+    springIn(cols, { scale: dir === 'out' ? 1.1 : 0.88, opacity: 0 }, { spring: 'gentle' });
+    if (!sheet) springIn(rootEl, { scale: dir === 'out' ? 0.94 : 1.03 }, { spring: 'bouncy' });
   }
 
   /** Account level (only with many accounts) ⇄ Livros: same zoom, smaller. */
   function layerChange(dir: 'out' | 'in'): void {
     if (!motionAllowed() || !booksEl) return;
-    const g = SPRING.gentle;
-    animate(booksEl, [{ opacity: 0, transform: `scale(${dir === 'out' ? 1.03 : 0.97})` }, { opacity: 1, transform: 'none' }], g.ms, g.easing);
+    springIn(booksEl, { scale: dir === 'out' ? 1.06 : 0.94, opacity: 0 }, { spring: 'gentle' });
   }
 
   function onKey(e: KeyboardEvent): void {
@@ -1062,7 +1098,7 @@
               {:else if previewKind === 'kanban' && previewContent?.id === curNote.id}
                 <KanbanMini text={previewContent.body ?? ''} onopen={openPreviewed} />
               {:else if previewBody != null && previewKind === 'markdown'}
-                <div class="lumi-prose compact" data-prose={editorSettings.value.proseFont}><MarkdownView blocks={previewBlocks} /></div>
+                <div class="lumi-prose compact" data-prose={editorSettings.value.proseFont}><MarkdownView rise={false} blocks={previewBlocks} /></div>
               {:else if previewErr}
                 <div class="fx-empty err">{previewErr}</div>
               {:else}
@@ -1124,9 +1160,14 @@
     background:
       radial-gradient(120% 90% at 50% 40%, transparent 40%, rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.55))),
       var(--scrim);
-    animation: ui-fade var(--dur-fade) var(--ease);
+    /* Depth: the page behind blurs a little as the scrim eases in
+       (one blurred layer; opacity-only animation). */
+    -webkit-backdrop-filter: blur(3px) saturate(0.9);
+    backdrop-filter: blur(3px) saturate(0.9);
+    animation: fx-scrim-in var(--spring-soft-ms) var(--spring-soft) both;
     transition: background-color var(--dur-fade) var(--ease), opacity var(--dur-fade) var(--ease);
   }
+  @keyframes fx-scrim-in { from { opacity: 0; } }
   .fx {
     position: relative;
     /* Most of the viewport (the note behind is dimmed anyway), capped
@@ -1143,12 +1184,10 @@
     box-shadow: var(--elev-4), var(--edge-light);
     overflow: hidden;
     outline: none;
-    /* Settles with a slight spring. */
-    animation: fx-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+    /* Grows from its trigger on the bouncy spring (flyIn, JS: no CSS
+       transform transition here, the engine writes transform). */
     transform-origin: 50% 35%;
-    transition: opacity var(--dur-fade) var(--ease), transform var(--spring-gentle-ms) var(--spring-gentle);
   }
-  @keyframes fx-in { from { opacity: 0; transform: translateY(10px) scale(0.965); } 30% { opacity: 1; } }
   /* A faint wash of the accent along the top edge: the panel's "light". */
   .fx::before {
     content: '';
@@ -1160,7 +1199,7 @@
   }
   /* Dragging a note out to a pane edge: the overlay steps aside. */
   .fx-scrim.dragging-out { pointer-events: none; background: transparent; }
-  .fx-scrim.dragging-out .fx { opacity: 0.22; transform: scale(0.94); }
+  .fx-scrim.dragging-out .fx { opacity: 0.22; transform: scale(0.94); transition: opacity var(--dur-fade) var(--ease), transform var(--spring-gentle-ms) var(--spring-gentle); }
   .fx-head {
     position: relative;
     flex: none;

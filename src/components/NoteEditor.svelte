@@ -243,7 +243,7 @@
       borderLeftWidth: '2px',
       borderRightWidth: '0',
       marginRight: '0',
-      animation: 'peer-caret-idle 12s linear forwards',
+      animation: 'peer-caret-in var(--spring-glide-ms) var(--spring-glide) both, peer-caret-idle 12s linear forwards',
     },
     '.cm-ySelectionCaretDot': {
       width: '6px',
@@ -268,7 +268,7 @@
       boxShadow: '0 2px 8px -2px rgb(0 0 0 / 0.35)',
       opacity: '1',
       transformOrigin: 'bottom left',
-      animation: 'peer-label-in 220ms var(--spring-bouncy) both, peer-label 3.2s linear 0.2s forwards',
+      animation: 'peer-label-in var(--spring-bouncy-ms) var(--spring-bouncy) both, peer-label 3.2s linear 0.4s forwards',
     },
     '.cm-ySelectionCaret:hover > .cm-ySelectionInfo': { opacity: '1', animation: 'none' },
     '.cm-panels': {

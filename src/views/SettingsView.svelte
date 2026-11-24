@@ -23,6 +23,7 @@
     type MapMode,
     type EditorSettings,
     type ReadingWidth,
+    type MotionSetting,
   } from '../lib/editor-settings.ts';
   import { parseVimrc, errorCount, displayLhs, MAX_VIMRC_BYTES, VIMRC_EXAMPLE } from '../lib/vimrc.ts';
   import { effectiveSettings } from '../lib/vim-config.ts';
@@ -611,10 +612,14 @@
             </label>
           {/if}
           {#if show('motion')}
-            <label class="row">
-              <div class="row-text"><span class="row-title">Reduce motion</span><span class="row-desc">Turns off view transitions and UI animation. Always on when your system asks for reduced motion.</span></div>
-              <input type="checkbox" class="ui-switch" checked={s.reduceMotion} onchange={(e) => editorSettings.update({ reduceMotion: checked(e) })} data-testid="reduce-motion-toggle" />
-            </label>
+            <div class="row">
+              <div class="row-text"><span class="row-title">Movimento</span><span class="row-desc">Completo: every response moves with real springs. Suave: the same choreography with less travel and no overshoot. Reduzido: changes are instant (always, when your system asks for reduced motion).</span></div>
+              <div class="ui-seg" data-testid="motion-level">
+                {#each [['full', 'Completo'], ['soft', 'Suave'], ['reduced', 'Reduzido']] as [v, label] (v)}
+                  <button type="button" aria-pressed={s.motion === v} onclick={() => editorSettings.update({ motion: v as MotionSetting })}>{label}</button>
+                {/each}
+              </div>
+            </div>
           {/if}
         </section>
       {/if}

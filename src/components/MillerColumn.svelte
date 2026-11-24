@@ -13,6 +13,7 @@
   import { noteIconKind, disambiguateTitles } from '../lib/note-icons.ts';
   import { peekNote } from '../lib/note-content.ts';
   import NoteIcon from './NoteIcon.svelte';
+  import { slab } from '../lib/motion-actions.ts';
 
   export const ROW_HEIGHT = 30;
   const OVERSCAN = 8;
@@ -169,7 +170,7 @@
       {#if active && cursor >= 0}
         <!-- The cursor highlight glides between rows (spring); rows keep
              their own .cursor styling as the static fallback. -->
-        <div class="glide" aria-hidden="true" style="transform: translateY({cursor * rowHeight}px); height: {rowHeight}px"></div>
+        <div class="glide" aria-hidden="true" use:slab={cursor * rowHeight} style="height: {rowHeight}px"></div>
       {/if}
       {#each visible as e, j (e.key)}
         {@const i = start + j}
@@ -273,7 +274,8 @@
     border-radius: var(--radius-sm);
     background: linear-gradient(90deg, var(--accent-soft), color-mix(in oklch, var(--color-primary) 6%, transparent));
     box-shadow: inset 0 0 0 1px var(--accent-wash), 0 8px 20px -12px var(--accent-glow);
-    transition: transform var(--spring-glide-ms) var(--spring-glide);
+    /* Driven by lib/motion-actions.ts slab(): a glide spring that
+       stretches with speed (mass), interruptible. */
     will-change: transform;
     pointer-events: none;
   }

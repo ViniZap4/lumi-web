@@ -261,7 +261,7 @@ kbd, .ui-kbd {
 html { scroll-behavior: smooth; }
 /* Hover lift + press scale for any interactive surface (cards, rows). */
 .lift { transition: transform var(--spring-snappy-ms) var(--spring-snappy), box-shadow var(--dur-fade) var(--ease); }
-.lift:hover { transform: translateY(-1px); box-shadow: var(--elev-2); }
+.lift:hover { transform: translateY(-2px); box-shadow: var(--elev-2); }
 .lift:active { transform: scale(0.97); transition-duration: var(--dur-tap); }
 .press { transition: transform var(--spring-snappy-ms) var(--spring-snappy); }
 .press:active { transform: scale(0.97); transition-duration: var(--dur-tap); }
@@ -304,21 +304,21 @@ html { scroll-behavior: smooth; }
 @keyframes resolve-in { from { opacity: 0; transform: translateY(3px); filter: blur(2px); } }
 /* Overlays settle with a slight spring (scale .96 → 1, overshoot). */
 .settle { animation: settle-in var(--spring-bouncy-ms) var(--spring-bouncy) both; }
-@keyframes settle-in { from { opacity: 0; transform: scale(0.96) translateY(6px); } 35% { opacity: 1; } }
+@keyframes settle-in { from { opacity: 0; transform: scale(0.9) translateY(12px); } 30% { opacity: 1; } }
 /* Panes appearing (splits) settle a touch less. */
 .settle-soft { animation: settle-soft var(--spring-gentle-ms) var(--spring-gentle) both; }
-@keyframes settle-soft { from { opacity: 0; transform: scale(0.985); } }
+@keyframes settle-soft { from { opacity: 0; transform: scale(0.97) translateY(8px); } }
 /* Error: a short damped shake (never on the typing path). */
 .shake { animation: shake 360ms var(--ease) both; }
 @keyframes shake { 15% { transform: translateX(-5px); } 35% { transform: translateX(4px); } 55% { transform: translateX(-2.5px); } 75% { transform: translateX(1px); } }
 /* Success: a check that pops once. */
-@keyframes pop-in { from { opacity: 0; transform: scale(0.6); } 60% { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.3); } 40% { opacity: 1; } }
 /* Toasts slide in from below; the stack shifts with FLIP (lib/motion.ts). */
 @keyframes toast-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
 /* Sync dot: breathing while syncing, a ring on remote changes. */
-@keyframes sync-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.72); opacity: 0.55; } }
-@keyframes sync-ping { from { transform: scale(1); opacity: 0.7; } to { transform: scale(2.8); opacity: 0; } }
+@keyframes sync-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.6); opacity: 0.45; } }
+@keyframes sync-ping { from { transform: scale(1); opacity: 0.85; } to { transform: scale(3.6); opacity: 0; } }
 /* Presence: a live collaborator's dot breathes (slow, out of phase). */
 @keyframes presence-breathe { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.9); opacity: 0; } }
 /* Remotely edited ranges in the editor (lib/remote-flash.ts). */
@@ -328,11 +328,14 @@ html { scroll-behavior: smooth; }
    then fades; an idle caret dims. Each move re-creates the caret DOM,
    which restarts both animations. */
 @keyframes peer-label { 0%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(2px); } }
-@keyframes peer-label-in { from { opacity: 0; transform: translateY(3px) scale(0.92); } }
+@keyframes peer-label-in { from { opacity: 0; transform: translateY(6px) scale(0.55); } }
+@keyframes peer-caret-in { from { opacity: 0.2; transform: scaleY(0.3); } }
 @keyframes peer-caret-idle { 0%, 80% { opacity: 1; } 100% { opacity: 0.45; } }
 /* Smooth caret: the cursor glides between positions (≤ 100 ms, typing
    path) and its blink breathes instead of blinking hard. */
 .cm-editor .cm-cursorLayer .cm-cursor { transition: left 80ms var(--ease), top 80ms var(--ease); }
+/* Remote carets GLIDE to their new position (y-codemirror re-creates
+   the caret on each move; the name tag pops on the bouncy spring). */
 .cm-editor.cm-focused .cm-cursorLayer { animation-timing-function: var(--ease-breath) !important; }
 /* Ambient home light (lib/ambient.ts pauses it while the tab is hidden). */
 @keyframes ambient-drift-a { from { transform: translate3d(-6%, -4%, 0) rotate(0deg) scale(1); } to { transform: translate3d(5%, 3%, 0) rotate(24deg) scale(1.12); } }
@@ -365,14 +368,18 @@ html { scroll-behavior: smooth; }
 ::view-transition-group(*) { animation-duration: var(--spring-gentle-ms); animation-timing-function: var(--spring-gentle); }
 /* Sequential, not a cross-dissolve: the old page leaves fast, the new
    one arrives just after, so two texts never overlap (no ghosting). */
-::view-transition-old(lumi-pane) { animation: 90ms var(--ease-exit) both vt-out; }
-::view-transition-new(lumi-pane) { animation: var(--spring-gentle-ms) var(--spring-gentle) 70ms both vt-in; }
+/* Motion v2: the old page lifts away (110 ms), the new page's frame is
+   there at once and its CONTENT rises in by blocks (MarkdownView rise,
+   lib/motion-actions.ts riseBlocks), so the eye reads the arrival. */
+::view-transition-old(lumi-pane) { animation: 110ms var(--ease-exit) both vt-out-lift; }
+::view-transition-new(lumi-pane) { animation: 120ms var(--ease) 40ms both vt-fade-in; }
 /* Shared elements (motion.ts sharedTransition): an explorer row grows
    into the opened note's title; a link morphs into its hover card. */
 ::view-transition-group(note-title),
 ::view-transition-group(hover-card) { animation-duration: var(--spring-glide-ms); animation-timing-function: var(--spring-glide); }
 ::view-transition-old(note-title), ::view-transition-new(note-title) { animation-duration: var(--spring-glide-ms); height: 100%; object-fit: none; object-position: left center; }
 @keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-out-lift { to { opacity: 0; transform: translateY(-10px) scale(0.99); } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(8px) scale(0.995); } }
 @keyframes vt-fade-in { from { opacity: 0; } }
 

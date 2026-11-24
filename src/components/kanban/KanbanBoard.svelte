@@ -14,7 +14,7 @@
   import { planKanban, type KanbanOp } from '../../lib/kanban/kanban-edits.ts';
   import { KanbanKeys, clampCursor, type KanbanCursor } from '../../lib/kanban/kanban-keys.ts';
   import { renderMarkdown } from '../../lib/markdown.ts';
-  import { motionAllowed, animate, SPRING } from '../../lib/motion.ts';
+  import { motionAllowed, animate, SPRING, springEase } from '../../lib/motion.ts';
   import { modeKey, type StructuredMode } from '../../lib/structured-mode.svelte.ts';
 
   interface Props {
@@ -530,7 +530,7 @@
     e.preventDefault();
     const t = dropTarget(e.clientX, e.clientY, drag);
     const vx = e.clientX - drag.x;
-    const tilt = Math.max(-7, Math.min(7, drag.tilt * 0.6 + vx * 0.35));
+    const tilt = Math.max(-9, Math.min(9, drag.tilt * 0.6 + vx * 0.4));
     drag = { ...drag, x: e.clientX, y: e.clientY, toLane: t.lane, toIndex: t.index, tilt };
     if (tiltTimer) clearTimeout(tiltTimer);
     tiltTimer = setTimeout(() => { if (drag) drag = { ...drag, tilt: 0 }; }, 90);
@@ -576,7 +576,9 @@
       // Lands: from the lifted ghost (scaled, leaning) into the slot on
       // the glide spring — a 1% overshoot reads as weight.
       const lean = motionAllowed() ? d.tilt : 0;
-      animate(el, [{ transform: `translate(${ghost.x - r.left}px, ${ghost.y - r.top}px) rotate(${lean}deg) scale(1.035)` }, { transform: 'none' }], SPRING.glide.ms, SPRING.glide.easing);
+      // Drop BOUNCE: the card has weight — it lands on the bouncy
+      // spring (overshoots into the slot, settles).
+      animate(el, [{ transform: `translate(${ghost.x - r.left}px, ${ghost.y - r.top}px) rotate(${lean}deg) scale(1.06)` }, { transform: 'none' }], SPRING.bouncy.ms, SPRING.bouncy.easing);
     });
   }
 
@@ -602,7 +604,9 @@
     }
     return lanes;
   });
-  const flipMs = () => (motionAllowed() ? 180 : 0);
+  // Neighbours make room with a spring (glide: they overshoot a hair).
+  const flipMs = () => (motionAllowed() ? SPRING.glide.ms : 0);
+  const glideEase = (t: number) => springEase(SPRING.glide.points, t);
 
   function realLaneIndex(l: LaneVM): number {
     return l.lane.index;
@@ -682,7 +686,7 @@
           data-lane-key={l.key}
           aria-hidden={l.placeholder ? 'true' : undefined}
           aria-label={l.placeholder ? undefined : l.lane.title || 'Untitled column'}
-          animate:flip={{ duration: flipMs() }}
+          animate:flip={{ duration: flipMs(), easing: glideEase }}
         >
           {#if !l.placeholder}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -714,7 +718,7 @@
                   data-card-index={vm ? ci : undefined}
                   aria-current={focused ? 'true' : undefined}
                   aria-hidden={'placeholder' in it ? 'true' : undefined}
-                  animate:flip={{ duration: flipMs() }}
+                  animate:flip={{ duration: flipMs(), easing: glideEase }}
                   onpointerdown={(e) => vm && onCardPointerDown(e, vm, laneIdx, ci)}
                   ondblclick={() => vm && !reading && startEdit(vm)}
                 >
@@ -1009,7 +1013,7 @@
     box-shadow: 0 2px 4px rgb(var(--shadow-rgb) / 0.25), 0 26px 50px -14px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 1.3)), 0 0 0 4px var(--accent-wash), 0 14px 40px -12px var(--accent-glow), var(--edge-light);
     box-sizing: border-box;
     will-change: transform;
-    scale: 1.035;
+    scale: 1.06;
     animation: ghost-lift var(--spring-bouncy-ms) var(--spring-bouncy) both;
   }
   @keyframes ghost-lift { from { scale: 1; box-shadow: var(--elev-1); } }

@@ -98,6 +98,12 @@
   let w = $state(0);
   let h = $state(0);
   let view = $state<Viewport>({ x: 0, y: 0, zoom: 1 });
+  // The opening reveal staggers node pops; after it, spawns are instant.
+  let opening = $state(true);
+  $effect(() => {
+    const t = setTimeout(() => (opening = false), 900);
+    return () => clearTimeout(t);
+  });
   let fitted = false;
   let easing = $state(false);
   let easeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -786,7 +792,7 @@
       {/if}
     {/each}
 
-    {#each cards as n (n.id)}
+    {#each cards as n, ni (n.id)}
       {@const c = colorCSS(n.color)}
       {@const sel = selected.includes(n.id)}
       <div
@@ -794,7 +800,7 @@
         class:sel
         class:colored={!!c}
         data-node-id={n.id}
-        style="left: {n.x}px; top: {n.y}px; width: {n.width}px; height: {n.height}px; {c ? `--c: ${c}` : ''}"
+        style="left: {n.x}px; top: {n.y}px; width: {n.width}px; height: {n.height}px; {c ? `--c: ${c};` : ''} {opening ? `--i: ${Math.min(ni, 14)}` : ''}"
       >
         {#if n.type === 'text'}
           {#if editing?.kind === 'text' && editing.id === n.id}
@@ -956,7 +962,10 @@
     transition: box-shadow var(--dur-fade) var(--ease), border-color var(--dur-fade) var(--ease);
   }
   .cv-node:hover { box-shadow: var(--elev-3), var(--edge-light); }
-  @keyframes node-in { from { opacity: 0; scale: 0.92; } }
+  /* Motion v2: on open the nodes pop in one after another (28 ms
+     apart, ≤ 14 steps); a node created later pops at once. */
+  .cv-node { animation-delay: calc(var(--i, 0) * 28ms); }
+  @keyframes node-in { from { opacity: 0; scale: 0.6; translate: 0 14px; } 30% { opacity: 1; } }
   .cv-node.colored { background: color-mix(in srgb, var(--c) 9%, var(--cv-node)); }
   .cv-node.sel { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--ring), 0 6px 18px color-mix(in srgb, #000 16%, transparent); }
   .cv-group {
@@ -1040,8 +1049,8 @@
   .cv-edge-line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   /* Edges draw themselves from their source (new edges, and the reveal
      when the canvas opens); arrow heads fade in as the line arrives. */
-  .cv-edge:not(.connecting) .cv-edge-line { stroke-dasharray: 1; animation: edge-draw var(--spring-soft-ms) var(--spring-soft) 120ms both; }
-  .cv-edge:not(.connecting) .cv-edge-head { animation: ui-fade var(--dur-fade) var(--ease) 380ms both; }
+  .cv-edge:not(.connecting) .cv-edge-line { stroke-dasharray: 1; animation: edge-draw 620ms var(--spring-soft) 260ms both; }
+  .cv-edge:not(.connecting) .cv-edge-head { animation: pop-in var(--spring-bouncy-ms) var(--spring-bouncy) 760ms both; transform-box: fill-box; transform-origin: center; }
   @keyframes edge-draw { from { stroke-dashoffset: 1; } }
   .cv-edge.connecting .cv-edge-line { animation: edge-march 0.6s linear infinite; }
   @keyframes edge-march { to { stroke-dashoffset: -11; } }

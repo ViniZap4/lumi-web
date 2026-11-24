@@ -11,6 +11,8 @@
   import { noteIconKind, disambiguateTitles } from '../lib/note-icons.ts';
   import type { NoteViewKind } from '../lib/note-kind.ts';
   import NoteIcon from './NoteIcon.svelte';
+  import { springIn, cascade } from '../lib/motion.ts';
+  import { slab } from '../lib/motion-actions.ts';
 
   interface Props {
     commands: readonly PaletteCommand[];
@@ -57,12 +59,37 @@
     cursor = 0;
   });
 
+  // The selection is a lit slab that springs between rows (glide +
+  // stretch with speed, lib/motion-actions.ts slab).
+  let slabY = $state(0);
+  let slabH = $state(34);
   $effect(() => {
+    void items;
     const el = listEl?.querySelector<HTMLElement>(`[data-i="${cursor}"]`);
     if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
+    if (el) {
+      slabY = el.offsetTop;
+      slabH = el.offsetHeight || 34;
+    }
   });
 
+  // Results ripple in when the query changes (first 10, ≤ 180 ms).
+  let lastQ: string | null = null;
+  $effect(() => {
+    const q = query;
+    void items;
+    if (q === lastQ) return;
+    const first = lastQ === null;
+    lastQ = q;
+    void tick().then(() => {
+      if (listEl) cascade(listEl.querySelectorAll('.item'), first ? { y: 10, opacity: 0 } : { x: -6, opacity: 0.2 }, { step: 18, max: 180, limit: 10, spring: 'glide', delay: first ? 60 : 0 });
+    });
+  });
+
+  let sheetEl = $state<HTMLElement | null>(null);
   onMount(() => {
+    // Opens with a spring from just above (bouncy: overshoots, settles).
+    springIn(sheetEl, { scale: 0.9, y: -18, opacity: 0 }, { spring: 'bouncy', origin: '50% 0' });
     void tick().then(() => inputEl?.focus());
   });
 
@@ -123,7 +150,8 @@
 
 <div class="ui-scrim" role="presentation" onclick={onclose}>
   <div
-    class="ui-sheet settle palette"
+    class="ui-sheet palette"
+    bind:this={sheetEl}
     role="dialog"
     aria-modal="true"
     aria-label="Command palette"
@@ -150,6 +178,7 @@
       />
     </div>
     <ul class="list" id="palette-list" role="listbox" bind:this={listEl}>
+      {#if items.length}<li class="sel-slab" role="presentation" aria-hidden="true" use:slab={slabY} style="height: {slabH}px"></li>{/if}
       {#each items as it, i (it.key)}
         {#if i === 0 || items[i - 1].kind !== it.kind}
           <li class="ui-eyebrow sep" role="presentation">{it.kind === 'cmd' ? 'Commands' : 'Notes'}</li>
@@ -220,7 +249,19 @@
     cursor: pointer;
     font-size: var(--text-sm);
   }
-  .item.cursor { background: linear-gradient(90deg, var(--accent-soft), var(--accent-wash)); box-shadow: inset 2px 0 0 var(--accent), 0 6px 16px -12px var(--accent-glow); }
+  .list { position: relative; }
+  .item { position: relative; z-index: 1; }
+  .sel-slab {
+    position: absolute;
+    left: var(--sp-2);
+    right: var(--sp-2);
+    top: 0;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, var(--accent-soft), var(--accent-wash));
+    box-shadow: inset 2px 0 0 var(--accent), 0 6px 16px -12px var(--accent-glow);
+    pointer-events: none;
+    will-change: transform;
+  }
   .item.cursor .icon { color: var(--accent); }
   .icon { color: var(--ink-3); display: inline-flex; }
   .item.cursor .icon { color: var(--color-primary); }

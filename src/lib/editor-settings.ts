@@ -55,8 +55,11 @@ export interface EditorSettings {
   previewSplit: boolean;
   /** Source share of the split (0.25–0.75). */
   previewRatio: number;
-  /** Turn off view transitions and UI animation (on top of the OS
-   *  `prefers-reduced-motion`). */
+  /** Settings → "Movimento": full (completo), soft (suave: less
+   *  travel, no overshoot) or reduced (reduzido: instant). The OS
+   *  `prefers-reduced-motion` always forces reduced. */
+  motion: MotionSetting;
+  /** Derived: motion === 'reduced' (kept for older readers). */
   reduceMotion: boolean;
   /** Ctrl-h/j/k/l move focus between panes (vim-tmux-navigator style).
    *  `Ctrl-w h/j/k/l/w/p` always work; explicit .vimrc maps of these
@@ -76,6 +79,8 @@ export interface EditorSettings {
   density: Density;
 }
 
+export type MotionSetting = 'full' | 'soft' | 'reduced';
+export const MOTION_SETTINGS: readonly MotionSetting[] = ['full', 'soft', 'reduced'];
 export type ReadingWidth = 'narrow' | 'medium' | 'wide' | 'full';
 export type Density = 'comfortable' | 'compact';
 export const READING_WIDTHS: readonly ReadingWidth[] = ['narrow', 'medium', 'wide', 'full'];
@@ -112,6 +117,7 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   proseFont: 'sans',
   previewSplit: false,
   previewRatio: 0.5,
+  motion: 'full',
   reduceMotion: false,
   paneNav: true,
   previewCursorSync: false,
@@ -200,6 +206,10 @@ export function sanitizeSettings(input: unknown): EditorSettings {
 
   const tab = typeof o.tabSize === 'number' && (TAB_SIZES as readonly number[]).includes(o.tabSize) ? o.tabSize : d.tabSize;
 
+  // Older settings stored a boolean "Reduce motion": it maps to reduced.
+  const motion: MotionSetting = (MOTION_SETTINGS as readonly unknown[]).includes(o.motion)
+    ? (o.motion as MotionSetting)
+    : bool(o.reduceMotion, false) ? 'reduced' : d.motion;
   return {
     vim: bool(o.vim, d.vim),
     escapeSequences: seqs,
@@ -218,7 +228,8 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     proseFont: o.proseFont === 'serif' || o.proseFont === 'mono' || o.proseFont === 'sans' ? o.proseFont : d.proseFont,
     previewSplit: bool(o.previewSplit, d.previewSplit),
     previewRatio: clampRatio(o.previewRatio, d.previewRatio),
-    reduceMotion: bool(o.reduceMotion, d.reduceMotion),
+    motion,
+    reduceMotion: motion === 'reduced',
     paneNav: bool(o.paneNav, d.paneNav),
     previewCursorSync: bool(o.previewCursorSync, d.previewCursorSync),
     hoverPreview: bool(o.hoverPreview, d.hoverPreview),

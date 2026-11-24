@@ -48,7 +48,8 @@
   import { structuredFocus } from '../lib/structured-mode.svelte.ts';
   import { noteIconKind } from '../lib/note-icons.ts';
   import NoteIcon from '../components/NoteIcon.svelte';
-  import { withViewTransition, sharedTransition, animate, scrollBehavior, SPRING, motionAllowed } from '../lib/motion.ts';
+  import { withViewTransition, sharedTransition, animate, scrollBehavior, SPRING, motionAllowed, springIn, springTo, exitGhost } from '../lib/motion.ts';
+  import { setOrigin, armRise } from '../lib/motion-actions.ts';
   import { installPaneClickFocus } from '../lib/pane-click.ts';
   import { dropSide, noteIdOfKey, NOTE_DRAG_TYPE, type DropTarget } from '../lib/pane-drop.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
@@ -1020,6 +1021,82 @@
     return rootEl?.querySelector<HTMLElement>(`[data-leaf="${id}"]`) ?? null;
   }
 
+  // Home (motion v2): the ambient light leans away from the pointer.
+  let ambientEl = $state<HTMLElement | null>(null);
+  $effect(() => {
+    const amb = ambientEl;
+    const host = homeEl;
+    if (!amb || !host || !motionAllowed()) return;
+    let raf = 0;
+    let px = 0;
+    let py = 0;
+    const move = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const r = host.getBoundingClientRect();
+      px = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
+      py = ((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1;
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = 0;
+        amb.style.setProperty('--px', px.toFixed(3));
+        amb.style.setProperty('--py', py.toFixed(3));
+      });
+    };
+    host.addEventListener('pointermove', move, { passive: true });
+    return () => {
+      host.removeEventListener('pointermove', move);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  });
+
+  // A book OPENS like a cover (motion v2): switching books swings the
+  // new book's page in from its spine (left edge), in perspective.
+  let lastBook: string | null = null;
+  $effect(() => {
+    const id = books.activeID;
+    const prev = untrack(() => lastBook);
+    lastBook = id;
+    if (!prev || !id || prev === id || !motionAllowed()) return;
+    void tick().then(() => {
+      const page = rootEl?.querySelector<HTMLElement>('[data-testid="stage"], [data-testid="book-home"]');
+      animate(page, [
+        { transformOrigin: 'left center', transform: 'perspective(1600px) rotateY(-24deg) translateX(-18px) scale(0.97)', opacity: 0 },
+        { transformOrigin: 'left center', transform: 'perspective(1600px) rotateY(3deg)', opacity: 1, offset: 0.7 },
+        { transformOrigin: 'left center', transform: 'none', opacity: 1 },
+      ], 560, 'cubic-bezier(0.22, 0.8, 0.25, 1)');
+    });
+  });
+
+  let paneHostEl = $state<HTMLElement | null>(null);
+  let cometEl = $state<HTMLElement | null>(null);
+  let cometFrom: string | null = null;
+  // Pane focus travels: the light moves from the old pane's top edge to
+  // the new one's (DOM focus already moved; this only shows the path).
+  $effect(() => {
+    const id = activeLeafId;
+    const host = paneHostEl;
+    const comet = cometEl;
+    const prev = untrack(() => cometFrom);
+    cometFrom = id;
+    if (!host || !comet || !prev || prev === id || untrack(() => zoomed) || !motionAllowed()) return;
+    const a = leafElement(prev)?.getBoundingClientRect();
+    const b = leafElement(id)?.getBoundingClientRect();
+    const h = host.getBoundingClientRect();
+    if (!a || !b || !b.width) return;
+    const render = (el: HTMLElement, v: { x: number; y: number; sx: number; opacity: number }) => {
+      el.style.opacity = String(Math.max(0, Math.min(1, v.opacity)));
+      el.style.transform = `translate3d(${v.x.toFixed(1)}px, ${v.y.toFixed(1)}px, 0) scaleX(${Math.max(0.01, v.sx).toFixed(4)})`;
+    };
+    const to = { x: b.left - h.left, y: b.top - h.top, sx: b.width / 100 };
+    springTo(comet, { ...to, opacity: 1 }, {
+      spring: 'glide',
+      from: { x: a.left - h.left, y: a.top - h.top, sx: a.width / 100, opacity: 1 },
+      absolute: true,
+      jump: true,
+      render,
+      onRest: () => springTo(comet, { ...to, opacity: 0 }, { spring: 'soft', render }),
+    });
+  });
+
   /** Zoom `id` (or unzoom with null). The zoomed pane is revealed from
    *  its old box to the full note area (clip, no text distortion); on
    *  unzoom the hidden panes settle back in around it. */
@@ -1032,11 +1109,17 @@
     const target = id ?? zoomed!;
     const el = leafElement(target);
     const first = el?.getBoundingClientRect() ?? null;
+    // Zoom in: the other panes RECEDE (a snapshot of each shrinks and
+    // fades where it stood) while the zoomed one expands over them.
+    if (id && animated) {
+      for (const x of rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? []) {
+        if (x.dataset.leaf !== target) exitGhost(x, { scale: 0.9, opacity: 0 }, { spring: 'gentle', origin: '50% 50%' });
+      }
+    }
     if (id && panes) panes = focusLeafState(panes, id);
     zoomed = id;
     await tick();
     if (!animated || !motionAllowed()) return;
-    const s = SPRING.gentle;
     const now = leafElement(target);
     if (id && now && first) {
       // Grow: the pane's content starts where it was (translated to the
@@ -1052,8 +1135,13 @@
       ], SPRING.glide.ms, SPRING.glide.easing);
     } else if (!id) {
       const others = [...(rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? [])].filter((x) => x.dataset.leaf !== target);
-      others.forEach((x, i) => animate(x, [{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], s.ms, s.easing, Math.min(120, i * 30)));
-      if (now) animate(now, [{ transform: 'scale(1.015)' }, { transform: 'none' }], s.ms, s.easing);
+      // Unzoom: the zoomed pane springs back into its slot (FLIP from
+      // the full area) and the others come forward again, one by one.
+      others.forEach((x, i) => springIn(x, { scale: 0.9, opacity: 0 }, { spring: 'glide', delay: Math.min(160, 40 + i * 45), origin: '50% 50%' }));
+      if (now && first) {
+        const last = now.getBoundingClientRect();
+        springIn(now, { x: first.left - last.left, y: first.top - last.top, sx: first.width / last.width, sy: first.height / last.height }, { spring: 'glide', origin: '0 0', absolute: true });
+      }
     }
   }
 
@@ -1114,11 +1202,24 @@
     if (!target) return;
     const next = splitPane(base, findLeaf(base.root, at) ? at : base.active, dir, target, undefined, before);
     if (!next) return flash('too many panes — close one first (⌃w q)', 'warn');
+    // FLIP: remember where every existing pane was.
+    const firsts = new Map<string, DOMRect>();
+    for (const x of rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? []) firsts.set(x.dataset.leaf!, x.getBoundingClientRect());
     panes = next;
     await tick();
     const el = rootEl?.querySelector<HTMLElement>(`[data-leaf="${next.active}"]`);
-    const off = (dir === 'row' ? 18 : 14) * (before ? -1 : 1);
-    animate(el, [{ opacity: 0, transform: dir === 'row' ? `translateX(${off}px) scale(0.985)` : `translateY(${off}px) scale(0.985)` }, { opacity: 1, transform: 'none' }], SPRING.gentle.ms, SPRING.gentle.easing);
+    // The new pane UNFOLDS from the divider it shares with its sibling
+    // (scale from that edge, glide: it overshoots a hair and settles)…
+    const edge = dir === 'row' ? (before ? 'right center' : 'left center') : before ? 'center bottom' : 'center top';
+    springIn(el, dir === 'row' ? { sx: 0.4, opacity: 0 } : { sy: 0.4, opacity: 0 }, { spring: 'glide', origin: edge });
+    // …and the neighbours spring to their new sizes.
+    for (const x of rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? []) {
+      const f = firsts.get(x.dataset.leaf!);
+      if (!f || x === el) continue;
+      const l = x.getBoundingClientRect();
+      if (!l.width || !l.height) continue;
+      springIn(x, { x: f.left - l.left, y: f.top - l.top, sx: f.width / l.width, sy: f.height / l.height }, { spring: 'glide', origin: '0 0', absolute: true });
+    }
     focusedPane = 'leaf';
     paneRefs[next.active]?.focus();
     requestAnimationFrame(() => {
@@ -1336,6 +1437,7 @@
   function openIn(id: string, where: OpenWhere, leaf: string = activeLeafId, o: OpenOpts = {}): void {
     // The layout moves under a still pointer: no card for a moment.
     hoverQuietUntil = Date.now() + 700;
+    if (where === 'current') armRise();
     hoverIntent.hide();
     if (where !== 'current') {
       if (o.closeFx) fx = null;
@@ -1988,7 +2090,9 @@
     { id: 'hover', title: editorSettings.value.hoverPreview ? 'Turn off hover link previews' : 'Turn on hover link previews', keys: 'K', group: 'preview link card', run: () => editorSettings.update({ hoverPreview: !editorSettings.value.hoverPreview }) },
     { id: 'deeplink', title: 'Copy link to this note', group: 'share url deep link lumi open', run: copyDeepLink },
     { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (hintsOpen = true) },
-    { id: 'motion', title: editorSettings.value.reduceMotion ? 'Allow motion' : 'Reduce motion', group: 'view animation accessibility', run: () => editorSettings.update({ reduceMotion: !editorSettings.value.reduceMotion }) },
+    { id: 'motion-full', title: 'Movimento: completo', group: 'motion animation full alive', run: () => editorSettings.update({ motion: 'full' }) },
+    { id: 'motion-soft', title: 'Movimento: suave', group: 'motion animation soft calm', run: () => editorSettings.update({ motion: 'soft' }) },
+    { id: 'motion', title: 'Movimento: reduzido', group: 'motion reduce animation accessibility vestibular', run: () => editorSettings.update({ motion: 'reduced' }) },
     { id: 'refresh', title: 'Refresh notes', keys: 'R', group: 'sync reload', run: () => void notes.refresh() },
     { id: 'next-book', title: 'Next book', keys: ']', group: 'navigate switch', run: () => cycleBook(1) },
     { id: 'prev-book', title: 'Previous book', keys: '[', group: 'navigate switch', run: () => cycleBook(-1) },
@@ -2053,7 +2157,7 @@
       {/if}
     </div>
     <div class="topbar-right">
-      <button class="ui-btn ghost sm explorer-btn" type="button" onclick={() => openFloating()} aria-label="Explorer" aria-haspopup="dialog" aria-expanded={!!fx} title="Explorer (-, {eff.leader}e, :explore)" data-testid="explorer-button">
+      <button class="ui-btn ghost sm explorer-btn" type="button" onclick={(e) => { setOrigin(e.currentTarget); openFloating(); }} aria-label="Explorer" aria-haspopup="dialog" aria-expanded={!!fx} title="Explorer (-, {eff.leader}e, :explore)" data-testid="explorer-button">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.75 4.25a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.75h5a1.5 1.5 0 0 1 1.5 1.5v6.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
         <span class="explorer-label">Explorer</span><kbd>-</kbd>
       </button>
@@ -2151,7 +2255,8 @@
             {/each}
           </div>
         {:else}
-          <div class="pane-host" data-testid="pane-host">
+          <div class="pane-host" data-testid="pane-host" bind:this={paneHostEl}>
+            <div class="focus-comet" aria-hidden="true" bind:this={cometEl}></div>
             <PaneTree
               node={panes.root}
               leaf={paneLeaf}
@@ -2300,7 +2405,7 @@
     <!-- Ambient light: two slow, soft blooms of the theme's colours
          (CSS only, transform-animated, paused when the tab is hidden,
          absent under Reduce Motion). Calm: a full cycle is ~48 s. -->
-    <div class="ambient" aria-hidden="true"><span class="bloom a"></span><span class="bloom b"></span><span class="grain"></span></div>
+    <div class="ambient" aria-hidden="true" bind:this={ambientEl}><span class="bloom a"></span><span class="bloom b"></span><span class="bloom c"></span><span class="grain"></span></div>
     <div class="home-inner">
       <p class="ui-eyebrow home-eyebrow">book</p>
       <h1 class="home-title">{books.active?.name ?? vaults.selected?.name ?? 'Book'}</h1>
@@ -2438,6 +2543,11 @@
           </div>
         {:else if editMode && editSession && NoteEditor}
           <div class="editor-frame" class:split={splitOn} class:mode-edge={!multi || activeLeafId === primaryLeaf}>
+            {#if eff.vim && (!multi || activeLeafId === primaryLeaf)}
+              <!-- Mode change (motion v2): the new mode's colour sweeps down
+                   the editor's edge (one compositor layer, restarts per mode). -->
+              {#key vimState.mode}<span class="mode-sweep" aria-hidden="true"></span>{/key}
+            {/if}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <header class="note-bar" data-testid="note-bar" ondblclick={(e) => { if (multi && !(e.target as Element).closest('button, input')) toggleZoom(primaryLeaf); }}>
               <div class="nb-lead">
@@ -2715,15 +2825,25 @@
      blur filter), paused while the tab is hidden; none under Reduce
      Motion (the static light stays — calm, not empty). */
   .ambient { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
-  .bloom { position: absolute; border-radius: 50%; will-change: transform; }
+  .bloom { position: absolute; border-radius: 50%; will-change: transform; transition: translate 900ms var(--spring-soft); }
+  /* Parallax (motion v2): the light leans away from the pointer, each
+     bloom by its own depth (--px/--py ∈ [-1, 1], one write per frame). */
+  .bloom.a { translate: calc(var(--px, 0) * -46px) calc(var(--py, 0) * -34px); }
+  .bloom.b { translate: calc(var(--px, 0) * 30px) calc(var(--py, 0) * 24px); }
+  .bloom.c {
+    width: 40vmax; height: 40vmax; left: 38%; top: 18%;
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-accent) 10%, transparent), transparent);
+    translate: calc(var(--px, 0) * -70px) calc(var(--py, 0) * -50px);
+    animation: ambient-drift-b calc(var(--dur-ambient) * 0.8) var(--ease-breath) infinite alternate-reverse;
+  }
   .bloom.a {
     width: 78vmax; height: 78vmax; left: -22vmax; top: -38vmax;
-    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-primary) 15%, transparent), color-mix(in oklch, var(--color-primary) 5%, transparent) 55%, transparent);
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-primary) 24%, transparent), color-mix(in oklch, var(--color-primary) 7%, transparent) 55%, transparent);
     animation: ambient-drift-a var(--dur-ambient) var(--ease-breath) infinite alternate;
   }
   .bloom.b {
     width: 64vmax; height: 64vmax; right: -24vmax; bottom: -34vmax;
-    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-secondary) 12%, transparent), color-mix(in oklch, var(--color-accent) 4%, transparent) 60%, transparent);
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-secondary) 20%, transparent), color-mix(in oklch, var(--color-accent) 6%, transparent) 60%, transparent);
     animation: ambient-drift-b calc(var(--dur-ambient) * 1.27) var(--ease-breath) infinite alternate;
   }
   :global(:root[data-theme='light']) .bloom.a { opacity: 0.8; }
@@ -2737,8 +2857,14 @@
   }
   /* The first screen is the book: title, actions and up to 12 recent
      notes in as many columns as fit (2 on a laptop, 3 on a big screen). */
-  .home-inner { width: min(1120px, 100%); padding: clamp(16px, 5vh, 56px) clamp(var(--sp-3), 4vw, var(--sp-6)) var(--sp-6); animation: home-in var(--spring-soft-ms) var(--spring-soft) both; }
-  @keyframes home-in { from { opacity: 0; transform: translateY(10px); } }
+  .home-inner { width: min(1120px, 100%); padding: clamp(16px, 5vh, 56px) clamp(var(--sp-3), 4vw, var(--sp-6)) var(--sp-6); }
+  /* Entrance: title, meta, actions and the recent grid rise in turn. */
+  .home-inner > :global(*) { animation: home-in var(--spring-gentle-ms) var(--spring-gentle) both; }
+  .home-inner > :global(:nth-child(2)) { animation-delay: 40ms; }
+  .home-inner > :global(:nth-child(3)) { animation-delay: 80ms; }
+  .home-inner > :global(:nth-child(4)) { animation-delay: 120ms; }
+  .home-inner > :global(:nth-child(n + 5)) { animation-delay: 150ms; }
+  @keyframes home-in { from { opacity: 0; transform: translateY(22px); } }
   .home-eyebrow { margin: 0 0 var(--sp-2); }
   .home-title {
     margin: 0;
@@ -2760,8 +2886,8 @@
   .home-actions :global(kbd.on-primary) { background: color-mix(in oklch, black 18%, transparent); border-color: transparent; color: inherit; box-shadow: none; }
   .home-h { margin: 0 0 var(--sp-2); padding-left: 12px; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 500; letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--ink-3); }
   .home-recent { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: var(--row-gap) var(--sp-2); }
-  .home-recent li { animation: recent-in var(--spring-gentle-ms) var(--spring-gentle) both; animation-delay: calc(min(var(--i, 0), 8) * 22ms + 80ms); }
-  @keyframes recent-in { from { opacity: 0; transform: translateY(6px); } }
+  .home-recent li { animation: recent-in var(--spring-glide-ms) var(--spring-glide) both; animation-delay: calc(min(var(--i, 0), 10) * 26ms + 160ms); }
+  @keyframes recent-in { from { opacity: 0; transform: translateY(16px) scale(0.97); } }
   .recent {
     width: 100%;
     display: grid;
@@ -2818,7 +2944,25 @@
 
   /* ── split note panes (SPEC-PARTE2 §3) ─────────────────── */
   .preview.multi { padding: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-sunk); }
-  .pane-host { flex: 1; min-height: 0; display: flex; }
+  .pane-host { flex: 1; min-height: 0; display: flex; position: relative; }
+  /* Pane focus (motion v2): a bar of light TRAVELS along the top edges
+     from the pane you left to the one you entered (glide), then fades
+     into that pane's own lit edge. Transform + opacity only. */
+  .focus-comet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100px;
+    height: 2px;
+    z-index: 30;
+    pointer-events: none;
+    opacity: 0;
+    transform-origin: 0 0;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent) 18%, color-mix(in oklch, var(--accent) 70%, white) 50%, var(--accent) 82%, transparent);
+    box-shadow: 0 0 14px 1px var(--accent-glow);
+  }
+  .pane-host > .focus-comet { flex: none; }
   .pane-host > :global(*) { flex: 1; min-width: 0; }
   .primary-pane {
     position: relative;
@@ -3044,9 +3188,30 @@
     mask-image: linear-gradient(to bottom, black, transparent 75%);
     opacity: 0.85;
     pointer-events: none;
-    transition: background-color var(--dur-fade) var(--ease);
+    transition: background-color 320ms var(--ease);
   }
   .vault-home[data-vim='none'] .editor-frame.mode-edge::after { opacity: 0.35; }
+  .mode-sweep {
+    position: absolute;
+    left: 0;
+    top: var(--notebar-h);
+    width: 3px;
+    height: 38%;
+    z-index: 3;
+    pointer-events: none;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, transparent, var(--mode) 40%, color-mix(in oklch, var(--mode) 60%, white) 85%, transparent);
+    box-shadow: 0 0 14px 2px color-mix(in oklch, var(--mode) 55%, transparent);
+    opacity: 0;
+    animation: mode-sweep 520ms cubic-bezier(0.3, 0.6, 0.2, 1) both;
+  }
+  .vault-home[data-vim='none'] .mode-sweep { display: none; }
+  @keyframes mode-sweep {
+    0% { opacity: 0; transform: translateY(-40%); }
+    12% { opacity: 1; }
+    75% { opacity: 0.9; }
+    100% { opacity: 0; transform: translateY(190%); }
+  }
   .editor-frame > .error { flex: none; padding: var(--sp-3) var(--sp-4); }
   .editor-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) 0; }
   .note-bar {

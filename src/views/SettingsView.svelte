@@ -22,6 +22,8 @@
     MAX_MAPPINGS,
     type MapMode,
     type EditorSettings,
+    type ReadingWidth,
+    type MotionSetting,
   } from '../lib/editor-settings.ts';
   import { parseVimrc, errorCount, displayLhs, MAX_VIMRC_BYTES, VIMRC_EXAMPLE } from '../lib/vimrc.ts';
   import { effectiveSettings } from '../lib/vim-config.ts';
@@ -63,6 +65,8 @@
     fontSize: ['editor', 'font size text zoom'],
     tabSize: ['editor', 'tab size indent tabstop'],
     prose: ['editor', 'prose font typeface serif sans mono reading'],
+    readingWidth: ['editor', 'reading width largura de leitura measure column narrow medium wide full space'],
+    density: ['editor', 'density densidade compact comfortable rows explorer list space'],
     vimOn: ['vim', 'vim keybindings mode modal'],
     escape: ['vim', 'escape sequences jj jk kj ff insert esc'],
     timeout: ['vim', 'escape timeout delay ms'],
@@ -376,6 +380,25 @@
               </div>
             </div>
           {/if}
+          {#if show('readingWidth')}
+            <div class="row">
+              <div class="row-text"><span class="row-title">Largura de leitura</span><span class="row-desc">Text column of the reader, Live Preview and split preview. Total fills the pane.</span></div>
+              <div class="ui-seg" data-testid="reading-width">
+                {#each [['narrow', 'Estreita'], ['medium', 'Média'], ['wide', 'Larga'], ['full', 'Total']] as [v, label] (v)}
+                  <button type="button" aria-pressed={s.readingWidth === v} onclick={() => editorSettings.update({ readingWidth: v as ReadingWidth })}>{label}</button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+          {#if show('density')}
+            <div class="row">
+              <div class="row-text"><span class="row-title">Densidade</span><span class="row-desc">Row height in the explorer and lists.</span></div>
+              <div class="ui-seg" data-testid="density">
+                <button type="button" aria-pressed={s.density === 'comfortable'} onclick={() => editorSettings.update({ density: 'comfortable' })}>Confortável</button>
+                <button type="button" aria-pressed={s.density === 'compact'} onclick={() => editorSettings.update({ density: 'compact' })}>Compacto</button>
+              </div>
+            </div>
+          {/if}
           {#if show('fontSize')}
             <div class="row">
               <div class="row-text"><span class="row-title">Font size</span><span class="row-desc">Editor text size.</span></div>
@@ -589,10 +612,14 @@
             </label>
           {/if}
           {#if show('motion')}
-            <label class="row">
-              <div class="row-text"><span class="row-title">Reduce motion</span><span class="row-desc">Turns off view transitions and UI animation. Always on when your system asks for reduced motion.</span></div>
-              <input type="checkbox" class="ui-switch" checked={s.reduceMotion} onchange={(e) => editorSettings.update({ reduceMotion: checked(e) })} data-testid="reduce-motion-toggle" />
-            </label>
+            <div class="row">
+              <div class="row-text"><span class="row-title">Movimento</span><span class="row-desc">Completo: every response moves with real springs. Suave: the same choreography with less travel and no overshoot. Reduzido: changes are instant (always, when your system asks for reduced motion).</span></div>
+              <div class="ui-seg" data-testid="motion-level">
+                {#each [['full', 'Completo'], ['soft', 'Suave'], ['reduced', 'Reduzido']] as [v, label] (v)}
+                  <button type="button" aria-pressed={s.motion === v} onclick={() => editorSettings.update({ motion: v as MotionSetting })}>{label}</button>
+                {/each}
+              </div>
+            </div>
           {/if}
         </section>
       {/if}

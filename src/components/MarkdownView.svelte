@@ -10,6 +10,7 @@
   import type { MdBlock } from '../lib/markdown.ts';
   import { enhanceRendered, codeTextFor } from '../lib/rendered-enhance.ts';
   import { motionAllowed } from '../lib/motion.ts';
+  import { riseBlocks } from '../lib/motion-actions.ts';
 
   interface Props {
     blocks: readonly MdBlock[];
@@ -22,8 +23,11 @@
     element?: HTMLElement | null;
     /** Called after the DOM reflects new blocks (scroll sync remeasure). */
     onrendered?: () => void;
+    /** Motion v2: when a different note arrives, its blocks rise in
+     *  (staggered 26 ms, ≤ 240 ms in total). Edits never trigger it. */
+    rise?: boolean;
   }
-  let { blocks, ontoggletask, onlink, animateUpdates = false, element = $bindable(null), onrendered }: Props = $props();
+  let { blocks, ontoggletask, onlink, animateUpdates = false, element = $bindable(null), onrendered, rise = true }: Props = $props();
 
   let zoom = $state<{ src: string; alt: string } | null>(null);
   let zoomReturn: HTMLElement | null = null;
@@ -41,6 +45,10 @@
         bs.forEach((b, i) => {
           if (!prevKeys.has(b.key)) els[i]?.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
         });
+      }
+      if (rise && bs.length) {
+        const shared = bs.reduce((n, b) => n + (prevKeys.has(b.key) ? 1 : 0), 0);
+        if (shared / bs.length < 0.3) riseBlocks(element);
       }
       prevKeys = new Set(bs.map((b) => b.key));
       untrack(() => onrendered?.());

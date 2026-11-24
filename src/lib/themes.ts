@@ -1,6 +1,7 @@
 // Theme definitions matching tui-client/theme/builtin.go exactly.
 
 import type { ThemeMode } from './types.ts';
+import { proseVars } from './prose-palette.ts';
 
 export interface Theme {
   name: string;
@@ -307,6 +308,8 @@ export function applyTheme(name: string): void {
   for (let i = 0; i < 6; i++) {
     root.style.setProperty(`--color-logo-${i}`, t.logoColors[i]);
   }
+  // Rich prose palette, contrast-checked per theme (lib/prose-palette.ts).
+  for (const [k, v] of Object.entries(proseVars(t))) root.style.setProperty(k, v);
 }
 
 /**

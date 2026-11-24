@@ -4,7 +4,9 @@
 //   Enter           edit text node / group label, open file or link node
 //   gf              open file node        C-w f   open it in a split
 //   h j k l, arrows pan                   H J K L  move the selected node (S-arrows too)
-//   + / =  -  0     zoom in / out / fit   a        new text node
+//   + = zi ⌘+       zoom in               _ zo ⌘-  zoom out
+//   0 zf            fit                   a        new text node
+//   -               not owned: the shell opens the explorer (SPEC-PARTE2 §5b)
 //   f               new file node (note picker)
 //   d, Backspace, Delete  delete selection
 //   c 1..6 / c 0    color / clear color   (Enter on a selected edge edits its label)
@@ -40,6 +42,11 @@ export const NUDGE_STEP = 20;
 export class CanvasKeys {
   pending: string | null = null;
 
+  private zoomed(factor: number): CanvasKeyAction {
+    this.pending = null;
+    return { kind: 'zoom', factor };
+  }
+
   reset(): void {
     this.pending = null;
   }
@@ -66,13 +73,25 @@ export class CanvasKeys {
   }
 
   private feedAny(e: CanvasKeyLike, hasSelection: boolean): CanvasKeyAction | null {
-    if (e.metaKey || e.altKey) return null;
     const k = e.key;
+    // ⌘/Ctrl-+ and ⌘/Ctrl-- zoom the canvas (the view prevents the
+    // browser's page zoom). Anything else with ⌘/Alt is not ours.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      if (k === '+' || k === '=') return this.zoomed(1.2);
+      if (k === '-' || k === '_') return this.zoomed(1 / 1.2);
+    }
+    if (e.metaKey || e.altKey) return null;
     const p = this.pending;
     this.pending = null;
 
     if (p === 'C-w') return k === 'f' || k === 'Enter' ? { kind: 'openFile', split: true } : null;
     if (p === 'g') return k === 'f' ? { kind: 'openFile', split: false } : null;
+    if (p === 'z') {
+      if (k === 'i') return { kind: 'zoom', factor: 1.2 };
+      if (k === 'o') return { kind: 'zoom', factor: 1 / 1.2 };
+      if (k === 'f') return { kind: 'fit' };
+      return null;
+    }
     if (p === 'c') {
       if (/^[1-6]$/.test(k)) return { kind: 'color', color: k };
       if (k === '0') return { kind: 'color', color: null };
@@ -100,6 +119,9 @@ export class CanvasKeys {
         return hasSelection ? { kind: 'activate' } : null;
       case 'g':
         this.pending = 'g';
+        return null;
+      case 'z':
+        this.pending = 'z';
         return null;
       case 'c':
         if (!hasSelection) return null;
@@ -132,7 +154,7 @@ export class CanvasKeys {
       case '+':
       case '=':
         return { kind: 'zoom', factor: 1.2 };
-      case '-':
+      // `-` is deliberately absent: it always opens the explorer.
       case '_':
         return { kind: 'zoom', factor: 1 / 1.2 };
       case '0':

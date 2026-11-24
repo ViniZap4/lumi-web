@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { springIn } from '../lib/motion.ts';
   // Sync state dot (SPEC-LIVROS §4.1 "Indicador"). Shape differs per
   // state, not only colour, so it is legible without colour vision; the
   // pt-BR label is always available to assistive tech.
@@ -28,25 +29,33 @@
   const signal = $derived(pulse + remoteActivity.tick(vaultID));
   let seen = untrack(() => signal);
   let rings = $state(0);
+  let dotEl = $state<HTMLElement | null>(null);
+  let wrapEl = $state<HTMLElement | null>(null);
   $effect(() => {
     const s = signal;
     untrack(() => {
-      if (s > seen) rings++;
+      if (s > seen) {
+        rings++;
+        // The dot itself takes the hit (bouncy) and the whole badge
+        // pulses once — a remote change is FELT, not just drawn.
+        springIn(dotEl, { scale: 1.9 }, { spring: 'bouncy' });
+        springIn(wrapEl, { scale: 1.08 }, { spring: 'bouncy' });
+      }
       seen = s;
     });
   });
   const text = $derived(STATE_LABEL[st].pt + (pending ? ` · ${PENDING_LABEL.pt}` : ''));
 </script>
 
-<span class="sync-dot-wrap" data-state={st} data-pending={pending ? 'true' : undefined} title={text}>
+<span class="sync-dot-wrap" bind:this={wrapEl} data-state={st} data-pending={pending ? 'true' : undefined} title={text}>
   {#if st === 'not_bound'}
     <span class="glyph" aria-hidden="true">▭</span>
   {:else if st === 'read_only'}
     <span class="glyph" aria-hidden="true">🔒︎</span>
   {:else}
     <span class="dot-box" aria-hidden="true">
-      <span class="dot dot-{st}"></span>
-      {#key rings}{#if rings > 0}<span class="ping" data-testid="sync-ping"></span>{/if}{/key}
+      <span class="dot dot-{st}" bind:this={dotEl}></span>
+      {#key rings}{#if rings > 0}<span class="ping" data-testid="sync-ping"></span><span class="ping late" aria-hidden="true"></span>{/if}{/key}
     </span>
   {/if}
   {#if label}<span class="label">{text.toLowerCase()}</span>{:else}<span class="sr-only">{text}</span>{/if}
@@ -82,8 +91,9 @@
     border: 1.5px solid var(--accent);
     box-shadow: 0 0 8px var(--accent-glow);
     pointer-events: none;
-    animation: sync-ping 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+    animation: sync-ping 900ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
   }
+  .ping.late { animation-delay: 160ms; opacity: 0; border-width: 1px; }
   .dot-offline { border: 1.5px solid var(--color-muted); background: transparent; }
   .dot-error { background: var(--color-error); }
   .dot-needs_login { background: var(--color-warning, #e0af68); }

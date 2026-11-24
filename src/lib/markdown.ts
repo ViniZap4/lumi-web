@@ -17,6 +17,7 @@
 import { Marked, Renderer, type Tokens, type Token } from 'marked';
 import DOMPurify from 'dompurify';
 import { isMermaidLang, mermaidKind } from './mermaid-detect.ts';
+import { tagHue } from './prose-palette.ts';
 
 // Allow-list of iframe sources for media embeds. Anything else gets
 // scrubbed during sanitisation.
@@ -217,7 +218,27 @@ markedInstance.use({
         const safe = escapeHTML(id);
         return `<sup class="md-fn-ref"><a href="#fn-${safe}" id="fnref-${safe}" aria-label="Footnote ${n}">${n}</a></sup>`;
       },
-    },    {
+    },
+    {
+      // #tag (Obsidian): after a space or at the start, not all digits.
+      // Rendered as a coloured chip; the hue is stable per tag name.
+      name: 'tag',
+      level: 'inline',
+      start: (src: string) => {
+        const m = /(^|[\s(])#[\p{L}_][\p{L}\p{N}_/-]*/u.exec(src);
+        return m ? m.index + m[1].length : undefined;
+      },
+      tokenizer(src: string) {
+        const m = /^#([\p{L}_][\p{L}\p{N}_/-]*)/u.exec(src);
+        if (!m) return undefined;
+        return { type: 'tag', raw: m[0], name: m[1] };
+      },
+      renderer(tok) {
+        const name = String((tok as unknown as { name: string }).name);
+        return `<span class="md-tag" data-hue="${tagHue(name.toLowerCase())}">#${escapeHTML(name)}</span>`;
+      },
+    },
+    {
       // ==highlight== (Obsidian / iA Writer) → <mark>.
       name: 'highlight',
       level: 'inline',

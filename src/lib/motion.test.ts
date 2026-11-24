@@ -67,7 +67,8 @@ describe('springs', () => {
   });
   it('underdamped springs overshoot, critically damped ones do not (much)', () => {
     expect(Math.max(...springCurve(SPRING.bouncy.params).points)).toBeGreaterThan(1.03);
-    expect(Math.max(...springCurve(SPRING.snappy.params).points)).toBeLessThan(1.01);
+    expect(Math.max(...springCurve(SPRING.gentle.params).points)).toBeLessThan(1.01);
+    expect(Math.max(...springCurve(SPRING.soft.params).points)).toBeLessThan(1.005);
   });
   it('linear() strings are well-formed and short', () => {
     const s = springLinear({ stiffness: 400, damping: 30 });
@@ -75,10 +76,19 @@ describe('springs', () => {
     expect(s.split(',').length).toBeLessThanOrEqual(24);
     expect(s.endsWith(', 1)')).toBe(true);
   });
-  it('tokens: snappy fits the typing-path budget, overlays stay short', () => {
-    expect(SPRING.snappy.ms).toBeLessThanOrEqual(220);
-    expect(SPRING.gentle.ms).toBeLessThanOrEqual(320);
-    expect(SPRING.bouncy.ms).toBeLessThanOrEqual(320);
+  it('tokens v2: perceptible but never slow (90 % there fast; tails ≤ 720 ms)', () => {
+    expect(SPRING.snappy.ms).toBeLessThanOrEqual(360);
+    expect(SPRING.gentle.ms).toBeLessThanOrEqual(520);
+    expect(SPRING.bouncy.ms).toBeLessThanOrEqual(720);
+    // Visible physics: the overshoot of the "travel" and "pop" springs.
+    expect(Math.max(...SPRING.glide.points)).toBeGreaterThan(1.04);
+    expect(Math.max(...SPRING.bouncy.points)).toBeGreaterThan(1.12);
+    // …and yet 90 % of the way in ≤ 40 % of the tail (not sluggish).
+    for (const k of ['snappy', 'glide', 'bouncy'] as const) {
+      const pts = SPRING[k].points;
+      const i = pts.findIndex((p) => p >= 0.9);
+      expect(i / (pts.length - 1)).toBeLessThanOrEqual(0.4);
+    }
     for (const t of Object.values(SPRING)) expect(t.easing.startsWith('linear(')).toBe(true);
   });
   it('the CSS spring variables (styles/tokens.css, the one token source) match the solver', async () => {

@@ -61,7 +61,8 @@ export interface LegendExtras {
 /** Canvas in Reading: look, never change (SPEC-PARTE2 §5a). */
 export const CANVAS_READ_ITEMS: LegendItem[] = [
   { keys: 'h j k l', label: 'pan' },
-  { keys: '+ - 0', label: 'zoom/fit' },
+  { keys: '+ _ 0', label: 'zoom/fit', tip: 'Zoom in: + = zi ⌘+ · out: _ zo ⌘- · fit: 0 zf' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'Tab', label: 'next node' },
   { keys: '⏎ gf', label: 'open', tip: 'Open the selected file / link node' },
   { keys: '⌃w f', label: 'open in split' },
@@ -80,6 +81,8 @@ export const CANVAS_EDIT_ITEMS: LegendItem[] = [
   { keys: 'c 1-6', label: 'color' },
   { keys: 'u ⌃r', label: 'undo/redo' },
   { keys: 'h j k l', label: 'pan' },
+  { keys: '+ _ 0', label: 'zoom/fit', tip: 'Zoom in: + = zi ⌘+ · out: _ zo ⌘- · fit: 0 zf' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'Esc', label: 'reading', tip: 'Esc / q with nothing selected: back to Reading (also ⌘E)' },
   { keys: '?', label: 'keys', do: 'shell:help' },
 ];
@@ -90,6 +93,7 @@ export const BOARD_READ_ITEMS: LegendItem[] = [
   { keys: 'j k', label: 'card' },
   { keys: '⏎', label: 'follow link' },
   { keys: '/', label: 'filter' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'e i', label: 'edit', tip: 'Edit mode (also ⌘E / the switch)' },
   { keys: 'space', label: 'commands', do: 'shell:palette' },
   { keys: '?', label: 'keys', do: 'shell:help' },
@@ -104,6 +108,7 @@ export const BOARD_EDIT_ITEMS: LegendItem[] = [
   { keys: 'x', label: 'done' },
   { keys: 'dd', label: 'delete' },
   { keys: 'u ⌃r', label: 'undo/redo' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'Esc', label: 'reading', tip: 'Esc / q: back to Reading (also ⌘E)' },
   { keys: '?', label: 'keys', do: 'shell:help' },
 ];
@@ -132,7 +137,7 @@ export const PANE_W: LegendItem[] = [
  *  `fx:` actions are explorer-only (split opens, list moves). */
 export const FLOAT_ITEMS: LegendItem[] = [
   { keys: 'j k', label: 'move', do: 'fx:down', tip: 'j / k move the cursor · gg G top / end · ⌃d ⌃u half page' },
-  { keys: 'h l', label: 'folders', do: 'shell:parent', tip: 'h: up a folder (at the book root: the books) · l: into a folder' },
+  { keys: 'h l', label: 'folders', do: 'shell:parent', tip: 'h: up a folder (at the book root: Livros) · l: into a folder' },
   { keys: '⏎', label: 'open', do: 'shell:open' },
   { keys: '⌃v', label: 'right', do: 'fx:vsplit', tip: 'Open in a split on the right (or drag the row to a pane edge)' },
   { keys: '⌃s', label: 'below', do: 'fx:hsplit', tip: 'Open in a split below (or drag the row to a pane edge)' },
@@ -154,18 +159,20 @@ export const FLOAT_ITEMS: LegendItem[] = [
   { keys: 'R', label: 'refresh', do: 'shell:refresh' },
 ];
 
-/** Floating explorer, books level. */
+/** Floating explorer, books level ("Livros": a scope, not a folder).
+ *  `h` (Contas e servidores) only applies with many accounts; the
+ *  explorer drops it otherwise. pt-BR like the rest of this level. */
 export const BOOKS_ITEMS: LegendItem[] = [
-  { keys: 'j k', label: 'move', do: 'fx:down' },
-  { keys: '⏎ l', label: 'open book', do: 'shell:open' },
-  { keys: 'h', label: 'accounts', do: 'shell:parent' },
-  { keys: 'Esc', label: 'close', do: 'shell:close' },
-  { keys: 'g1–9', label: 'book n' },
-  { keys: 'a', label: 'new book', do: 'shell:create' },
-  { keys: 'gh', label: 'this book', do: 'shell:home' },
-  { keys: 'f', label: 'hints', do: 'shell:hints' },
-  { keys: 'R', label: 'refresh', do: 'shell:refresh' },
-  { keys: '?', label: 'keys', do: 'shell:help' },
+  { keys: 'j k', label: 'mover', do: 'fx:down' },
+  { keys: '⏎ l', label: 'abrir livro', do: 'shell:open' },
+  { keys: 'h', label: 'contas', do: 'shell:parent', tip: 'Contas e servidores (com 3 ou mais contas)' },
+  { keys: 'Esc', label: 'fechar', do: 'shell:close' },
+  { keys: 'g1–9', label: 'livro n' },
+  { keys: 'a', label: 'novo livro', do: 'shell:create' },
+  { keys: 'gh', label: 'este livro', do: 'shell:home' },
+  { keys: 'f', label: 'dicas', do: 'shell:hints' },
+  { keys: 'R', label: 'atualizar', do: 'shell:refresh' },
+  { keys: '?', label: 'teclas', do: 'shell:help' },
 ];
 
 /** The explorer's filter field is focused. */
@@ -365,7 +372,7 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
         { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer: the only navigation (also l, ⏎, <leader>e, :explore)' },
         { keys: 'a', label: 'new note', do: 'shell:create' },
         { keys: 'j k', label: 'recent', do: 'shell:down' },
-        { keys: 'gb', label: 'books', do: 'app:books', tip: 'Switch book in the floating explorer (accounts → books)' },
+        { keys: 'gb', label: 'books', do: 'app:books', tip: 'Switch book: the Livros shelf in the floating explorer' },
         { keys: '[ ]', label: 'prev/next book', do: 'shell:nextBook' },
         { keys: 'space', label: 'commands', do: 'shell:palette' },
         { keys: '?', label: 'keys', do: 'shell:help' },

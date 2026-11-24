@@ -4,7 +4,6 @@
   // with a spring FLIP; leaving ones fade out. Click dismisses. Polite
   // live region; nothing takes focus.
   import { flip as flipAnim } from 'svelte/animate';
-  import { fly } from 'svelte/transition';
   import { toasts } from '../lib/toasts.svelte.ts';
   import { motionAllowed, SPRING, springEase as ease } from '../lib/motion.ts';
 
@@ -14,8 +13,26 @@
   }
   const { bottom = 40 }: Props = $props();
 
-  const springEase = (t: number) => ease(SPRING.gentle.points, t);
+  const glideEase = (t: number) => ease(SPRING.glide.points, t);
   const dur = (ms: number) => (motionAllowed() ? ms : 0);
+  // Motion v2: a toast SPRINGS up from below the status bar (bouncy:
+  // y 44 → 0 with a 16 % overshoot, scale .82 → 1) and the stack makes
+  // room with a glide FLIP — the others are pushed, overshoot, settle.
+  function springUp(_node: Element, { y = 44, scale = 0.82 }: { y?: number; scale?: number } = {}) {
+    return {
+      duration: dur(SPRING.bouncy.ms),
+      css: (t: number) => {
+        const p = ease(SPRING.bouncy.points, t);
+        return `opacity: ${Math.min(1, t * 3)}; transform: translateY(${((1 - p) * y).toFixed(2)}px) scale(${(scale + (1 - scale) * p).toFixed(4)})`;
+      },
+    };
+  }
+  function dropOut(_node: Element) {
+    return {
+      duration: dur(160),
+      css: (t: number) => `opacity: ${t}; transform: translateY(${((1 - t) * 14).toFixed(2)}px) scale(${(0.92 + 0.08 * t).toFixed(4)})`,
+    };
+  }
 </script>
 
 <div class="toast-stack" style="bottom: {bottom}px" role="status" aria-live="polite" data-testid="toast-stack">
@@ -24,9 +41,9 @@
       type="button"
       class="toast {t.tone}"
       data-testid="toast"
-      animate:flipAnim={{ duration: dur(SPRING.gentle.ms), easing: springEase }}
-      in:fly={{ y: 14, duration: dur(SPRING.bouncy.ms), easing: springEase }}
-      out:fly={{ y: 8, duration: dur(140), opacity: 0 }}
+      animate:flipAnim={{ duration: dur(SPRING.glide.ms), easing: glideEase }}
+      in:springUp
+      out:dropOut
       onclick={() => toasts.dismiss(t.id)}
       title="Dismiss"
     ><span class="tone-dot" aria-hidden="true"></span>{t.text}</button>

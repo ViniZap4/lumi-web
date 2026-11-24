@@ -5,7 +5,7 @@
   // width comes from a hidden measurer, so the morph never waits on the
   // keystroke that changed the mode. Reduced motion: instant.
   import { fade } from 'svelte/transition';
-  import { motionAllowed } from '../lib/motion.ts';
+  import { motionAllowed, springIn } from '../lib/motion.ts';
 
   interface Props {
     /** normal | insert | visual | replace | plain */
@@ -21,10 +21,18 @@
     const w = measureEl?.offsetWidth ?? 0;
     width = w > 0 ? w : null;
   });
-  const dur = () => (motionAllowed() ? 110 : 0);
+  const dur = () => (motionAllowed() ? 140 : 0);
+  // Motion v2: each mode change gives the pill a small bouncy kick.
+  let pillEl = $state<HTMLElement | null>(null);
+  let lastMode = '';
+  $effect(() => {
+    const m = mode;
+    if (lastMode && m !== lastMode) springIn(pillEl, { scale: 1.18 }, { spring: 'bouncy' });
+    lastMode = m;
+  });
 </script>
 
-<span class="mode-pill" data-mode={mode} data-testid="vim-mode" style={width != null ? `--w: ${width}px` : undefined} title="Vim mode">
+<span class="mode-pill" data-mode={mode} data-testid="vim-mode" style={width != null ? `--w: ${width}px` : undefined} title="Vim mode" bind:this={pillEl}>
   <span class="measure" bind:this={measureEl} data-label={label} aria-hidden="true"></span>
   {#key label}
     <span class="txt" in:fade={{ duration: dur() }} out:fade={{ duration: dur() * 0.6 }}>{label}</span>

@@ -55,8 +55,11 @@ export interface EditorSettings {
   previewSplit: boolean;
   /** Source share of the split (0.25–0.75). */
   previewRatio: number;
-  /** Turn off view transitions and UI animation (on top of the OS
-   *  `prefers-reduced-motion`). */
+  /** Settings → "Movimento": full (completo), soft (suave: less
+   *  travel, no overshoot) or reduced (reduzido: instant). The OS
+   *  `prefers-reduced-motion` always forces reduced. */
+  motion: MotionSetting;
+  /** Derived: motion === 'reduced' (kept for older readers). */
   reduceMotion: boolean;
   /** Ctrl-h/j/k/l move focus between panes (vim-tmux-navigator style).
    *  `Ctrl-w h/j/k/l/w/p` always work; explicit .vimrc maps of these
@@ -68,7 +71,22 @@ export interface EditorSettings {
   /** Hovering a note link for ~350 ms shows a preview card (`K` always
    *  works from the keyboard). */
   hoverPreview: boolean;
+  /** Reading measure for the reader, Live Preview and split preview
+   *  ("Largura de leitura"): narrow 68ch, medium 84ch (default), wide
+   *  110ch, full = the whole pane with a comfortable gutter. */
+  readingWidth: ReadingWidth;
+  /** Row density of the explorer and lists ("Densidade"). */
+  density: Density;
 }
+
+export type MotionSetting = 'full' | 'soft' | 'reduced';
+export const MOTION_SETTINGS: readonly MotionSetting[] = ['full', 'soft', 'reduced'];
+export type ReadingWidth = 'narrow' | 'medium' | 'wide' | 'full';
+export type Density = 'comfortable' | 'compact';
+export const READING_WIDTHS: readonly ReadingWidth[] = ['narrow', 'medium', 'wide', 'full'];
+export const DENSITIES: readonly Density[] = ['comfortable', 'compact'];
+/** CSS value of --md-measure per reading width (app.css mirrors this). */
+export const READING_MEASURE: Record<ReadingWidth, string> = { narrow: '68ch', medium: '84ch', wide: '110ch', full: '100%' };
 
 export const STORAGE_KEY = 'lumi.v2.editor';
 
@@ -99,10 +117,13 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   proseFont: 'sans',
   previewSplit: false,
   previewRatio: 0.5,
+  motion: 'full',
   reduceMotion: false,
   paneNav: true,
   previewCursorSync: false,
   hoverPreview: true,
+  readingWidth: 'medium',
+  density: 'comfortable',
 });
 
 export const PREVIEW_RATIO_MIN = 0.25;
@@ -185,6 +206,10 @@ export function sanitizeSettings(input: unknown): EditorSettings {
 
   const tab = typeof o.tabSize === 'number' && (TAB_SIZES as readonly number[]).includes(o.tabSize) ? o.tabSize : d.tabSize;
 
+  // Older settings stored a boolean "Reduce motion": it maps to reduced.
+  const motion: MotionSetting = (MOTION_SETTINGS as readonly unknown[]).includes(o.motion)
+    ? (o.motion as MotionSetting)
+    : bool(o.reduceMotion, false) ? 'reduced' : d.motion;
   return {
     vim: bool(o.vim, d.vim),
     escapeSequences: seqs,
@@ -203,10 +228,13 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     proseFont: o.proseFont === 'serif' || o.proseFont === 'mono' || o.proseFont === 'sans' ? o.proseFont : d.proseFont,
     previewSplit: bool(o.previewSplit, d.previewSplit),
     previewRatio: clampRatio(o.previewRatio, d.previewRatio),
-    reduceMotion: bool(o.reduceMotion, d.reduceMotion),
+    motion,
+    reduceMotion: motion === 'reduced',
     paneNav: bool(o.paneNav, d.paneNav),
     previewCursorSync: bool(o.previewCursorSync, d.previewCursorSync),
     hoverPreview: bool(o.hoverPreview, d.hoverPreview),
+    readingWidth: (READING_WIDTHS as readonly unknown[]).includes(o.readingWidth) ? (o.readingWidth as ReadingWidth) : d.readingWidth,
+    density: (DENSITIES as readonly unknown[]).includes(o.density) ? (o.density as Density) : d.density,
   };
 }
 

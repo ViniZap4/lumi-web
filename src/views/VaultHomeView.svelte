@@ -17,6 +17,7 @@
   import type { ConflictCopy } from '../lib/offline-store.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
+  import { accountGroups, hasAccountsLayer } from '../lib/books-nav.ts';
   import { sync } from '../lib/sync.svelte.ts';
   import { serverLabel } from '../lib/serverurl.ts';
   import { isEditableTarget } from '../lib/shortcuts.ts';
@@ -47,7 +48,8 @@
   import { structuredFocus } from '../lib/structured-mode.svelte.ts';
   import { noteIconKind } from '../lib/note-icons.ts';
   import NoteIcon from '../components/NoteIcon.svelte';
-  import { withViewTransition, sharedTransition, animate, scrollBehavior, SPRING, motionAllowed } from '../lib/motion.ts';
+  import { withViewTransition, sharedTransition, animate, scrollBehavior, SPRING, motionAllowed, springIn, springTo, exitGhost } from '../lib/motion.ts';
+  import { setOrigin, armRise } from '../lib/motion-actions.ts';
   import { installPaneClickFocus } from '../lib/pane-click.ts';
   import { dropSide, noteIdOfKey, NOTE_DRAG_TYPE, type DropTarget } from '../lib/pane-drop.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
@@ -67,6 +69,7 @@
   import CommandPalette from '../components/CommandPalette.svelte';
   import HelpOverlay from '../components/HelpOverlay.svelte';
   import MarkdownView from '../components/MarkdownView.svelte';
+  import TocRail from '../components/TocRail.svelte';
   import SourceSplit from '../components/SourceSplit.svelte';
   import { noteViewKind } from '../lib/note-kind.ts';
   import ContextMenu from '../components/ContextMenu.svelte';
@@ -715,7 +718,7 @@
 
   // ---- the book's home ------------------------------------------------------
 
-  const recents = $derived(recentNotes(notes.list, 8));
+  const recents = $derived(recentNotes(notes.list, 12));
   let homeIndex = $state(-1);
 
   function homeFocus(i: number): void {
@@ -1018,6 +1021,82 @@
     return rootEl?.querySelector<HTMLElement>(`[data-leaf="${id}"]`) ?? null;
   }
 
+  // Home (motion v2): the ambient light leans away from the pointer.
+  let ambientEl = $state<HTMLElement | null>(null);
+  $effect(() => {
+    const amb = ambientEl;
+    const host = homeEl;
+    if (!amb || !host || !motionAllowed()) return;
+    let raf = 0;
+    let px = 0;
+    let py = 0;
+    const move = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const r = host.getBoundingClientRect();
+      px = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
+      py = ((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1;
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = 0;
+        amb.style.setProperty('--px', px.toFixed(3));
+        amb.style.setProperty('--py', py.toFixed(3));
+      });
+    };
+    host.addEventListener('pointermove', move, { passive: true });
+    return () => {
+      host.removeEventListener('pointermove', move);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  });
+
+  // A book OPENS like a cover (motion v2): switching books swings the
+  // new book's page in from its spine (left edge), in perspective.
+  let lastBook: string | null = null;
+  $effect(() => {
+    const id = books.activeID;
+    const prev = untrack(() => lastBook);
+    lastBook = id;
+    if (!prev || !id || prev === id || !motionAllowed()) return;
+    void tick().then(() => {
+      const page = rootEl?.querySelector<HTMLElement>('[data-testid="stage"], [data-testid="book-home"]');
+      animate(page, [
+        { transformOrigin: 'left center', transform: 'perspective(1600px) rotateY(-24deg) translateX(-18px) scale(0.97)', opacity: 0 },
+        { transformOrigin: 'left center', transform: 'perspective(1600px) rotateY(3deg)', opacity: 1, offset: 0.7 },
+        { transformOrigin: 'left center', transform: 'none', opacity: 1 },
+      ], 560, 'cubic-bezier(0.22, 0.8, 0.25, 1)');
+    });
+  });
+
+  let paneHostEl = $state<HTMLElement | null>(null);
+  let cometEl = $state<HTMLElement | null>(null);
+  let cometFrom: string | null = null;
+  // Pane focus travels: the light moves from the old pane's top edge to
+  // the new one's (DOM focus already moved; this only shows the path).
+  $effect(() => {
+    const id = activeLeafId;
+    const host = paneHostEl;
+    const comet = cometEl;
+    const prev = untrack(() => cometFrom);
+    cometFrom = id;
+    if (!host || !comet || !prev || prev === id || untrack(() => zoomed) || !motionAllowed()) return;
+    const a = leafElement(prev)?.getBoundingClientRect();
+    const b = leafElement(id)?.getBoundingClientRect();
+    const h = host.getBoundingClientRect();
+    if (!a || !b || !b.width) return;
+    const render = (el: HTMLElement, v: { x: number; y: number; sx: number; opacity: number }) => {
+      el.style.opacity = String(Math.max(0, Math.min(1, v.opacity)));
+      el.style.transform = `translate3d(${v.x.toFixed(1)}px, ${v.y.toFixed(1)}px, 0) scaleX(${Math.max(0.01, v.sx).toFixed(4)})`;
+    };
+    const to = { x: b.left - h.left, y: b.top - h.top, sx: b.width / 100 };
+    springTo(comet, { ...to, opacity: 1 }, {
+      spring: 'glide',
+      from: { x: a.left - h.left, y: a.top - h.top, sx: a.width / 100, opacity: 1 },
+      absolute: true,
+      jump: true,
+      render,
+      onRest: () => springTo(comet, { ...to, opacity: 0 }, { spring: 'soft', render }),
+    });
+  });
+
   /** Zoom `id` (or unzoom with null). The zoomed pane is revealed from
    *  its old box to the full note area (clip, no text distortion); on
    *  unzoom the hidden panes settle back in around it. */
@@ -1030,11 +1109,17 @@
     const target = id ?? zoomed!;
     const el = leafElement(target);
     const first = el?.getBoundingClientRect() ?? null;
+    // Zoom in: the other panes RECEDE (a snapshot of each shrinks and
+    // fades where it stood) while the zoomed one expands over them.
+    if (id && animated) {
+      for (const x of rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? []) {
+        if (x.dataset.leaf !== target) exitGhost(x, { scale: 0.9, opacity: 0 }, { spring: 'gentle', origin: '50% 50%' });
+      }
+    }
     if (id && panes) panes = focusLeafState(panes, id);
     zoomed = id;
     await tick();
     if (!animated || !motionAllowed()) return;
-    const s = SPRING.gentle;
     const now = leafElement(target);
     if (id && now && first) {
       // Grow: the pane's content starts where it was (translated to the
@@ -1050,8 +1135,13 @@
       ], SPRING.glide.ms, SPRING.glide.easing);
     } else if (!id) {
       const others = [...(rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? [])].filter((x) => x.dataset.leaf !== target);
-      others.forEach((x, i) => animate(x, [{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], s.ms, s.easing, Math.min(120, i * 30)));
-      if (now) animate(now, [{ transform: 'scale(1.015)' }, { transform: 'none' }], s.ms, s.easing);
+      // Unzoom: the zoomed pane springs back into its slot (FLIP from
+      // the full area) and the others come forward again, one by one.
+      others.forEach((x, i) => springIn(x, { scale: 0.9, opacity: 0 }, { spring: 'glide', delay: Math.min(160, 40 + i * 45), origin: '50% 50%' }));
+      if (now && first) {
+        const last = now.getBoundingClientRect();
+        springIn(now, { x: first.left - last.left, y: first.top - last.top, sx: first.width / last.width, sy: first.height / last.height }, { spring: 'glide', origin: '0 0', absolute: true });
+      }
     }
   }
 
@@ -1112,11 +1202,24 @@
     if (!target) return;
     const next = splitPane(base, findLeaf(base.root, at) ? at : base.active, dir, target, undefined, before);
     if (!next) return flash('too many panes — close one first (⌃w q)', 'warn');
+    // FLIP: remember where every existing pane was.
+    const firsts = new Map<string, DOMRect>();
+    for (const x of rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? []) firsts.set(x.dataset.leaf!, x.getBoundingClientRect());
     panes = next;
     await tick();
     const el = rootEl?.querySelector<HTMLElement>(`[data-leaf="${next.active}"]`);
-    const off = (dir === 'row' ? 18 : 14) * (before ? -1 : 1);
-    animate(el, [{ opacity: 0, transform: dir === 'row' ? `translateX(${off}px) scale(0.985)` : `translateY(${off}px) scale(0.985)` }, { opacity: 1, transform: 'none' }], SPRING.gentle.ms, SPRING.gentle.easing);
+    // The new pane UNFOLDS from the divider it shares with its sibling
+    // (scale from that edge, glide: it overshoots a hair and settles)…
+    const edge = dir === 'row' ? (before ? 'right center' : 'left center') : before ? 'center bottom' : 'center top';
+    springIn(el, dir === 'row' ? { sx: 0.4, opacity: 0 } : { sy: 0.4, opacity: 0 }, { spring: 'glide', origin: edge });
+    // …and the neighbours spring to their new sizes.
+    for (const x of rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? []) {
+      const f = firsts.get(x.dataset.leaf!);
+      if (!f || x === el) continue;
+      const l = x.getBoundingClientRect();
+      if (!l.width || !l.height) continue;
+      springIn(x, { x: f.left - l.left, y: f.top - l.top, sx: f.width / l.width, sy: f.height / l.height }, { spring: 'glide', origin: '0 0', absolute: true });
+    }
     focusedPane = 'leaf';
     paneRefs[next.active]?.focus();
     requestAnimationFrame(() => {
@@ -1334,6 +1437,7 @@
   function openIn(id: string, where: OpenWhere, leaf: string = activeLeafId, o: OpenOpts = {}): void {
     // The layout moves under a still pointer: no card for a moment.
     hoverQuietUntil = Date.now() + 700;
+    if (where === 'current') armRise();
     hoverIntent.hide();
     if (where !== 'current') {
       if (o.closeFx) fx = null;
@@ -1917,10 +2021,11 @@
             .filter((m) => m.lhs.startsWith(LEADER_TOKEN))
             .map((m) => ({ keys: m.lhs.slice(LEADER_TOKEN.length), rhs: m.rhs }))
         : [],
-    }),
+    }).filter((it) => !(legendCtx === 'books' && it.keys === 'h' && !hasAccountsLayer(accountGroups(books.list)))),
   );
   const legendMode = $derived(
     legendCtx === 'float' ? 'explorer'
+    : legendCtx === 'books' ? 'livros'
     : legendCtx === 'hover' ? 'preview'
     : legendCtx === 'canvas' || legendCtx === 'board' ? (structuredFocus.current?.mode === 'edit' ? 'edit' : 'reading')
     : legendCtx,
@@ -1928,12 +2033,28 @@
 
   // ---- palette ------------------------------------------------------------------
 
+  /** Palette → the focused canvas: replay a zoom key on its root (the
+   *  canvas keymap is the one place that owns zoom keys). */
+  function canvasKey(key: string): void {
+    const root = [...document.querySelectorAll<HTMLElement>('[data-testid=canvas-view]')].pop();
+    if (!root) return;
+    root.focus({ preventScroll: true });
+    root.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  }
+
   const paletteCommands: PaletteCommand[] = $derived([
     // Canvas / board modes (SPEC-PARTE2 §5a) for the view that had the keyboard.
     ...(structuredFocus.last
       ? ([
           { id: 'structuredRead', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Reading mode`, keys: 'Esc', group: 'mode view read only canvas board kanban', run: () => structuredFocus.last?.set('read') },
           { id: 'structuredEdit', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Edit mode`, keys: 'e', group: 'mode edit canvas board kanban', run: () => structuredFocus.last?.set('edit') },
+          ...(structuredFocus.last.kind === 'canvas'
+            ? [
+                { id: 'canvasZoomIn', title: 'Canvas: Zoom in', keys: '+ zi ⌘+', group: 'canvas zoom in bigger magnify', run: () => canvasKey('+') },
+                { id: 'canvasZoomOut', title: 'Canvas: Zoom out', keys: '_ zo ⌘-', group: 'canvas zoom out smaller', run: () => canvasKey('_') },
+                { id: 'canvasFit', title: 'Canvas: Fit', keys: '0 zf', group: 'canvas zoom fit all overview', run: () => canvasKey('0') },
+              ]
+            : []),
           ...(structuredFocus.last.source ? [{ id: 'structuredSource', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Source`, group: 'mode source json markdown raw canvas board kanban', run: () => structuredFocus.last?.source?.() }] : []),
         ] as PaletteCommand[])
       : []),
@@ -1969,7 +2090,9 @@
     { id: 'hover', title: editorSettings.value.hoverPreview ? 'Turn off hover link previews' : 'Turn on hover link previews', keys: 'K', group: 'preview link card', run: () => editorSettings.update({ hoverPreview: !editorSettings.value.hoverPreview }) },
     { id: 'deeplink', title: 'Copy link to this note', group: 'share url deep link lumi open', run: copyDeepLink },
     { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (hintsOpen = true) },
-    { id: 'motion', title: editorSettings.value.reduceMotion ? 'Allow motion' : 'Reduce motion', group: 'view animation accessibility', run: () => editorSettings.update({ reduceMotion: !editorSettings.value.reduceMotion }) },
+    { id: 'motion-full', title: 'Movimento: completo', group: 'motion animation full alive', run: () => editorSettings.update({ motion: 'full' }) },
+    { id: 'motion-soft', title: 'Movimento: suave', group: 'motion animation soft calm', run: () => editorSettings.update({ motion: 'soft' }) },
+    { id: 'motion', title: 'Movimento: reduzido', group: 'motion reduce animation accessibility vestibular', run: () => editorSettings.update({ motion: 'reduced' }) },
     { id: 'refresh', title: 'Refresh notes', keys: 'R', group: 'sync reload', run: () => void notes.refresh() },
     { id: 'next-book', title: 'Next book', keys: ']', group: 'navigate switch', run: () => cycleBook(1) },
     { id: 'prev-book', title: 'Previous book', keys: '[', group: 'navigate switch', run: () => cycleBook(-1) },
@@ -2034,7 +2157,7 @@
       {/if}
     </div>
     <div class="topbar-right">
-      <button class="ui-btn ghost sm explorer-btn" type="button" onclick={() => openFloating()} aria-label="Explorer" aria-haspopup="dialog" aria-expanded={!!fx} title="Explorer (-, {eff.leader}e, :explore)" data-testid="explorer-button">
+      <button class="ui-btn ghost sm explorer-btn" type="button" onclick={(e) => { setOrigin(e.currentTarget); openFloating(); }} aria-label="Explorer" aria-haspopup="dialog" aria-expanded={!!fx} title="Explorer (-, {eff.leader}e, :explore)" data-testid="explorer-button">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.75 4.25a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.75h5a1.5 1.5 0 0 1 1.5 1.5v6.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
         <span class="explorer-label">Explorer</span><kbd>-</kbd>
       </button>
@@ -2132,7 +2255,8 @@
             {/each}
           </div>
         {:else}
-          <div class="pane-host" data-testid="pane-host">
+          <div class="pane-host" data-testid="pane-host" bind:this={paneHostEl}>
+            <div class="focus-comet" aria-hidden="true" bind:this={cometEl}></div>
             <PaneTree
               node={panes.root}
               leaf={paneLeaf}
@@ -2144,6 +2268,10 @@
         {/if}
       {:else}
         {@render mainContent()}
+        {#if !editMode && notes.content && primaryView === MARKDOWN_VIEW}
+          <!-- Wide screens: the empty gutter holds the note's outline. -->
+          <TocRail scrollEl={previewEl ?? null} />
+        {/if}
       {/if}
       {#if dropAt}
         <!-- Where the dragged note will land (edge highlight). -->
@@ -2156,9 +2284,6 @@
     </main>
   {/if}
 
-  {#if editorSettings.value.legend}
-    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim && !fx ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
-  {/if}
 
   <footer class="statusbar" data-testid="editor-status">
     {#if editMode && editSession && eff.vim}
@@ -2179,7 +2304,13 @@
       {/if}
       <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}</span>
     {/if}
-    <span class="sb-spacer"></span>
+    {#if editorSettings.value.legend}
+      <!-- One bar, not two: the which-key legend lives inside the status
+           line and shows as many keys as fit between its ends. -->
+      <span class="sb-legend"><CommandLegend embedded items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim && !fx ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} /></span>
+    {:else}
+      <span class="sb-spacer"></span>
+    {/if}
     {#if editMode && editSession}
       <span class="sb-item sync" class:pending={editSession.pending} class:offline={!editSession.pending && !editSession.liveSynced} data-testid="editor-sync-state" title={editSession.persistence
         ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
@@ -2274,7 +2405,7 @@
     <!-- Ambient light: two slow, soft blooms of the theme's colours
          (CSS only, transform-animated, paused when the tab is hidden,
          absent under Reduce Motion). Calm: a full cycle is ~48 s. -->
-    <div class="ambient" aria-hidden="true"><span class="bloom a"></span><span class="bloom b"></span><span class="grain"></span></div>
+    <div class="ambient" aria-hidden="true" bind:this={ambientEl}><span class="bloom a"></span><span class="bloom b"></span><span class="bloom c"></span><span class="grain"></span></div>
     <div class="home-inner">
       <p class="ui-eyebrow home-eyebrow">book</p>
       <h1 class="home-title">{books.active?.name ?? vaults.selected?.name ?? 'Book'}</h1>
@@ -2412,6 +2543,11 @@
           </div>
         {:else if editMode && editSession && NoteEditor}
           <div class="editor-frame" class:split={splitOn} class:mode-edge={!multi || activeLeafId === primaryLeaf}>
+            {#if eff.vim && (!multi || activeLeafId === primaryLeaf)}
+              <!-- Mode change (motion v2): the new mode's colour sweeps down
+                   the editor's edge (one compositor layer, restarts per mode). -->
+              {#key vimState.mode}<span class="mode-sweep" aria-hidden="true"></span>{/key}
+            {/if}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <header class="note-bar" data-testid="note-bar" ondblclick={(e) => { if (multi && !(e.target as Element).closest('button, input')) toggleZoom(primaryLeaf); }}>
               <div class="nb-lead">
@@ -2580,6 +2716,9 @@
 <style>
   .vault-home {
     --mode: var(--mode-normal);
+    /* Chrome heights: one compact top row, one note bar per pane. */
+    --topbar-h: 38px;
+    --notebar-h: 36px;
     height: 100vh;
     height: 100dvh;
     background: var(--surface-0);
@@ -2600,8 +2739,8 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    height: 44px;
-    padding: 0 var(--sp-2) 0 var(--sp-3);
+    height: var(--topbar-h);
+    padding: 0 var(--sp-1) 0 var(--sp-2);
     background: color-mix(in oklch, var(--surface-1) 55%, var(--surface-0));
     box-shadow: 0 1px 0 var(--hairline-soft), 0 6px 16px -14px rgb(var(--shadow-rgb) / var(--shadow-a));
     flex: none;
@@ -2613,7 +2752,7 @@
     align-items: center;
     gap: 8px;
     max-width: 260px;
-    height: 30px;
+    height: 28px;
     padding: 0 10px 0 7px;
     border: 1px solid transparent;
     border-radius: var(--radius);
@@ -2686,15 +2825,25 @@
      blur filter), paused while the tab is hidden; none under Reduce
      Motion (the static light stays — calm, not empty). */
   .ambient { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
-  .bloom { position: absolute; border-radius: 50%; will-change: transform; }
+  .bloom { position: absolute; border-radius: 50%; will-change: transform; transition: translate 900ms var(--spring-soft); }
+  /* Parallax (motion v2): the light leans away from the pointer, each
+     bloom by its own depth (--px/--py ∈ [-1, 1], one write per frame). */
+  .bloom.a { translate: calc(var(--px, 0) * -46px) calc(var(--py, 0) * -34px); }
+  .bloom.b { translate: calc(var(--px, 0) * 30px) calc(var(--py, 0) * 24px); }
+  .bloom.c {
+    width: 40vmax; height: 40vmax; left: 38%; top: 18%;
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-accent) 10%, transparent), transparent);
+    translate: calc(var(--px, 0) * -70px) calc(var(--py, 0) * -50px);
+    animation: ambient-drift-b calc(var(--dur-ambient) * 0.8) var(--ease-breath) infinite alternate-reverse;
+  }
   .bloom.a {
     width: 78vmax; height: 78vmax; left: -22vmax; top: -38vmax;
-    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-primary) 15%, transparent), color-mix(in oklch, var(--color-primary) 5%, transparent) 55%, transparent);
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-primary) 24%, transparent), color-mix(in oklch, var(--color-primary) 7%, transparent) 55%, transparent);
     animation: ambient-drift-a var(--dur-ambient) var(--ease-breath) infinite alternate;
   }
   .bloom.b {
     width: 64vmax; height: 64vmax; right: -24vmax; bottom: -34vmax;
-    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-secondary) 12%, transparent), color-mix(in oklch, var(--color-accent) 4%, transparent) 60%, transparent);
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--color-secondary) 20%, transparent), color-mix(in oklch, var(--color-accent) 6%, transparent) 60%, transparent);
     animation: ambient-drift-b calc(var(--dur-ambient) * 1.27) var(--ease-breath) infinite alternate;
   }
   :global(:root[data-theme='light']) .bloom.a { opacity: 0.8; }
@@ -2706,8 +2855,16 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     mix-blend-mode: overlay;
   }
-  .home-inner { width: min(640px, 100%); padding: clamp(28px, 10vh, 112px) var(--sp-5) var(--sp-7); animation: home-in var(--spring-soft-ms) var(--spring-soft) both; }
-  @keyframes home-in { from { opacity: 0; transform: translateY(10px); } }
+  /* The first screen is the book: title, actions and up to 12 recent
+     notes in as many columns as fit (2 on a laptop, 3 on a big screen). */
+  .home-inner { width: min(1120px, 100%); padding: clamp(16px, 5vh, 56px) clamp(var(--sp-3), 4vw, var(--sp-6)) var(--sp-6); }
+  /* Entrance: title, meta, actions and the recent grid rise in turn. */
+  .home-inner > :global(*) { animation: home-in var(--spring-gentle-ms) var(--spring-gentle) both; }
+  .home-inner > :global(:nth-child(2)) { animation-delay: 40ms; }
+  .home-inner > :global(:nth-child(3)) { animation-delay: 80ms; }
+  .home-inner > :global(:nth-child(4)) { animation-delay: 120ms; }
+  .home-inner > :global(:nth-child(n + 5)) { animation-delay: 150ms; }
+  @keyframes home-in { from { opacity: 0; transform: translateY(22px); } }
   .home-eyebrow { margin: 0 0 var(--sp-2); }
   .home-title {
     margin: 0;
@@ -2724,20 +2881,21 @@
   }
   .home-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: var(--sp-3) 0 0; font-size: var(--text-sm); color: var(--ink-3); }
   .home-dot { color: var(--ink-4); }
-  .home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-5) 0 var(--sp-6); }
+  .home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-5); }
   .home-actions .ui-btn { gap: 7px; height: 32px; padding: 0 14px; }
   .home-actions :global(kbd.on-primary) { background: color-mix(in oklch, black 18%, transparent); border-color: transparent; color: inherit; box-shadow: none; }
   .home-h { margin: 0 0 var(--sp-2); padding-left: 12px; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 500; letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--ink-3); }
-  .home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-  .home-recent li { animation: recent-in var(--spring-gentle-ms) var(--spring-gentle) both; animation-delay: calc(min(var(--i, 0), 8) * 22ms + 80ms); }
-  @keyframes recent-in { from { opacity: 0; transform: translateY(6px); } }
+  .home-recent { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: var(--row-gap) var(--sp-2); }
+  .home-recent li { animation: recent-in var(--spring-glide-ms) var(--spring-glide) both; animation-delay: calc(min(var(--i, 0), 10) * 26ms + 160ms); }
+  @keyframes recent-in { from { opacity: 0; transform: translateY(16px) scale(0.97); } }
   .recent {
     width: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: baseline;
     gap: var(--sp-3);
-    padding: 10px 12px;
+    min-height: calc(var(--row-h) + 6px);
+    padding: 0 12px;
+    align-items: center;
     border: none;
     border-radius: var(--radius);
     background: transparent;
@@ -2755,7 +2913,7 @@
   .recent-dir { font-size: var(--text-2xs); color: var(--ink-4); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .recent-when { font-size: var(--text-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .home-empty { padding: var(--sp-5) 0; color: var(--ink-3); font-size: var(--text-sm); }
-  .home-keys { margin-top: var(--sp-6); padding-left: 12px; font-size: var(--text-xs); color: var(--ink-4); }
+  .home-keys { margin-top: var(--sp-4); padding-left: 12px; font-size: var(--text-xs); color: var(--ink-4); }
   .home-keys kbd { margin: 0 1px; }
   .home-skel, .reader-skel { display: flex; flex-direction: column; gap: 12px; padding-top: var(--sp-2); }
   .home-skel .skeleton { height: 36px; border-radius: var(--radius); }
@@ -2770,7 +2928,7 @@
     .breadcrumb .sep { display: none; }
     .palette-btn { min-width: 0; background: transparent; box-shadow: none; border-color: transparent; }
     .palette-label, .palette-btn kbd, .explorer-label, .explorer-btn kbd { display: none; }
-    .preview { padding: var(--sp-5) var(--sp-4); }
+    .preview { --pad-top: var(--sp-2); padding: var(--pad-top) var(--sp-3) var(--sp-6); }
     .sb-item:not(.sync):not(.stale) { display: none; }
     .recent { grid-template-columns: minmax(0, 1fr) auto; padding: 12px; }
     .recent-dir { display: none; }
@@ -2778,14 +2936,33 @@
   }
 
   .preview {
+    --pad-top: var(--sp-4);
     overflow-y: auto;
-    padding: var(--sp-6) var(--sp-6) var(--sp-7);
+    padding: var(--pad-top) clamp(var(--sp-4), 3vw, var(--sp-6)) var(--sp-7);
     outline: none;
   }
 
   /* ── split note panes (SPEC-PARTE2 §3) ─────────────────── */
   .preview.multi { padding: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-sunk); }
-  .pane-host { flex: 1; min-height: 0; display: flex; }
+  .pane-host { flex: 1; min-height: 0; display: flex; position: relative; }
+  /* Pane focus (motion v2): a bar of light TRAVELS along the top edges
+     from the pane you left to the one you entered (glide), then fades
+     into that pane's own lit edge. Transform + opacity only. */
+  .focus-comet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100px;
+    height: 2px;
+    z-index: 30;
+    pointer-events: none;
+    opacity: 0;
+    transform-origin: 0 0;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent) 18%, color-mix(in oklch, var(--accent) 70%, white) 50%, var(--accent) 82%, transparent);
+    box-shadow: 0 0 14px 1px var(--accent-glow);
+  }
+  .pane-host > .focus-comet { flex: none; }
   .pane-host > :global(*) { flex: 1; min-width: 0; }
   .primary-pane {
     position: relative;
@@ -2793,7 +2970,8 @@
     min-width: 0;
     overflow-y: auto;
     outline: none;
-    padding: var(--sp-6) clamp(16px, 4%, 40px) var(--sp-7);
+    --pad-top: var(--sp-3);
+    padding: var(--pad-top) clamp(14px, 3%, 32px) var(--sp-7);
     background: var(--surface-0);
   }
   .primary-pane:has(> .editor-frame), .primary-pane:has(> .view-frame) { padding: 0; overflow: hidden; }
@@ -2904,15 +3082,15 @@
   .split-btn[aria-pressed='true'] { color: var(--accent-ink); background: var(--accent-soft); }
   .reading-head {
     position: sticky;
-    top: calc(-1 * var(--sp-6));
+    top: calc(-1 * var(--pad-top));
     z-index: 2;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    min-height: 30px;
-    margin: calc(-1 * var(--sp-6)) 0 var(--sp-5);
-    padding: var(--sp-3) 0;
+    min-height: 28px;
+    margin: calc(-1 * var(--pad-top)) 0 var(--sp-3);
+    padding: var(--sp-2) 0;
     font-family: var(--font-ui);
     font-size: var(--text-md);
     line-height: 1.4;
@@ -2965,8 +3143,9 @@
     align-items: center;
     gap: var(--sp-3);
     flex-wrap: wrap;
-    margin: var(--sp-2) var(--sp-3) 0;
-    padding: var(--sp-2) var(--sp-3);
+    margin: var(--sp-1) var(--sp-2) 0;
+    padding: 3px var(--sp-1) 3px var(--sp-3);
+    min-height: 28px;
     background: var(--accent-wash);
     border: 1px solid var(--accent-soft);
     border-radius: var(--radius);
@@ -3001,7 +3180,7 @@
     content: '';
     position: absolute;
     left: 0;
-    top: 44px;
+    top: var(--notebar-h);
     bottom: 0;
     width: 2px;
     background-color: var(--mode);
@@ -3009,9 +3188,30 @@
     mask-image: linear-gradient(to bottom, black, transparent 75%);
     opacity: 0.85;
     pointer-events: none;
-    transition: background-color var(--dur-fade) var(--ease);
+    transition: background-color 320ms var(--ease);
   }
   .vault-home[data-vim='none'] .editor-frame.mode-edge::after { opacity: 0.35; }
+  .mode-sweep {
+    position: absolute;
+    left: 0;
+    top: var(--notebar-h);
+    width: 3px;
+    height: 38%;
+    z-index: 3;
+    pointer-events: none;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, transparent, var(--mode) 40%, color-mix(in oklch, var(--mode) 60%, white) 85%, transparent);
+    box-shadow: 0 0 14px 2px color-mix(in oklch, var(--mode) 55%, transparent);
+    opacity: 0;
+    animation: mode-sweep 520ms cubic-bezier(0.3, 0.6, 0.2, 1) both;
+  }
+  .vault-home[data-vim='none'] .mode-sweep { display: none; }
+  @keyframes mode-sweep {
+    0% { opacity: 0; transform: translateY(-40%); }
+    12% { opacity: 1; }
+    75% { opacity: 0.9; }
+    100% { opacity: 0; transform: translateY(190%); }
+  }
   .editor-frame > .error { flex: none; padding: var(--sp-3) var(--sp-4); }
   .editor-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) 0; }
   .note-bar {
@@ -3021,8 +3221,8 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    height: 44px;
-    padding: 0 var(--sp-3) 0 var(--sp-4);
+    height: var(--notebar-h);
+    padding: 0 var(--sp-2) 0 var(--sp-3);
     border-bottom: 1px solid var(--hairline-soft);
     background: color-mix(in oklch, var(--surface-1) 40%, var(--surface-0));
   }
@@ -3169,8 +3369,11 @@
   }
   .sync.pending::before { background: var(--color-warning); animation: sync-breathe 1.6s var(--ease-breath) infinite; }
   .sync.offline::before { background: var(--ink-4); box-shadow: none; }
-  .sb-path { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 40%; }
+  .sb-path { flex: none; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 24%; }
   .sb-spacer { flex: 1; }
+  .sb-item { flex: none; }
+  .sb-legend { flex: 1; min-width: 0; display: flex; align-self: stretch; align-items: center; padding-left: var(--sp-2); border-left: 1px solid var(--hairline-soft); }
+  .sb-legend > :global(.legend) { height: 100%; }
   .sb-help {
     align-self: stretch;
     width: 28px;

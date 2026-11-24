@@ -208,4 +208,36 @@ describe('VaultHomeView structured notes', () => {
       d.startViewTransition = had;
     }
   });
+  // SPEC-PARTE2 §5b: `-` always opens the explorer — from a focused
+  // canvas or board, in Reading and in Edit (canvas zoom moved off `-`).
+  for (const kind of ['canvas', 'board'] as const) {
+    for (const mode of ['read', 'edit'] as const) {
+      it(`\`-\` opens the explorer from a focused ${kind} in ${mode === 'read' ? 'Reading' : 'Edit'}`, async () => {
+        cmp = mount(VaultHomeView, { target });
+        await waitFor(() => notes.vaultID === 'v1' && !notes.loadingList && notes.list.length > 0, 'notes');
+        await settle();
+        // The book opened on its home with the explorer up: close it.
+        if (target.querySelector('[data-testid="floating-explorer"]')) {
+          key(document.activeElement ?? target, 'Escape');
+          await waitFor(() => !target.querySelector('[data-testid="floating-explorer"]'), 'explorer closed');
+        }
+        await notes.select(kind === 'canvas' ? 'c1' : 'n1');
+        const sel = kind === 'canvas' ? '[data-testid="canvas-view"]' : '[data-testid="kanban-board"]';
+        const view = await waitFor(() => target.querySelector<HTMLElement>(sel), kind);
+        await settle();
+        if (mode === 'edit') {
+          view.focus();
+          key(view, 'e');
+          await waitFor(() => target.querySelector('[data-testid="structured-note"]')?.getAttribute('data-mode') === 'edit', 'edit mode');
+        }
+        const v = target.querySelector<HTMLElement>(sel)!;
+        v.focus();
+        expect(document.activeElement).toBe(v);
+        const ev = key(v, '-');
+        await settle();
+        expect(target.querySelector('[data-testid="floating-explorer"]'), `${kind} ${mode}`).not.toBeNull();
+        if (kind === 'canvas') expect(ev.defaultPrevented).toBe(true); // the shell took it
+      });
+    }
+  }
 });

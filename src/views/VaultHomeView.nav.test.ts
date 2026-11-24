@@ -289,7 +289,7 @@ describe('the floating explorer is the only navigation', () => {
     expect(legend()).toMatch(/new note/);
     await press('g', 'b');
     await waitFor(() => fx()?.getAttribute('data-level') === 'books', 'books');
-    expect(legend()).toMatch(/open book/);
+    expect(legend()).toMatch(/abrir livro/);
   });
 
   it('narrow screens: the overlay is a full-height sheet', async () => {
@@ -547,7 +547,7 @@ describe('a 10k-note book', () => {
     expect(lb.querySelector('[role="option"]')!.getAttribute('aria-setsize')).toBe('8020');
     expect(fxRows().length).toBeLessThan(100);
     // The home lists only a handful of recent notes.
-    expect(home()!.querySelectorAll('.recent').length).toBe(8);
+    expect(home()!.querySelectorAll('.recent').length).toBe(12);
 
     const t1 = performance.now();
     await press('G');

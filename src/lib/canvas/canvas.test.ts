@@ -224,8 +224,34 @@ describe('canvas keys', () => {
     expect(k.feed({ key: 'L' }, true)).toEqual({ kind: 'nudge', dx: 20, dy: 0 });
     expect(k.feed({ key: 'ArrowUp', shiftKey: true }, true)).toEqual({ kind: 'nudge', dx: 0, dy: -20 });
     expect(k.feed({ key: '+' }, false)).toEqual({ kind: 'zoom', factor: 1.2 });
-    expect(k.feed({ key: '-' }, false)?.kind).toBe('zoom');
     expect(k.feed({ key: '0' }, false)).toEqual({ kind: 'fit' });
+  });
+  // SPEC-PARTE2 §5b: `-` always opens the explorer, so the canvas never
+  // owns it; zoom lives on + = zi ⌘+ / _ zo ⌘- / 0 zf.
+  it('zoom keys: + = zi ⌘+ in, _ zo ⌘- out, 0 zf fit; `-` is not owned', () => {
+    const inn = { kind: 'zoom', factor: 1.2 };
+    const out = { kind: 'zoom', factor: 1 / 1.2 };
+    expect(k.feed({ key: '=' }, false)).toEqual(inn);
+    expect(k.feed({ key: '_' }, false)).toEqual(out);
+    expect(k.feed({ key: 'z' }, false)).toBeNull();
+    expect(k.feed({ key: 'i' }, false)).toEqual(inn);
+    expect(k.feed({ key: 'z' }, false)).toBeNull();
+    expect(k.feed({ key: 'o' }, false)).toEqual(out);
+    expect(k.feed({ key: 'z' }, false)).toBeNull();
+    expect(k.feed({ key: 'f' }, false)).toEqual({ kind: 'fit' });
+    expect(k.feed({ key: '+', metaKey: true }, false)).toEqual(inn);
+    expect(k.feed({ key: '=', ctrlKey: true }, false)).toEqual(inn);
+    expect(k.feed({ key: '-', metaKey: true }, false)).toEqual(out);
+    expect(k.feed({ key: '-', ctrlKey: true }, false)).toEqual(out);
+    for (const reading of [false, true]) {
+      for (const sel of [false, true]) expect(k.feed({ key: '-' }, sel, reading)).toBeNull();
+      // Reading mode keeps every zoom key.
+      expect(k.feed({ key: '+' }, false, reading)).toEqual(inn);
+      expect(k.feed({ key: '-', metaKey: true }, false, reading)).toEqual(out);
+      k.feed({ key: 'z' }, false, reading);
+      expect(k.feed({ key: 'f' }, false, reading)).toEqual({ kind: 'fit' });
+    }
+    expect(k.pending).toBeNull();
   });
   it('creates, deletes, colors', () => {
     expect(k.feed({ key: 'a' }, false)).toEqual({ kind: 'addText' });

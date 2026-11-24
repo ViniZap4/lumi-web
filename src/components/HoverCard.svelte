@@ -131,6 +131,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<span class="hc-tether" class:above={pos.above} aria-hidden="true" style="left: {pos.left + pos.ox}px; top: {pos.above ? anchor.top - 14 : pos.top - 5}px"></span>
 <div
   class="hover-card"
   class:above={pos.above}
@@ -164,7 +165,7 @@
         <KanbanMini text={content.body ?? ''} onopen={() => onopen('current')} />
       {:else if body != null}
         <div class="lumi-prose compact" data-prose={editorSettings.value.proseFont}>
-          <MarkdownView {blocks} />
+          <MarkdownView {blocks} rise={false} />
         </div>
         {#if truncated}<div class="hc-more">…</div>{/if}
       {:else if error}
@@ -217,7 +218,29 @@
   }
   .hover-card.above { transform-origin: var(--ox, 0) bottom; }
   .hover-card:focus-visible { box-shadow: var(--elev-4), 0 0 0 2px var(--ring); }
-  @keyframes hc-in { from { opacity: 0; transform: scale(0.92); } 35% { opacity: 1; } }
+  /* Motion v2: the card GROWS out of the link (origin at the link's x,
+     bouncy: 16 % overshoot) — a tether nub pops first, then the card. */
+  @keyframes hc-in { from { opacity: 0; transform: translateY(var(--hc-dy, -6px)) scale(0.3, 0.2); } 25% { opacity: 1; } }
+  .hover-card.above { --hc-dy: 6px; }
+  .hc-tether {
+    position: fixed;
+    z-index: 261;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    border-radius: 2px;
+    background: var(--glass-bg-strong);
+    border: 1px solid var(--hairline);
+    border-right: none;
+    border-bottom: none;
+    transform: rotate(45deg);
+    pointer-events: none;
+    animation: hc-tether var(--spring-bouncy-ms) var(--spring-bouncy) both;
+  }
+  .hc-tether.above { transform: rotate(225deg); }
+  @keyframes hc-tether { from { opacity: 0; transform: rotate(45deg) scale(0); } }
+  .hc-tether.above { animation-name: hc-tether-up; }
+  @keyframes hc-tether-up { from { opacity: 0; transform: rotate(225deg) scale(0); } }
   .hc-head {
     flex: none;
     padding: 10px 14px 8px;

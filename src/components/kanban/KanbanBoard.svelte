@@ -14,7 +14,7 @@
   import { planKanban, type KanbanOp } from '../../lib/kanban/kanban-edits.ts';
   import { KanbanKeys, clampCursor, type KanbanCursor } from '../../lib/kanban/kanban-keys.ts';
   import { renderMarkdown } from '../../lib/markdown.ts';
-  import { motionAllowed, animate, SPRING } from '../../lib/motion.ts';
+  import { motionAllowed, animate, SPRING, springEase } from '../../lib/motion.ts';
   import { modeKey, type StructuredMode } from '../../lib/structured-mode.svelte.ts';
 
   interface Props {
@@ -530,7 +530,7 @@
     e.preventDefault();
     const t = dropTarget(e.clientX, e.clientY, drag);
     const vx = e.clientX - drag.x;
-    const tilt = Math.max(-7, Math.min(7, drag.tilt * 0.6 + vx * 0.35));
+    const tilt = Math.max(-9, Math.min(9, drag.tilt * 0.6 + vx * 0.4));
     drag = { ...drag, x: e.clientX, y: e.clientY, toLane: t.lane, toIndex: t.index, tilt };
     if (tiltTimer) clearTimeout(tiltTimer);
     tiltTimer = setTimeout(() => { if (drag) drag = { ...drag, tilt: 0 }; }, 90);
@@ -576,7 +576,9 @@
       // Lands: from the lifted ghost (scaled, leaning) into the slot on
       // the glide spring — a 1% overshoot reads as weight.
       const lean = motionAllowed() ? d.tilt : 0;
-      animate(el, [{ transform: `translate(${ghost.x - r.left}px, ${ghost.y - r.top}px) rotate(${lean}deg) scale(1.035)` }, { transform: 'none' }], SPRING.glide.ms, SPRING.glide.easing);
+      // Drop BOUNCE: the card has weight — it lands on the bouncy
+      // spring (overshoots into the slot, settles).
+      animate(el, [{ transform: `translate(${ghost.x - r.left}px, ${ghost.y - r.top}px) rotate(${lean}deg) scale(1.06)` }, { transform: 'none' }], SPRING.bouncy.ms, SPRING.bouncy.easing);
     });
   }
 
@@ -602,7 +604,9 @@
     }
     return lanes;
   });
-  const flipMs = () => (motionAllowed() ? 180 : 0);
+  // Neighbours make room with a spring (glide: they overshoot a hair).
+  const flipMs = () => (motionAllowed() ? SPRING.glide.ms : 0);
+  const glideEase = (t: number) => springEase(SPRING.glide.points, t);
 
   function realLaneIndex(l: LaneVM): number {
     return l.lane.index;
@@ -682,7 +686,7 @@
           data-lane-key={l.key}
           aria-hidden={l.placeholder ? 'true' : undefined}
           aria-label={l.placeholder ? undefined : l.lane.title || 'Untitled column'}
-          animate:flip={{ duration: flipMs() }}
+          animate:flip={{ duration: flipMs(), easing: glideEase }}
         >
           {#if !l.placeholder}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -714,7 +718,7 @@
                   data-card-index={vm ? ci : undefined}
                   aria-current={focused ? 'true' : undefined}
                   aria-hidden={'placeholder' in it ? 'true' : undefined}
-                  animate:flip={{ duration: flipMs() }}
+                  animate:flip={{ duration: flipMs(), easing: glideEase }}
                   onpointerdown={(e) => vm && onCardPointerDown(e, vm, laneIdx, ci)}
                   ondblclick={() => vm && !reading && startEdit(vm)}
                 >
@@ -786,7 +790,10 @@
 
 <style>
   .kb {
+    /* Lanes share the width: each grows from 280 px up to 440 px, and
+       the board scrolls sideways only when they no longer fit. */
     --kb-lane-w: 280px;
+    --kb-lane-max: 440px;
     --kb-surface: var(--surface-1);
     --kb-card: var(--surface-0);
     display: flex;
@@ -803,12 +810,14 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3, 12px);
-    padding: 10px 16px;
+    min-height: 36px;
+    padding: 3px 8px 3px 14px;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--hairline);
     flex-wrap: wrap;
   }
   .kb-lead { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
-  .kb-title { font-weight: 600; font-size: var(--text-lg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kb-title { font-weight: 600; font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kb-meta, .kb-status { color: var(--ink-3); font-size: var(--text-xs); }
   .kb-status { padding: 1px 6px; border-radius: 999px; background: var(--tint-hover); }
   .kb-pending { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-primary); }
@@ -829,11 +838,13 @@
   .kb-filter:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--ring); }
 
   .kb-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-  .kb-lanes { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px 24px; min-height: 100%; box-sizing: border-box; width: max-content; }
+  .kb-lanes { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px 20px; min-height: 100%; box-sizing: border-box; width: max-content; min-width: 100%; }
 
   .kb-lane {
-    flex: 0 0 var(--kb-lane-w);
+    flex: 1 1 var(--kb-lane-w);
     width: var(--kb-lane-w);
+    min-width: var(--kb-lane-w);
+    max-width: var(--kb-lane-max);
     max-height: 100%;
     display: flex;
     flex-direction: column;
@@ -1002,7 +1013,7 @@
     box-shadow: 0 2px 4px rgb(var(--shadow-rgb) / 0.25), 0 26px 50px -14px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 1.3)), 0 0 0 4px var(--accent-wash), 0 14px 40px -12px var(--accent-glow), var(--edge-light);
     box-sizing: border-box;
     will-change: transform;
-    scale: 1.035;
+    scale: 1.06;
     animation: ghost-lift var(--spring-bouncy-ms) var(--spring-bouncy) both;
   }
   @keyframes ghost-lift { from { scale: 1; box-shadow: var(--elev-1); } }
@@ -1011,8 +1022,8 @@
   .kb-ghost.moving { rotate: var(--tilt, 0deg); transition: rotate var(--spring-glide-ms) var(--spring-glide); }
 
   @media (max-width: 640px) {
-    .kb { --kb-lane-w: min(84vw, 300px); }
-    .kb-lanes { padding: 12px 16px 20px; scroll-snap-type: x mandatory; }
+    .kb { --kb-lane-w: min(86vw, 300px); --kb-lane-max: var(--kb-lane-w); }
+    .kb-lanes { padding: 8px 10px 16px; scroll-snap-type: x mandatory; }
     .kb-lane { scroll-snap-align: start; }
   }
 </style>

@@ -858,6 +858,13 @@
     void openPrompt({ kind: 'create', text: '' });
   }
 
+  /** `a` prompt prefilled with `.canvas` (POST kind:"canvas"). */
+  function beginCreateCanvas(): void {
+    if (structuralOffline) return showOfflineHint();
+    if (pane === 'note') leaveNote();
+    void openPrompt({ kind: 'create', text: '.canvas' }, true);
+  }
+
   function beginRename(): void {
     const cur = pane === 'note' ? nav.entries.find((x) => x.kind === 'note' && x.note.id === notes.selectedID) : nav.current;
     if (!cur) return;
@@ -918,7 +925,7 @@
         await moveFolder(plan.from, plan.to);
         prompt = null;
       } else if (plan.kind === 'note' && 'folder' in plan) {
-        await createNote(plan.title, plan.folder);
+        await createNote(plan.title, plan.folder, '', plan.noteKind);
         prompt = null;
       } else if (plan.kind === 'note' && p.kind === 'rename' && p.entry.kind === 'note') {
         const input: { title?: string; path?: string } = {};
@@ -940,10 +947,10 @@
   }
 
   /** POST (always at the book root), then PATCH the path into `folder`. */
-  async function createNote(title: string, folder: string, body = ''): Promise<void> {
+  async function createNote(title: string, folder: string, body = '', kind?: 'canvas'): Promise<void> {
     creating = true;
     try {
-      const created = await notes.create({ title, body });
+      const created = await notes.create(kind ? { title, body, kind } : { title, body });
       if (!created) return;
       let final = created;
       if (folder) {
@@ -1006,7 +1013,8 @@
     try {
       const src = await api.getNoteContent(vid, y.note.id);
       const taken = new Set(notes.list.map((n) => n.title));
-      await createNote(copyTitle(y.note.title ?? y.name, taken), nav.dir, src.body ?? '');
+      const isCanvas = noteViewKind({ path: y.note.path, kind: y.note.kind ?? src.kind }) === 'canvas';
+      await createNote(copyTitle(y.note.title ?? y.name, taken), nav.dir, src.body ?? '', isCanvas ? 'canvas' : undefined);
       flash(`pasted a copy of ${y.name}`);
     } catch (e) {
       flash(errText(e), 'error');
@@ -1440,6 +1448,7 @@
 
   const paletteCommands: PaletteCommand[] = $derived([
     { id: 'new', title: 'New note…', keys: 'a', group: 'create file', run: beginCreate },
+    { id: 'new-canvas', title: 'New canvas…', keys: 'a name.canvas', group: 'create canvas json', run: beginCreateCanvas },
     { id: 'new-folder', title: 'New folder…', keys: 'a dir/', group: 'create directory', run: () => { if (structuralOffline) return showOfflineHint(); void openPrompt({ kind: 'create', text: '/' }, true); } },
     { id: 'rename', title: 'Rename / move…', keys: 'r', group: 'file', run: beginRename },
     { id: 'delete', title: 'Delete note', keys: 'd', group: 'file remove', run: beginDelete },

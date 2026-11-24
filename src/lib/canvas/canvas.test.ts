@@ -239,3 +239,15 @@ describe('canvas keys', () => {
     expect(k.feed({ key: 'k', metaKey: true }, true)).toBeNull();
   });
 });
+
+describe('server contract', () => {
+  it("the server's empty canvas parses and takes a first edit", () => {
+    const empty = '{"nodes":[],"edges":[]}\n';
+    const p = ok(empty);
+    expect(p.nodes).toEqual([]);
+    expect(p.style).toMatchObject({ layout: 'compact', trailingNewline: true });
+    const next = applyTextEdits(empty, commitCanvas(empty, addNode({ id: 'a', type: 'text', text: 'x', x: 0, y: 0, width: 250, height: 60 })));
+    expect(ok(next).nodes.map((n) => n.id)).toEqual(['a']);
+    expect(next.endsWith('}\n')).toBe(true);
+  });
+});

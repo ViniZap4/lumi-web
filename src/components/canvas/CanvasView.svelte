@@ -66,12 +66,22 @@
   const groups = $derived(nodes.filter((n) => n.type === 'group') as GroupNode[]);
   const cards = $derived(nodes.filter((n) => n.type !== 'group'));
 
+  const MAX_BYTES = 4 * 1024 * 1024;
   function commit(op: CanvasOp): boolean {
     if (!editable) {
       flash(invalid ? 'Invalid JSON: fix it in Source' : 'Read-only');
       return false;
     }
-    const edits = commitCanvas(doc.read(), op);
+    const cur = doc.read();
+    const edits = commitCanvas(cur, op);
+    // Server limit: 4 MiB of UTF-8 per file.
+    if (edits.length && cur.length + edits[0].insert.length > 1_000_000) {
+      const next = cur.slice(0, edits[0].from) + edits[0].insert + cur.slice(edits[0].to);
+      if (new TextEncoder().encode(next).length > MAX_BYTES) {
+        flash('Canvas too large (4 MiB limit)');
+        return false;
+      }
+    }
     if (edits.length) doc.apply(edits);
     return edits.length > 0;
   }

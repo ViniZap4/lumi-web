@@ -1160,10 +1160,9 @@
     background:
       radial-gradient(120% 90% at 50% 40%, transparent 40%, rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.55))),
       var(--scrim);
-    /* Depth: the page behind blurs a little as the scrim eases in
-       (one blurred layer; opacity-only animation). */
-    -webkit-backdrop-filter: blur(3px) saturate(0.9);
-    backdrop-filter: blur(3px) saturate(0.9);
+    /* Depth: the scrim eases in (soft, opacity only) and its vignette
+       deepens; no backdrop blur here — the panel's own glass is the one
+       blurred layer (a second full-viewport blur doubled frame cost). */
     animation: fx-scrim-in var(--spring-soft-ms) var(--spring-soft) both;
     transition: background-color var(--dur-fade) var(--ease), opacity var(--dur-fade) var(--ease);
   }

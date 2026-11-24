@@ -9,7 +9,7 @@ import fs from 'node:fs';
 const args = process.argv.slice(2);
 const BASE = args[0];
 const jsonOut = args.includes('--json') ? args[args.indexOf('--json') + 1] : null;
-const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || undefined });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || undefined, args: process.env.GPU ? ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist'] : [] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
 await page.addInitScript(() => {
@@ -65,11 +65,18 @@ await fxOpen();
 await measure('explorer-cursor', async () => { for (let k = 0; k < 6; k++) { await press('j'); await wait(60); } for (let k = 0; k < 6; k++) { await press('k'); await wait(60); } });
 await measure('folder-travel', async () => {
   await press('g'); await press('g');
-  await page.locator('[data-testid=floating-explorer] .fx-current').getByText('journal', { exact: true }).first().click();
   await press('l'); await wait(450); await press('h'); await wait(450);
 }, 4);
-await page.locator('[data-testid=floating-explorer] .fx-current').getByText('Showcase', { exact: true }).first().click();
-await measure('note-open', async () => { await press('Enter'); await wait(900); await fxOpen(); await page.locator('[data-testid=floating-explorer] .fx-current').getByText('Showcase', { exact: true }).first().click(); }, 3);
+async function selectRow(name) {
+  await press('g'); await press('g');
+  for (let k = 0; k < 40; k++) {
+    const t = (await page.locator('[data-testid=floating-explorer] .fx-current [role=option][aria-selected=true]').innerText().catch(() => '')).trim();
+    if (t.startsWith(name)) return;
+    await press('j');
+  }
+}
+await selectRow('Showcase');
+await measure('note-open', async () => { await press('Enter'); await wait(900); await fxOpen(); await selectRow('Showcase'); }, 3);
 await press('Escape'); await wait(400);
 await page.locator('[data-testid=md-body]').first().click({ position: { x: 5, y: 5 } }).catch(() => {});
 await press('Control+w'); await press('v'); await wait(900);
@@ -91,7 +98,7 @@ await page.keyboard.press('u'); // undo is fine either way
 await page.keyboard.press('Meta+Enter').catch(() => {});
 await wait(600);
 await fxOpen();
-await page.locator('[data-testid=floating-explorer] .fx-current').getByText('board', { exact: true }).first().click();
+await selectRow('board');
 await press('Enter'); await wait(1200);
 await press('e'); await wait(400);
 await measure('kanban-drag', async () => {
@@ -108,7 +115,7 @@ await measure('kanban-drag', async () => {
 }, 3);
 // Canvas pan with inertia.
 await fxOpen();
-await page.locator('[data-testid=floating-explorer] .fx-current').getByText('big', { exact: true }).first().click();
+await selectRow('big');
 await press('Enter'); await wait(1500);
 await measure('canvas-pan', async () => {
   const c = await page.locator('[data-testid=canvas-view]').last().boundingBox();

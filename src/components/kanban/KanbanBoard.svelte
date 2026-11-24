@@ -995,7 +995,8 @@
     pointer-events: none;
     padding: 8px 10px;
     border-radius: var(--radius);
-    background: var(--kb-card);
+    /* One step lighter than its siblings: it is closer to you. */
+    background: var(--surface-2);
     border: 1px solid var(--accent-line);
     /* Lifted: bigger, deeper shadow, an accent rim. */
     box-shadow: 0 2px 4px rgb(var(--shadow-rgb) / 0.25), 0 26px 50px -14px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 1.3)), 0 0 0 4px var(--accent-wash), 0 14px 40px -12px var(--accent-glow), var(--edge-light);

@@ -84,7 +84,10 @@
 {:else}
   <div class="pane-split" class:col={node.dir === 'col'} class:dragging={dragging != null} bind:this={box} data-split={node.id}>
     {#each node.children as c, i (c.id)}
-      <div class="pane-cell" class:zoom-hide={zoomed != null && !containsLeaf(c, zoomed)} style="flex: {node.sizes[i]} 1 0px">
+      <!-- Zoomed: the cell holding the zoomed leaf takes the whole split
+           (flex-grow 1 — a lone item with grow < 1 would only take that
+           fraction); the others are hidden but stay mounted. -->
+      <div class="pane-cell" class:zoom-hide={zoomed != null && !containsLeaf(c, zoomed)} style="flex: {zoomed != null && containsLeaf(c, zoomed) ? 1 : node.sizes[i]} 1 0px">
         <PaneTree node={c} {leaf} {onresize} {onequalize} {onresized} {zoomed} />
         {#if c.kind === 'leaf'}<span class="pane-light" aria-hidden="true"></span>{/if}
       </div>

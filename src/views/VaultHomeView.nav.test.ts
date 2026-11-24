@@ -467,6 +467,8 @@ describe('pane zoom, click-to-focus and mouse splits (SPEC-PARTE2 §3)', () => {
     expect(panes().length).toBe(1);
     expect(cellHidden(panes()[0])).toBe(false);
     expect(panes()[0].querySelector('[data-testid="zoom-badge"]')).not.toBeNull();
+    // The zoomed cell fills the split (flex-grow 1, not its 0.5 share).
+    expect((panes()[0].closest('.pane-cell') as HTMLElement).style.flex).toMatch(/^1 1 0(px)?$/);
     expect(target.querySelector('[data-testid="status-zoom"]')).not.toBeNull();
     expect(target.querySelector('[data-testid="pane-divider"]')).toBeNull();
     await ctrl('w');

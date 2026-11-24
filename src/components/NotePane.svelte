@@ -68,8 +68,9 @@
   const body = $derived(content?.body ?? '');
   const blocks = $derived(content ? renderBlocks(body) : []);
   const titleInBody = $derived(!!content && startsWithTitle(body, title));
-  const views = $derived(viewsFor({ path, frontmatter: content?.frontmatter ?? null, body }));
-  const view = $derived(resolveView({ path, frontmatter: content?.frontmatter ?? null, body }, p.leaf.view));
+  const match = $derived({ path, kind: content?.kind ?? meta?.kind ?? null, frontmatter: content?.frontmatter ?? null, body });
+  const views = $derived(viewsFor(match));
+  const view = $derived(resolveView(match, p.leaf.view));
 
   // Load (and reload when the note changes on the server).
   let seq = 0;
@@ -244,10 +245,10 @@
     </span>
     {#if stale}<span class="pane-stale">offline copy</span>{/if}
     <span class="pane-actions">
-      {#if views.length > 1}
+      {#if views.length > 1 && view === MARKDOWN_VIEW}
         <span class="ui-seg pane-seg" role="group" aria-label="View">
           {#each views as v (v.id)}
-            <button type="button" class:active={view === v.id} aria-pressed={view === v.id} onclick={() => p.onview(v.id === views[0].id ? null : v.id)}>{v.label}</button>
+            <button type="button" class:active={view === v.id} aria-pressed={view === v.id} onclick={() => { if (v.id !== MARKDOWN_VIEW && editing) exitEdit(); p.onview(v.id === views[0].id ? null : v.id); }}>{v.label}</button>
           {/each}
         </span>
       {/if}
@@ -282,6 +283,9 @@
         openLink={(href, where) => p.onfollow(href, where, path)}
         acquireSession={() => acquireEditorSession(p.vaultID, p.leaf.note)}
         releaseSession={(s) => editorPool.release(s)}
+        {title}
+        onsource={() => { p.onview(MARKDOWN_VIEW); void enterEdit(); }}
+        onlink={(href, e) => p.onlink(href, e, path)}
       />
     </div>
   {:else if editing && session && NoteEditor && session.editable && !(session.emptyAtSync && body !== '')}

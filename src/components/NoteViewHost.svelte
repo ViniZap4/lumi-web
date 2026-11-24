@@ -4,10 +4,8 @@
   import type { Component } from 'svelte';
   import { noteViewSpec, type NoteViewProps } from '../lib/note-views.ts';
 
-  interface Props extends NoteViewProps {
-    view: string;
-  }
-  const { view, ...props }: Props = $props();
+  const props: NoteViewProps = $props();
+  const view = $derived(props.view);
 
   let Comp = $state<Component<NoteViewProps> | null>(null);
   let error = $state<string | null>(null);

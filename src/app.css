@@ -393,13 +393,13 @@ kbd, .ui-kbd {
 }
 .lumi-prose.compact[data-prose='serif'] { --prose-size: 15.5px; }
 .lumi-prose.compact[data-prose='mono'] { --prose-size: 13px; }
-.lumi-prose.compact .md-body h1 { font-size: 1.45em; margin-top: 1em; }
-.lumi-prose.compact .md-body h2 { font-size: 1.25em; margin-top: 1.2em; }
-.lumi-prose.compact .md-body h3 { font-size: 1.1em; margin-top: 1.1em; }
-.lumi-prose.compact .md-body h2::after { display: none; }
+.lumi-prose.compact h1 { font-size: 1.45em; margin-top: 1em; }
+.lumi-prose.compact h2 { font-size: 1.25em; margin-top: 1.2em; }
+.lumi-prose.compact h3 { font-size: 1.1em; margin-top: 1.1em; }
+.lumi-prose.compact h2::after { display: none; }
 .lumi-prose.compact .md-anchor, .lumi-prose.compact .md-code-head { display: none; }
 .lumi-prose.compact .md-code pre { padding: 0.6em 0.85em; }
-.lumi-prose.compact .md-body img { max-height: 12em; object-fit: cover; }
+.lumi-prose.compact img { max-height: 12em; object-fit: cover; }
 
 /* ── Rendered markdown (.md-body) ─────────────────────────────────── */
 .md-body {

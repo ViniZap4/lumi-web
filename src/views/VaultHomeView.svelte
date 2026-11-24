@@ -30,6 +30,9 @@
   import { HoverIntent, type HoverTarget } from '../lib/hover-preview.ts';
   import { formatDeepLink } from '../lib/deeplink.ts';
   import { resolveView, viewsFor, MARKDOWN_VIEW } from '../lib/note-views.ts';
+  import { registerStructuredViews } from '../lib/structured-views.ts';
+  // Kanban boards and JSON canvases render through the note-view registry.
+  registerStructuredViews();
   import { MAC } from '../lib/platform.ts';
   import { linkCandidates } from '../lib/links.ts';
   import { PreviewKeymap, type PreviewAction } from '../lib/preview-keys.ts';
@@ -48,6 +51,7 @@
   import HelpOverlay from '../components/HelpOverlay.svelte';
   import MarkdownView from '../components/MarkdownView.svelte';
   import SourceSplit from '../components/SourceSplit.svelte';
+  import { noteViewKind } from '../lib/note-kind.ts';
   import ContextMenu from '../components/ContextMenu.svelte';
   import HintOverlay from '../components/HintOverlay.svelte';
   import PaneTree from '../components/PaneTree.svelte';
@@ -498,8 +502,16 @@
 
     if (overlayOpen()) return;
 
-    // A component (CodeMirror/vim, a form control) already handled it.
-    if (e.defaultPrevented) return;
+    // A component (CodeMirror/vim, a form control, a board / canvas)
+    // already handled it — including the second key of a Ctrl-w chord
+    // (canvas Ctrl-w f), so the shell's chord ends too.
+    if (e.defaultPrevented) {
+      if (paneKeys.pending) {
+        paneKeys.reset();
+        panePending = false;
+      }
+      return;
+    }
     // A task checkbox (focused by a click or a hint) is not text entry:
     // the reader keys keep working around it.
     const taskBox = (e.target as HTMLElement | null)?.matches?.('input[type="checkbox"][data-task]') ?? false;
@@ -977,6 +989,13 @@
     void openPrompt({ kind: 'create', text: '' });
   }
 
+  /** `a` prompt prefilled with `.canvas` (POST kind:"canvas"). */
+  function beginCreateCanvas(): void {
+    if (structuralOffline) return showOfflineHint();
+    if (pane === 'note') leaveNote();
+    void openPrompt({ kind: 'create', text: '.canvas' }, true);
+  }
+
   function beginRename(): void {
     const cur = pane === 'note' ? nav.entries.find((x) => x.kind === 'note' && x.note.id === notes.selectedID) : nav.current;
     if (!cur) return;
@@ -1037,14 +1056,14 @@
   }
 
   /** POST (always at the book root), then PATCH the path into `folder`. */
-  async function createNote(title: string, folder: string, body = ''): Promise<void> {
-    return createNoteIn(nav, title, folder, body);
+  async function createNote(title: string, folder: string, body = '', kind?: 'canvas'): Promise<void> {
+    return createNoteIn(nav, title, folder, body, kind);
   }
 
-  async function createNoteIn(n: MillerNav, title: string, folder: string, body = ''): Promise<void> {
+  async function createNoteIn(n: MillerNav, title: string, folder: string, body = '', kind?: 'canvas'): Promise<void> {
     creating = true;
     try {
-      const created = await notes.create({ title, body });
+      const created = await notes.create(kind ? { title, body, kind } : { title, body });
       if (!created) return;
       let final = created;
       if (folder) {
@@ -1109,7 +1128,8 @@
     try {
       const src = await api.getNoteContent(vid, y.note.id);
       const taken = new Set(notes.list.map((n) => n.title));
-      await createNote(copyTitle(y.note.title ?? y.name, taken), nav.dir, src.body ?? '');
+      const isCanvas = noteViewKind({ path: y.note.path, kind: y.note.kind ?? src.kind }) === 'canvas';
+      await createNote(copyTitle(y.note.title ?? y.name, taken), nav.dir, src.body ?? '', isCanvas ? 'canvas' : undefined);
       flash(`pasted a copy of ${y.name}`);
     } catch (e) {
       flash(errText(e), 'error');
@@ -1707,9 +1727,10 @@
       if (structuralOffline) throw new Error(OFFLINE_HINT);
       const vid = vaults.selectedID;
       if (!vid) return;
-      const body = (await api.getNoteContent(vid, src.note.id)).body ?? '';
+      const c = await api.getNoteContent(vid, src.note.id);
       const taken = new Set(notes.list.map((x) => x.title));
-      await createNoteIn(n, copyTitle(src.note.title ?? src.name, taken), n.dir, body);
+      const isCanvas = noteViewKind({ path: src.note.path, kind: src.note.kind ?? c.kind }) === 'canvas';
+      await createNoteIn(n, copyTitle(src.note.title ?? src.name, taken), n.dir, c.body ?? '', isCanvas ? 'canvas' : undefined);
     },
   };
 
@@ -1726,7 +1747,7 @@
     } else if (plan.kind === 'folder') {
       await moveFolder(plan.from, plan.to, n);
     } else if (plan.kind === 'note' && 'folder' in plan) {
-      await createNoteIn(n, plan.title, plan.folder);
+      await createNoteIn(n, plan.title, plan.folder, '', plan.noteKind);
     } else if (plan.kind === 'note' && p.kind === 'rename' && p.entry.kind === 'note') {
       const input: { title?: string; path?: string } = {};
       if (plan.title) input.title = plan.title;
@@ -1986,7 +2007,7 @@
   // marked is fast enough that we don't bother debouncing here; large
   // notes (10k+ lines) are the slice 4.4 / 4.6 perf concern.
   const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
-  const primaryMatch = $derived({ path: notes.selected?.path ?? notes.content?.path ?? '', frontmatter: notes.content?.frontmatter ?? null, body: notes.content?.body ?? '' });
+  const primaryMatch = $derived({ path: notes.selected?.path ?? notes.content?.path ?? '', kind: notes.content?.kind ?? notes.selected?.kind ?? null, frontmatter: notes.content?.frontmatter ?? null, body: notes.content?.body ?? '' });
   const primaryViews = $derived(viewsFor(primaryMatch));
   const primaryView = $derived(resolveView(primaryMatch, panes ? (findLeaf(panes.root, primaryLeaf)?.view ?? null) : null));
   const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
@@ -2059,6 +2080,7 @@
 
   const paletteCommands: PaletteCommand[] = $derived([
     { id: 'new', title: 'New note…', keys: 'a', group: 'create file', run: beginCreate },
+    { id: 'new-canvas', title: 'New canvas…', keys: 'a name.canvas', group: 'create canvas json', run: beginCreateCanvas },
     { id: 'new-folder', title: 'New folder…', keys: 'a dir/', group: 'create directory', run: () => { if (structuralOffline) return showOfflineHint(); void openPrompt({ kind: 'create', text: '/' }, true); } },
     { id: 'rename', title: 'Rename / move…', keys: 'r', group: 'file', run: beginRename },
     { id: 'delete', title: 'Delete note', keys: 'd', group: 'file remove', run: beginDelete },
@@ -2544,17 +2566,8 @@
           </div>
         {/each}
         {#if primaryView !== MARKDOWN_VIEW && vaults.selectedID && notes.selectedID}
+          <!-- The board / canvas brings its own title bar and Board ⇄ Source toggle. -->
           <div class="view-frame">
-            <header class="note-bar view-bar">
-              <div class="nb-lead"><span class="nb-title static">{notes.selected?.title}</span></div>
-              <div class="nb-actions">
-                <div class="ui-seg nb-seg" role="group" aria-label="View">
-                  {#each primaryViews as v (v.id)}
-                    <button type="button" class:active={primaryView === v.id} aria-pressed={primaryView === v.id} onclick={() => setPrimaryView(v.id === primaryViews[0].id ? null : v.id)}>{v.label}</button>
-                  {/each}
-                </div>
-              </div>
-            </header>
             <NoteViewHost
               view={primaryView}
               vaultID={vaults.selectedID}
@@ -2565,6 +2578,9 @@
               openLink={(href, where) => followLink(href, where, leafPath(primaryLeaf), false, primaryLeaf)}
               acquireSession={() => acquireEditorSession(vaults.selectedID!, notes.selectedID!)}
               releaseSession={(x) => editorPool.release(x)}
+              title={notes.selected?.title ?? ''}
+              onsource={() => { setPrimaryView(MARKDOWN_VIEW); void enterEdit(); }}
+              onlink={onMdLink}
             />
           </div>
         {:else if editMode && editSession && NoteEditor}
@@ -2585,6 +2601,13 @@
                 {/if}
               </div>
               <div class="nb-actions">
+                {#if primaryViews.length > 1}
+                  <div class="ui-seg nb-seg" role="group" aria-label="View">
+                    {#each primaryViews.filter((v) => v.id !== MARKDOWN_VIEW) as v (v.id)}
+                      <button type="button" onclick={() => { exitEdit(); setPrimaryView(null); }} title="Back to the {v.label.toLowerCase()}">{v.label}</button>
+                    {/each}
+                  </div>
+                {/if}
                 <div class="ui-seg nb-seg" role="group" aria-label="View mode" data-testid="view-mode">
                   <button type="button" onclick={exitEditAnimated} title="Reading view ({keyLabel('⌘E')})">Reading</button>
                   <button type="button" class:active={editorSettings.value.editMode === 'live'}
@@ -2889,7 +2912,7 @@
     z-index: 3;
   }
   .primary-pane.active:has(> .editor-frame)::before, .primary-pane.active:has(> .view-frame)::before { display: none; }
-  .primary-pane.active > .editor-frame > .note-bar, .primary-pane.active > .view-frame > .note-bar { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 55%, transparent); }
+  .primary-pane.active > .editor-frame > .note-bar { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 55%, transparent); }
   .primary-pane:has(> .editor-frame), .primary-pane:has(> .view-frame) { padding: 0; overflow: hidden; }
   .pane-tabs {
     flex: none;
@@ -3032,6 +3055,7 @@
      column below (centred by the editor itself), the scrollbar at the
      pane edge. */
   .preview:has(> .editor-frame) { padding: 0; overflow: hidden; }
+  .preview:has(> .view-frame) { padding: 0; overflow: hidden; }
   .editor-frame {
     display: flex;
     flex-direction: column;

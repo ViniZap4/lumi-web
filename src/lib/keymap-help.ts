@@ -64,6 +64,7 @@ export const KEYMAP: readonly KeymapSection[] = [
     title: 'Floating explorer',
     rows: [
       ['-  ⟨leader⟩e  :explore', 'open at this note'],
+      [':explore', 'in a canvas (there - zooms out)'],
       ['j k h l  /', 'move, folders, filter'],
       ['⏎', 'open in this pane'],
       ['⌃v  ⌃s', 'open in a split right / below'],

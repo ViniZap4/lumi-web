@@ -31,6 +31,8 @@ export const MARKDOWN_VIEW = 'markdown';
 export interface NoteViewMatch {
   /** Book-relative path (`notes/plan.md`, `boards/q3.canvas`). */
   path: string;
+  /** Server file kind (`markdown` | `canvas`), when known. */
+  kind?: string | null;
   /** Parsed frontmatter when known (null for files without it). */
   frontmatter?: Record<string, unknown> | null;
   /** Body text when already loaded (may be absent while loading). */
@@ -38,6 +40,8 @@ export interface NoteViewMatch {
 }
 
 export interface NoteViewProps {
+  /** The registered view id being rendered (`kanban`, `canvas`, …). */
+  view: string;
   vaultID: string;
   noteID: string;
   notePath: string;
@@ -52,6 +56,12 @@ export interface NoteViewProps {
    *  when editing is impossible (no account, signed out). */
   acquireSession: () => Promise<EditorSession | string>;
   releaseSession: (s: EditorSession) => void;
+  /** Note title (for headers). */
+  title?: string;
+  /** Switch this pane to the markdown Source editor (Board ⇄ Source). */
+  onsource?: () => void;
+  /** A link clicked inside the view (plain / Cmd / Shift-Cmd click). */
+  onlink?: (href: string, e: MouseEvent) => void;
 }
 
 export interface NoteViewSpec {

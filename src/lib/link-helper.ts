@@ -11,10 +11,13 @@
 // (CRDT client protocol: never replace the document), so y-codemirror
 // forwards a minimal Y.Text delete+insert.
 
-import type { Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { Prec, type Extension } from '@codemirror/state';
+import { EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import {
   autocompletion,
+  closeCompletion,
+  completionKeymap,
+  completionStatus,
   startCompletion,
   type Completion,
   type CompletionContext,
@@ -159,10 +162,28 @@ export function pasteLinkHandler(): Extension {
   });
 }
 
+/**
+ * Escape closes the picker only when it is SHOWN. While a query is
+ * merely pending (every keystroke starts one, ~100 ms) Escape cancels
+ * it and still reaches vim: with the stock binding a quick `abc<Esc>u`
+ * stayed in INSERT and typed the `u` instead of undoing.
+ */
+export const completionEscape: KeyBinding = {
+  key: 'Escape',
+  run: (view) => {
+    const status = completionStatus(view.state);
+    if (status === 'active') return closeCompletion(view);
+    if (status === 'pending') closeCompletion(view);
+    return false;
+  },
+};
+
 /** The editor extension: completion (link sources only) + paste. */
 export function linkHelper(deps: LinkHelperDeps): Extension {
   return [
+    Prec.highest(keymap.of([completionEscape, ...completionKeymap.filter((b) => b.key !== 'Escape')])),
     autocompletion({
+      defaultKeymap: false,
       override: [linkCompletionSource(deps)],
       activateOnTyping: true,
       icons: false,

@@ -1,6 +1,7 @@
 <script lang="ts" module>
   import { Vim } from '@replit/codemirror-vim';
   import { installYankFlash } from '../lib/yank-flash.ts';
+  import { installVimUndo } from '../lib/editor-undo.ts';
   import { motionAllowed } from '../lib/motion.ts';
 
   /** Per-editor ex handlers. Vim ex commands are registered once on
@@ -58,6 +59,8 @@
     Vim.defineEx('only', 'on', (cm: unknown) => target(cm)?.win('only', ''));
     Vim.defineEx('close', 'clo', (cm: unknown) => target(cm)?.win('close', ''));
     Vim.defineEx('zoom', 'zo', (cm: unknown) => target(cm)?.win('zoom', ''));
+    // u / Ctrl-r / :undo / :redo → the session's Y.UndoManager.
+    installVimUndo();
     // Neovim-style yank highlight (purely visual).
     installYankFlash(Vim as never, () => !motionAllowed());
   }
@@ -84,6 +87,7 @@
   import { remoteFlash, observeRemoteEdits } from '../lib/remote-flash.ts';
   import { remoteActivity } from '../lib/remote-activity.svelte.ts';
   import { editorKeymap, vimInsertKeys } from '../lib/editor-keys.ts';
+  import { yUndoExtension, yUndoKeymap } from '../lib/editor-undo.ts';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
@@ -301,7 +305,7 @@
 
   function baseKeys(s: EffectiveSettings): Extension {
     const insert = s.vim ? vimInsertKeys((v) => !!(getCM(v)?.state.vim as { insertMode?: boolean } | undefined)?.insertMode) : [];
-    return keymap.of([...insert, ...editorKeymap(defaultKeymap, s.vim), ...searchKeymap]);
+    return keymap.of([...insert, ...yUndoKeymap(s.vim), ...editorKeymap(defaultKeymap, s.vim), ...searchKeymap]);
   }
 
   function vimExt(s: EffectiveSettings): Extension {
@@ -409,8 +413,9 @@
     applyVimConfig(Vim, eff);
     const s = eff;
     // Order matters: our highest-precedence keymap runs before vim (so
-    // Mod-E works even where vim binds Ctrl-E); vim() MUST precede
-    // yCollab() so vim's keymap doesn't shadow the Yjs undo.
+    // Mod-E works even where vim binds Ctrl-E); yUndoExtension() MUST
+    // precede yCollab() (its update sets the undo-unit boundary before
+    // ySync pushes the change into the Y.Doc).
     const extensions = [
       Prec.highest(keymap.of([
         { key: 'Mod-e', run: () => { onexit?.(); return true; } },
@@ -457,17 +462,16 @@
       wrapC.of(wrapExt(s)),
       tabC.of(tabExt(s)),
       fontC.of(fontExt(s)),
-      // We do NOT call history() — yCollab supplies a Yjs-aware
-      // UndoManager that integrates with collaborative undo.
+      // No history(): undo is the session's Y.UndoManager (only this
+      // user's edits), grouped per vim command / insert session.
       syntaxHighlighting(lumiHighlightStyle),
       // Fold placeholders for vim zc/zo/za (headings, lists, code).
       codeFolding({ placeholderText: '⋯' }),
       keysC.of(baseKeys(s)),
       markdown({ base: markdownLanguage, codeLanguages: languages }),
       previewC.of(previewExt(s)),
-      yCollab(session.ytext, session.provider?.awareness ?? null, {
-        undoManager: session.undoManager,
-      }),
+      yUndoExtension(session.undoManager),
+      yCollab(session.ytext, session.provider?.awareness ?? null, { undoManager: false }),
       EditorView.updateListener.of(scheduleStats),
       linkHelper(linkDeps),
       noteLinkHandler.of((href, ev) => {

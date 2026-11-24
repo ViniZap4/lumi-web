@@ -411,7 +411,11 @@ export class EditorSession {
     // replica of this same note persisted after an earlier SyncStep2.
     this.ydoc = new Y.Doc();
     this.ytext = this.ydoc.getText('content');
-    this.undoManager = new Y.UndoManager(this.ytext);
+    // Tracks only origins registered by the editor views (their
+    // YSyncConfig) and the structured views ('lumi:structured') — never
+    // the default `null` origin, so no untagged write (task toggle,
+    // recovery) can ever be undone as if it were the user's edit.
+    this.undoManager = new Y.UndoManager(this.ytext, { trackedOrigins: new Set() });
     this.offline = options.offline ?? null;
     this.persistence = this.offline
       ? new ReplicaPersistence({

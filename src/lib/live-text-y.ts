@@ -28,12 +28,16 @@ export function yLiveText(
     apply(edits: readonly TextEdit[]) {
       if (!edits.length || (opts.editable && !opts.editable())) return;
       assertDisjoint(edits);
+      // One board/canvas action = one undo step, however fast the
+      // next one follows (and never merged with editor typing).
+      um?.stopCapturing();
       doc.transact(() => {
         for (const e of sortEditsDesc(edits)) {
           if (e.to > e.from) ytext.delete(e.from, e.to - e.from);
           if (e.insert) ytext.insert(e.from, e.insert);
         }
       }, origin);
+      um?.stopCapturing();
     },
     subscribe(fn) {
       const h = (_ev: Y.YTextEvent, tr: Y.Transaction) => fn(tr.origin !== origin && tr.origin !== um);

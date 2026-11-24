@@ -1,6 +1,7 @@
 // The base CodeMirror keymap for the note editor.
 //
-// - Undo/redo are dropped: yCollab supplies a Yjs-aware UndoManager.
+// - CM history's undo/redo are dropped: editor-undo.ts binds them to
+//   the session's Y.UndoManager.
 // - With vim on, the macOS emacs-style Ctrl bindings (Ctrl-v page
 //   down, Ctrl-a/e/b/f/n/p/d/h/k/o/t…) are dropped: CodeMirror's keymap
 //   handler runs before the vim plugin, so they would shadow vim's

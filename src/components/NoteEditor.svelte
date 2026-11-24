@@ -80,6 +80,8 @@
   import { languages } from '@codemirror/language-data';
   import { syntaxHighlighting, indentUnit, codeFolding, foldGutter } from '@codemirror/language';
   import { yankFlash } from '../lib/yank-flash.ts';
+  import { remoteFlash, observeRemoteEdits } from '../lib/remote-flash.ts';
+  import { remoteActivity } from '../lib/remote-activity.svelte.ts';
   import { editorKeymap, vimInsertKeys } from '../lib/editor-keys.ts';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
@@ -412,6 +414,7 @@
       // Blockwise visual (<C-v>) is one range per line.
       EditorState.allowMultipleSelections.of(true),
       yankFlash(),
+      remoteFlash(),
       gutterC.of(gutterExt(s)),
       activeLineC.of(activeLineExt(s)),
       wrapC.of(wrapExt(s)),
@@ -451,6 +454,9 @@
       parent: container,
     });
     handlers.set(view, exHandlers);
+    // After the view (so after y-codemirror's observer): remote deltas
+    // are already in the doc when the flash maps them.
+    stopRemoteFlash = observeRemoteEdits(session.ytext, view, () => remoteActivity.bump(session.vaultID));
     lastFocused = exHandlers;
     watchVim();
     emitStats();
@@ -620,8 +626,12 @@
     if (view) untrack(() => watchVim());
   });
 
+  let stopRemoteFlash: (() => void) | null = null;
+
   function destroyEditor(): void {
     if (lastFocused === exHandlers) lastFocused = null;
+    stopRemoteFlash?.();
+    stopRemoteFlash = null;
     if (statsTimer) {
       clearTimeout(statsTimer);
       statsTimer = null;

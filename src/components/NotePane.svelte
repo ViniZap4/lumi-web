@@ -225,7 +225,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <section
-  class="note-pane"
+  class="note-pane settle-soft"
   class:active={p.active}
   data-leaf={p.leaf.id}
   data-note-path={path}
@@ -317,7 +317,7 @@
         <div class="pane-note">{session?.stopped ? 'Live editing unavailable.' : 'Connecting to live editor… (read-only until synced)'}</div>
       {/if}
       {#if loading && !content}
-        <div class="pane-note"><span class="spinner" aria-hidden="true"></span>Loading…</div>
+        <div class="pane-skel" aria-busy="true" aria-label="Loading…"><span class="skeleton t"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton short"></span></div>
       {:else if error}
         <div class="pane-error" role="alert">{error}</div>
       {:else if content}
@@ -381,6 +381,10 @@
     color: var(--md-heading);
     text-wrap: balance;
   }
+  .pane-skel { display: flex; flex-direction: column; gap: 12px; max-width: var(--md-measure); margin: var(--sp-6) auto; padding: 0 var(--sp-4); }
+  .pane-skel .skeleton { height: 11px; }
+  .pane-skel .skeleton.t { height: 22px; width: 55%; margin-bottom: 8px; }
+  .pane-skel .skeleton.short { width: 62%; }
   .pane-note, .pane-error {
     display: flex;
     gap: var(--sp-2);

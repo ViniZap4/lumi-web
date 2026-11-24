@@ -157,10 +157,10 @@
     background: var(--color-background);
     box-shadow: var(--shadow-pop);
     outline: none;
-    animation: ctx-in 120ms var(--ease);
+    animation: ctx-in var(--spring-bouncy-ms, 160ms) var(--spring-bouncy, var(--ease)) both;
     transform-origin: top left;
   }
-  @keyframes ctx-in { from { opacity: 0; transform: scale(0.97) translateY(-2px); } }
+  @keyframes ctx-in { from { opacity: 0; transform: scale(0.94) translateY(-3px); } 35% { opacity: 1; } }
   .ctx-title {
     padding: 4px 8px 4px;
     font-family: var(--font-mono);

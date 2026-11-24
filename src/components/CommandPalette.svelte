@@ -117,7 +117,7 @@
 
 <div class="ui-scrim" role="presentation" onclick={onclose}>
   <div
-    class="ui-sheet palette"
+    class="ui-sheet settle palette"
     role="dialog"
     aria-modal="true"
     aria-label="Command palette"

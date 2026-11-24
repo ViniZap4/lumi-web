@@ -56,7 +56,10 @@
     const below = vh - anchor.bottom;
     const h = target.kind === 'note' ? Math.min(H, Math.max(160, Math.max(below, anchor.top) - 20)) : 120;
     const top = below >= h + 12 || below >= anchor.top ? anchor.bottom + 8 : Math.max(12, anchor.top - h - 8);
-    return { left, top, w, h, above: top < anchor.top };
+    // Grow out of the link (shared-element entrance): the transform
+    // origin sits where the link is, on the card's near edge.
+    const ox = Math.max(8, Math.min(w - 8, anchor.left - left + 12));
+    return { left, top, w, h, above: top < anchor.top, ox };
   });
 
   $effect(() => {
@@ -126,7 +129,8 @@
   role="dialog"
   aria-label={note ? `Preview of ${note.title}` : 'Link'}
   tabindex="-1"
-  style="left: {pos.left}px; top: {pos.top}px; width: {pos.w}px; {target.kind === 'note' ? `max-height: ${pos.h}px` : ''}"
+  style="left: {pos.left}px; top: {pos.top}px; width: {pos.w}px; --ox: {pos.ox}px; {target.kind === 'note' ? `max-height: ${pos.h}px` : ''}"
+  data-vt-target="hover-card"
   bind:this={card}
   onkeydown={onKey}
   onpointerenter={onhold}
@@ -153,7 +157,7 @@
       {:else if error}
         <div class="hc-state err">{error}</div>
       {:else}
-        <div class="hc-state"><span class="hc-skel"></span><span class="hc-skel short"></span><span class="hc-skel"></span></div>
+        <div class="hc-state"><span class="hc-skel skeleton"></span><span class="hc-skel skeleton short"></span><span class="hc-skel skeleton"></span></div>
       {/if}
     </div>
     <footer class="hc-actions">
@@ -193,12 +197,12 @@
     box-shadow: var(--shadow-pop);
     overflow: hidden;
     outline: none;
-    transform-origin: top left;
-    animation: hc-in 160ms var(--ease);
+    transform-origin: var(--ox, 0) top;
+    animation: hc-in var(--spring-bouncy-ms, 220ms) var(--spring-bouncy, var(--ease)) both;
   }
-  .hover-card.above { transform-origin: bottom left; }
+  .hover-card.above { transform-origin: var(--ox, 0) bottom; }
   .hover-card:focus-visible { box-shadow: var(--shadow-pop), 0 0 0 2px var(--ring); }
-  @keyframes hc-in { from { opacity: 0; transform: translateY(3px) scale(0.985); } }
+  @keyframes hc-in { from { opacity: 0; transform: scale(0.92); } 35% { opacity: 1; } }
   .hc-head {
     flex: none;
     padding: 10px 14px 8px;
@@ -224,7 +228,7 @@
   .hc-spacer { flex: 1; }
   .hc-state { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 10px; color: var(--color-text-dim); font-size: var(--text-sm); }
   .hc-state.err { color: var(--color-error); }
-  .hc-skel { height: 10px; border-radius: 5px; background: var(--tint-hover); }
+  .hc-skel { height: 10px; border-radius: 5px; }
   .hc-skel.short { width: 60%; }
   .hc-url { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; min-width: 0; }
   .hc-url-host { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--text-sm); }

@@ -146,7 +146,7 @@
       onkeydown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); void toggle(); } }}
       onclick={() => void toggle()}
     >
-      <SyncDot state={status.state} pending={status.pending} label />
+      <SyncDot state={status.state} pending={status.pending} vaultID={book?.vault_id ?? null} label />
     </button>
     {#if open}
       <div

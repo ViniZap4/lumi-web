@@ -8,7 +8,7 @@
   // mouse users can trigger what the keys do.
   import { tick } from 'svelte';
   import { fitLegend, type LegendItem } from '../lib/legend.ts';
-  import { animate } from '../lib/motion.ts';
+  import { stagger } from '../lib/motion.ts';
   import { keyLabel } from '../lib/platform.ts';
 
   interface Props {
@@ -60,13 +60,13 @@
   });
   const shown = $derived(fit.shown.map((i) => items[i]));
 
-  // A short fade when the context changes (not on every key).
+  // The new context's keys ripple in (not on every key).
   let lastMode: string | null = null;
   $effect(() => {
     const m = mode;
     if (m === lastMode) return;
     lastMode = m;
-    animate(wrap, [{ opacity: 0.4 }, { opacity: 1 }], 140);
+    void tick().then(() => { if (wrap) stagger(wrap.children, { step: 12, max: 96, y: 3 }); });
   });
 
   function tipOf(it: LegendItem): string {

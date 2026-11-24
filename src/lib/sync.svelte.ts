@@ -19,6 +19,7 @@
 // server gains the endpoint.
 
 import { untrack } from 'svelte';
+import { remoteActivity } from './remote-activity.svelte.ts';
 import { FeedConnection, type FeedEvent, type FeedState, type FeedStateInfo } from './feed.ts';
 import {
   bookStatus,
@@ -350,6 +351,8 @@ export class SyncCoordinator {
       case 'vault.head': {
         const b = this.boundBook(key, ev.vault_id);
         if (!b) return;
+        // The head moved past what we know: a change from elsewhere.
+        if (ev.seq > this.cu(b.id).head) remoteActivity.bump(b.vault_id);
         this.setHead(b, ev.seq);
         await this.maybeCatchUp(b);
         return;

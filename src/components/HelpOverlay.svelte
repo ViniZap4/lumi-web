@@ -60,7 +60,7 @@
 </script>
 
 <div class="ui-scrim" role="presentation" onclick={onclose}>
-  <div class="ui-sheet help" role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1" data-testid="help" bind:this={sheetEl}>
+  <div class="ui-sheet settle help" role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1" data-testid="help" bind:this={sheetEl}>
     <header class="head">
       <span class="title" id="help-title">Keys</span>
       <span class="hint">leader <kbd>{leader === '<Space>' ? 'space' : leader}</kbd> · <kbd>j</kbd><kbd>k</kbd> scroll · any other key closes</span>

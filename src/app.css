@@ -69,6 +69,14 @@
   --dur-1: 120ms;
   --dur-2: 160ms;
   --dur-3: 220ms;
+  /* Springs (lib/motion.ts SPRING, sampled by springLinear): pair each
+     with its duration. snappy ≤ 220 ms is the typing-path budget. */
+  --spring-snappy: linear(0, 0.039, 0.135, 0.245, 0.371, 0.481, 0.59, 0.676, 0.749, 0.814, 0.861, 0.902, 0.93, 0.953, 0.969, 0.98, 0.989, 0.994, 0.998, 1, 1.002, 1);
+  --spring-gentle: linear(0, 0.038, 0.13, 0.239, 0.362, 0.472, 0.579, 0.666, 0.745, 0.805, 0.857, 0.895, 0.926, 0.949, 0.966, 0.978, 0.987, 0.993, 0.997, 1, 1.001, 1);
+  --spring-bouncy: linear(0, 0.106, 0.329, 0.586, 0.795, 0.947, 1.039, 1.083, 1.09, 1.077, 1.056, 1.033, 1.015, 1.003, 0.995, 0.992, 0.992, 0.993, 0.995, 0.997, 0.999, 1);
+  --spring-snappy-ms: 220ms;
+  --spring-gentle-ms: 300ms;
+  --spring-bouncy-ms: 320ms;
 
   font-family: var(--font-ui);
   font-size: var(--text-md);
@@ -129,10 +137,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease);
+  transition: background 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy), box-shadow 160ms var(--ease);
 }
 .ui-btn:hover { background: var(--tint-hover); }
-.ui-btn:active:not(:disabled) { background: var(--tint-active); }
+/* Alive: a hair of lift on hover, a press that gives. */
+.ui-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.ui-btn:active:not(:disabled) { background: var(--tint-active); transform: scale(0.96); transition-duration: 80ms; }
 .ui-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .ui-btn svg { flex: none; }
 .ui-btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -293,7 +303,53 @@ kbd, .ui-kbd {
 @keyframes ui-fade { from { opacity: 0; } }
 @keyframes ui-rise { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
 @keyframes ui-pop { from { opacity: 0; transform: scale(0.965); } }
+@supports not (animation-timing-function: linear(0, 1)) {
+  :root {
+    --spring-snappy: cubic-bezier(0.22, 0.9, 0.3, 1);
+    --spring-gentle: cubic-bezier(0.2, 0.8, 0.25, 1);
+    --spring-bouncy: cubic-bezier(0.3, 1.35, 0.5, 1);
+  }
+}
+
+/* ── Alive motion (SPEC-PARTE2 §1) ───────────────────────────────────
+   Everything below is switched off by the kill-switch that follows. */
+html { scroll-behavior: smooth; }
+/* Hover lift + press scale for any interactive surface (cards, rows). */
+.lift { transition: transform var(--spring-snappy-ms) var(--spring-snappy), box-shadow 160ms var(--ease); }
+.lift:hover { transform: translateY(-1px); box-shadow: var(--shadow-1); }
+.lift:active { transform: scale(0.97); transition-duration: 80ms; }
+.press { transition: transform var(--spring-snappy-ms) var(--spring-snappy); }
+.press:active { transform: scale(0.97); transition-duration: 80ms; }
+/* Skeleton shimmer while notes / books load. */
+.skeleton {
+  display: block;
+  border-radius: 6px;
+  background:
+    linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--color-text) 7%, transparent) 50%, transparent 70%) 0 0 / 220% 100% no-repeat,
+    var(--tint-hover);
+  animation: skeleton-sweep 1.3s ease-in-out infinite;
+}
+@keyframes skeleton-sweep { from { background-position: 130% 0, 0 0; } to { background-position: -130% 0, 0 0; } }
+/* Overlays settle with a slight spring (scale .96 → 1, overshoot). */
+.settle { animation: settle-in var(--spring-bouncy-ms) var(--spring-bouncy) both; }
+@keyframes settle-in { from { opacity: 0; transform: scale(0.96) translateY(4px); } 40% { opacity: 1; } }
+/* Panes appearing (splits) settle a touch less. */
+.settle-soft { animation: settle-soft var(--spring-gentle-ms) var(--spring-gentle) both; }
+@keyframes settle-soft { from { opacity: 0; transform: scale(0.985); } }
+/* Toasts slide in from below; the stack shifts with FLIP (lib/motion.ts). */
+@keyframes toast-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px) scale(0.97); } }
+/* Sync dot: breathing while syncing, a ring on remote changes. */
+@keyframes sync-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.72); opacity: 0.55; } }
+@keyframes sync-ping { from { transform: scale(1); opacity: 0.7; } to { transform: scale(2.8); opacity: 0; } }
+/* Remotely edited ranges in the editor (lib/remote-flash.ts). */
+@keyframes remote-flash-del { to { opacity: 0; } }
+/* Smooth caret: the cursor glides between positions (≤ 100 ms, typing path). */
+.cm-editor .cm-cursorLayer .cm-cursor { transition: left 80ms cubic-bezier(0.2, 0.7, 0.2, 1), top 80ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+@keyframes remote-flash { from { background-color: color-mix(in srgb, var(--color-primary) 26%, transparent); } to { background-color: transparent; } }
+
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
@@ -303,6 +359,7 @@ kbd, .ui-kbd {
   transition: none !important;
   scroll-behavior: auto !important;
 }
+:root[data-motion='reduce'] { scroll-behavior: auto !important; }
 :root[data-motion='reduce']::view-transition-group(*),
 :root[data-motion='reduce']::view-transition-old(*),
 :root[data-motion='reduce']::view-transition-new(*) { animation: none !important; }
@@ -311,9 +368,14 @@ kbd, .ui-kbd {
    with a slight lift on the main pane; the chrome stays put. */
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--dur-2); animation-timing-function: var(--ease); }
 /* Pane layout changes (close / only / equalise) slide into place. */
-::view-transition-group(*) { animation-duration: var(--dur-3); animation-timing-function: var(--ease-out); }
+::view-transition-group(*) { animation-duration: var(--dur-3); animation-timing-function: var(--spring-gentle); }
 ::view-transition-old(lumi-pane) { animation: 120ms var(--ease) both vt-out; }
-::view-transition-new(lumi-pane) { animation: 180ms var(--ease) both vt-in; }
+::view-transition-new(lumi-pane) { animation: var(--spring-snappy-ms) var(--spring-gentle) both vt-in; }
+/* Shared elements (motion.ts sharedTransition): an explorer row grows
+   into the opened note's title; a link morphs into its hover card. */
+::view-transition-group(note-title),
+::view-transition-group(hover-card) { animation-duration: var(--spring-gentle-ms); animation-timing-function: var(--spring-gentle); }
+::view-transition-old(note-title), ::view-transition-new(note-title) { animation-duration: var(--spring-gentle-ms); height: 100%; object-fit: none; object-position: left center; }
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(6px); } }
 

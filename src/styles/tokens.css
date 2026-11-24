@@ -164,12 +164,12 @@
   --shadow-rgb: 40 48 80;
   --shadow-a: 0.22;
   --edge-light: inset 0 1px 0 rgb(255 255 255 / 0.6);
-  --glass-bg: color-mix(in oklch, var(--color-overlay-bg) 78%, transparent);
-  --glass-bg-strong: color-mix(in oklch, var(--color-overlay-bg) 90%, transparent);
+  --glass-bg: color-mix(in oklch, color-mix(in oklch, var(--color-overlay-bg) 80%, white) 86%, transparent);
+  --glass-bg-strong: color-mix(in oklch, color-mix(in oklch, var(--color-overlay-bg) 80%, white) 94%, transparent);
   --surface-1: color-mix(in oklch, var(--color-overlay-bg) 55%, var(--color-background));
   --surface-2: color-mix(in oklch, var(--color-overlay-bg) 85%, var(--color-background));
   --surface-3: color-mix(in oklch, var(--color-text) 5%, var(--color-overlay-bg));
-  --scrim: color-mix(in oklch, var(--color-text) 14%, rgb(20 24 40 / 0.18));
+  --scrim: color-mix(in oklch, var(--color-background) 35%, rgb(28 32 56 / 0.2));
   --hairline: color-mix(in oklch, var(--color-border) 70%, transparent);
   --ink-3: color-mix(in oklch, var(--color-text) 66%, var(--color-background));
 }

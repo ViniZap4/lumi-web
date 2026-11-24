@@ -363,8 +363,10 @@ html { scroll-behavior: smooth; }
 ::view-transition-new(root) { animation: var(--dur-fade) var(--ease) both vt-fade-in; }
 /* Pane layout changes (close / only / equalise) slide into place. */
 ::view-transition-group(*) { animation-duration: var(--spring-gentle-ms); animation-timing-function: var(--spring-gentle); }
-::view-transition-old(lumi-pane) { animation: var(--dur-exit) var(--ease-exit) both vt-out; }
-::view-transition-new(lumi-pane) { animation: var(--spring-gentle-ms) var(--spring-gentle) both vt-in; }
+/* Sequential, not a cross-dissolve: the old page leaves fast, the new
+   one arrives just after, so two texts never overlap (no ghosting). */
+::view-transition-old(lumi-pane) { animation: 90ms var(--ease-exit) both vt-out; }
+::view-transition-new(lumi-pane) { animation: var(--spring-gentle-ms) var(--spring-gentle) 70ms both vt-in; }
 /* Shared elements (motion.ts sharedTransition): an explorer row grows
    into the opened note's title; a link morphs into its hover card. */
 ::view-transition-group(note-title),

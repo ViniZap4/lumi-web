@@ -262,7 +262,9 @@
       borderRadius: '5px 5px 5px 1px',
       top: '-1.55em',
       left: '-2px',
-      color: 'var(--color-background)',
+      // Dark ink on the collaborator's (always mid/light) colour: legible
+      // in light and dark themes alike.
+      color: 'rgb(14 16 26)',
       boxShadow: '0 2px 8px -2px rgb(0 0 0 / 0.35)',
       opacity: '1',
       transformOrigin: 'bottom left',

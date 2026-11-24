@@ -84,3 +84,15 @@ describe('ShellKeymap', () => {
     expect(km.feed({ key: '2', ctrlKey: true, metaKey: true, altKey: false } as KeyboardEvent, 'explorer', true)).toEqual({ kind: 'book', n: 2 });
   });
 });
+
+describe('part 2 reader keys', () => {
+  const k = (key: string) => ({ key, ctrlKey: false, metaKey: false, altKey: false });
+  it('- opens the floating explorer in the reader (still "up" in the explorer); K previews; gf follows', () => {
+    const m = new ShellKeymap();
+    expect(m.feed(k('-'), 'reader')).toEqual({ kind: 'floatExplorer' });
+    expect(m.feed(k('-'), 'explorer')).toEqual({ kind: 'parent' });
+    expect(m.feed(k('K'), 'reader')).toEqual({ kind: 'hover' });
+    expect(m.feed(k('g'), 'reader')).toEqual({ kind: 'pending' });
+    expect(m.feed(k('f'), 'reader')).toEqual({ kind: 'follow' });
+  });
+});

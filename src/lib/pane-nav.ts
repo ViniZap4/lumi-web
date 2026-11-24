@@ -14,8 +14,9 @@
 import type { PlannedMap } from './vim-config.ts';
 
 /** explorer = the miller columns, main = reader / note preview column,
- *  editor = CodeMirror, split = the rendered preview beside Source. */
-export type PaneId = 'explorer' | 'main' | 'editor' | 'split';
+ *  editor = CodeMirror, split = the rendered preview beside Source,
+ *  leaf = a secondary note pane of a split layout (lib/pane-tree.ts). */
+export type PaneId = 'explorer' | 'main' | 'editor' | 'split' | 'leaf';
 export type PaneDir = 'h' | 'j' | 'k' | 'l' | 'w' | 'p';
 
 export interface PaneLayout {
@@ -104,7 +105,38 @@ export function paneTarget(l: PaneLayout, from: PaneId | null, dir: PaneDir, pre
 
 export type KeyLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'> & { shiftKey?: boolean; code?: string };
 
-export type PaneKeyResult = { kind: 'nav'; dir: PaneDir; chord: boolean } | { kind: 'pending' } | { kind: 'cancel' };
+/** `Ctrl-w` window commands (SPEC-PARTE2 §3): v/s split, q/c close,
+ *  o only, = equalise, f/Enter follow the link under the cursor in a
+ *  vertical split, F in a horizontal one, < > + - resize. */
+export type WinCmd = 'vsplit' | 'split' | 'close' | 'only' | 'equal' | 'linkV' | 'linkH' | 'wider' | 'narrower' | 'taller' | 'shorter';
+
+export type PaneKeyResult =
+  | { kind: 'nav'; dir: PaneDir; chord: boolean }
+  | { kind: 'win'; cmd: WinCmd }
+  | { kind: 'pending' }
+  | { kind: 'cancel' };
+
+/** Second key of `Ctrl-w` → window command (case matters: f vs F). */
+export function winCommand(e: KeyLike): WinCmd | null {
+  if (e.key === 'Enter') return 'linkV';
+  const ch = e.ctrlKey ? ctrlLetter(e) : e.key;
+  switch (ch) {
+    case 'v': return 'vsplit';
+    case 's':
+    case 'S': return 'split';
+    case 'q':
+    case 'c': return 'close';
+    case 'o': return 'only';
+    case '=': return 'equal';
+    case 'f': return 'linkV';
+    case 'F': return 'linkH';
+    case '>': return 'wider';
+    case '<': return 'narrower';
+    case '+': return 'taller';
+    case '-': return 'shorter';
+    default: return null;
+  }
+}
 
 /** ms a `Ctrl-w` prefix stays armed. */
 export const PANE_CHORD_MS = 1500;
@@ -156,6 +188,8 @@ export class PaneKeys {
       this.armedAt = null;
       if (e.key === 'Escape') return { kind: 'cancel' };
       if (e.metaKey || e.altKey) return { kind: 'cancel' };
+      const win = winCommand(e);
+      if (win) return { kind: 'win', cmd: win };
       // Ctrl-w Ctrl-h ≡ Ctrl-w h; Ctrl-w Ctrl-w ≡ Ctrl-w w.
       const ch = e.ctrlKey ? ctrlLetter(e) : e.key.length === 1 ? e.key.toLowerCase() : null;
       const dir = ARROWS[e.key] ?? (ch && DIRS.has(ch as PaneDir) ? (ch as PaneDir) : null);

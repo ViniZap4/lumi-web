@@ -199,3 +199,29 @@ describe('editor routing (vim mode aware)', () => {
     expect(fallsThroughWithoutTarget({ dir: 'j', chord: false })).toBe(false);
   });
 });
+
+describe('Ctrl-w window commands (SPEC-PARTE2 §3)', () => {
+  const ctrlW = { key: 'w', ctrlKey: true, metaKey: false, altKey: false };
+  const k = (key: string, o: Partial<{ ctrlKey: boolean; shiftKey: boolean }> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, ...o });
+  const win = (second: ReturnType<typeof k>) => {
+    const keys = new PaneKeys();
+    keys.feed(ctrlW, { ctrlHjkl: true });
+    return keys.feed(second, { ctrlHjkl: true });
+  };
+  it('maps v s q c o = f F Enter < > + -', () => {
+    expect(win(k('v'))).toEqual({ kind: 'win', cmd: 'vsplit' });
+    expect(win(k('v', { ctrlKey: true }))).toEqual({ kind: 'win', cmd: 'vsplit' });
+    expect(win(k('s'))).toEqual({ kind: 'win', cmd: 'split' });
+    expect(win(k('q'))).toEqual({ kind: 'win', cmd: 'close' });
+    expect(win(k('c'))).toEqual({ kind: 'win', cmd: 'close' });
+    expect(win(k('o'))).toEqual({ kind: 'win', cmd: 'only' });
+    expect(win(k('='))).toEqual({ kind: 'win', cmd: 'equal' });
+    expect(win(k('f'))).toEqual({ kind: 'win', cmd: 'linkV' });
+    expect(win(k('Enter'))).toEqual({ kind: 'win', cmd: 'linkV' });
+    expect(win(k('F', { shiftKey: true }))).toEqual({ kind: 'win', cmd: 'linkH' });
+    expect(win(k('>'))).toEqual({ kind: 'win', cmd: 'wider' });
+    expect(win(k('-'))).toEqual({ kind: 'win', cmd: 'shorter' });
+    // Directions still navigate.
+    expect(win(k('l'))).toEqual({ kind: 'nav', dir: 'l', chord: true });
+  });
+});

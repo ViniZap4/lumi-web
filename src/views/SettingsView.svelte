@@ -22,6 +22,7 @@
     MAX_MAPPINGS,
     type MapMode,
     type EditorSettings,
+    type ReadingWidth,
   } from '../lib/editor-settings.ts';
   import { parseVimrc, errorCount, displayLhs, MAX_VIMRC_BYTES, VIMRC_EXAMPLE } from '../lib/vimrc.ts';
   import { effectiveSettings } from '../lib/vim-config.ts';
@@ -63,6 +64,8 @@
     fontSize: ['editor', 'font size text zoom'],
     tabSize: ['editor', 'tab size indent tabstop'],
     prose: ['editor', 'prose font typeface serif sans mono reading'],
+    readingWidth: ['editor', 'reading width largura de leitura measure column narrow medium wide full space'],
+    density: ['editor', 'density densidade compact comfortable rows explorer list space'],
     vimOn: ['vim', 'vim keybindings mode modal'],
     escape: ['vim', 'escape sequences jj jk kj ff insert esc'],
     timeout: ['vim', 'escape timeout delay ms'],
@@ -373,6 +376,25 @@
                 <button type="button" aria-pressed={s.proseFont === 'sans'} onclick={() => editorSettings.update({ proseFont: 'sans' })} style="font-family: var(--font-sans)">Sans</button>
                 <button type="button" aria-pressed={s.proseFont === 'serif'} onclick={() => editorSettings.update({ proseFont: 'serif' })} style="font-family: var(--font-serif)">Serif</button>
                 <button type="button" aria-pressed={s.proseFont === 'mono'} onclick={() => editorSettings.update({ proseFont: 'mono' })} style="font-family: var(--font-mono)">Mono</button>
+              </div>
+            </div>
+          {/if}
+          {#if show('readingWidth')}
+            <div class="row">
+              <div class="row-text"><span class="row-title">Largura de leitura</span><span class="row-desc">Text column of the reader, Live Preview and split preview. Total fills the pane.</span></div>
+              <div class="ui-seg" data-testid="reading-width">
+                {#each [['narrow', 'Estreita'], ['medium', 'Média'], ['wide', 'Larga'], ['full', 'Total']] as [v, label] (v)}
+                  <button type="button" aria-pressed={s.readingWidth === v} onclick={() => editorSettings.update({ readingWidth: v as ReadingWidth })}>{label}</button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+          {#if show('density')}
+            <div class="row">
+              <div class="row-text"><span class="row-title">Densidade</span><span class="row-desc">Row height in the explorer and lists.</span></div>
+              <div class="ui-seg" data-testid="density">
+                <button type="button" aria-pressed={s.density === 'comfortable'} onclick={() => editorSettings.update({ density: 'comfortable' })}>Confortável</button>
+                <button type="button" aria-pressed={s.density === 'compact'} onclick={() => editorSettings.update({ density: 'compact' })}>Compacto</button>
               </div>
             </div>
           {/if}

@@ -362,8 +362,8 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    height: 38px;
-    padding: 0 var(--sp-2) 0 var(--sp-3);
+    height: 32px;
+    padding: 0 var(--sp-1) 0 var(--sp-3);
     border-bottom: 1px solid var(--hairline-soft);
     background: color-mix(in oklch, var(--surface-1) 40%, var(--surface-0));
     font-size: var(--text-xs);
@@ -420,7 +420,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: var(--sp-5) clamp(16px, 4%, 40px) var(--sp-7);
+    padding: var(--sp-3) clamp(14px, 3%, 32px) var(--sp-7);
     outline: none;
   }
   .pane-editor, .pane-view { flex: 1; min-height: 0; display: flex; overflow: hidden; }

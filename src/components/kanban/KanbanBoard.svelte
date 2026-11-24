@@ -786,7 +786,10 @@
 
 <style>
   .kb {
+    /* Lanes share the width: each grows from 280 px up to 440 px, and
+       the board scrolls sideways only when they no longer fit. */
     --kb-lane-w: 280px;
+    --kb-lane-max: 440px;
     --kb-surface: var(--surface-1);
     --kb-card: var(--surface-0);
     display: flex;
@@ -803,12 +806,14 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3, 12px);
-    padding: 10px 16px;
+    min-height: 36px;
+    padding: 3px 8px 3px 14px;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--hairline);
     flex-wrap: wrap;
   }
   .kb-lead { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
-  .kb-title { font-weight: 600; font-size: var(--text-lg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kb-title { font-weight: 600; font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kb-meta, .kb-status { color: var(--ink-3); font-size: var(--text-xs); }
   .kb-status { padding: 1px 6px; border-radius: 999px; background: var(--tint-hover); }
   .kb-pending { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-primary); }
@@ -829,11 +834,13 @@
   .kb-filter:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--ring); }
 
   .kb-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-  .kb-lanes { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px 24px; min-height: 100%; box-sizing: border-box; width: max-content; }
+  .kb-lanes { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px 20px; min-height: 100%; box-sizing: border-box; width: max-content; min-width: 100%; }
 
   .kb-lane {
-    flex: 0 0 var(--kb-lane-w);
+    flex: 1 1 var(--kb-lane-w);
     width: var(--kb-lane-w);
+    min-width: var(--kb-lane-w);
+    max-width: var(--kb-lane-max);
     max-height: 100%;
     display: flex;
     flex-direction: column;
@@ -1011,8 +1018,8 @@
   .kb-ghost.moving { rotate: var(--tilt, 0deg); transition: rotate var(--spring-glide-ms) var(--spring-glide); }
 
   @media (max-width: 640px) {
-    .kb { --kb-lane-w: min(84vw, 300px); }
-    .kb-lanes { padding: 12px 16px 20px; scroll-snap-type: x mandatory; }
+    .kb { --kb-lane-w: min(86vw, 300px); --kb-lane-max: var(--kb-lane-w); }
+    .kb-lanes { padding: 8px 10px 16px; scroll-snap-type: x mandatory; }
     .kb-lane { scroll-snap-align: start; }
   }
 </style>

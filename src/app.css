@@ -425,7 +425,9 @@ html { scroll-behavior: smooth; }
   --prose-font: var(--font-sans);
   --prose-size: 16px;
   --prose-leading: 1.65;
-  --md-measure: 68ch;
+  /* Reading width (Settings → Largura de leitura; App.svelte sets
+     data-measure on <html>). Default: medium. */
+  --md-measure: 84ch;
   --md-rhythm: 0.95em;
   --md-heading: var(--color-text);
   --md-dim: color-mix(in srgb, var(--color-text) 82%, var(--color-background));
@@ -484,6 +486,13 @@ html { scroll-behavior: smooth; }
   --md-tag-4: var(--color-warning);
   --md-code-tint: color-mix(in srgb, var(--color-primary) 4.5%, color-mix(in srgb, var(--color-text) 1.5%, var(--color-background)));
 }
+:root[data-measure='narrow'] { --md-measure: 68ch; }
+:root[data-measure='wide'] { --md-measure: 110ch; }
+/* Total: the whole pane; the pane's own padding is the gutter. */
+:root[data-measure='full'] { --md-measure: 100%; }
+/* Density (Settings → Densidade): row height of the explorer and lists. */
+:root { --row-h: 30px; --row-gap: 1px; }
+:root[data-density='compact'] { --row-h: 24px; --row-gap: 0px; }
 .lumi-prose[data-prose='serif'], .note-editor-host[data-prose='serif'] { --prose-font: var(--font-serif); --prose-size: 18px; --prose-leading: 1.6; }
 .lumi-prose[data-prose='mono'], .note-editor-host[data-prose='mono'] { --prose-font: var(--font-mono); --prose-size: 14.5px; --prose-leading: 1.7; }
 .lumi-prose {

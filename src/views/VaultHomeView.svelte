@@ -68,6 +68,7 @@
   import CommandPalette from '../components/CommandPalette.svelte';
   import HelpOverlay from '../components/HelpOverlay.svelte';
   import MarkdownView from '../components/MarkdownView.svelte';
+  import TocRail from '../components/TocRail.svelte';
   import SourceSplit from '../components/SourceSplit.svelte';
   import { noteViewKind } from '../lib/note-kind.ts';
   import ContextMenu from '../components/ContextMenu.svelte';
@@ -716,7 +717,7 @@
 
   // ---- the book's home ------------------------------------------------------
 
-  const recents = $derived(recentNotes(notes.list, 8));
+  const recents = $derived(recentNotes(notes.list, 12));
   let homeIndex = $state(-1);
 
   function homeFocus(i: number): void {
@@ -2162,6 +2163,10 @@
         {/if}
       {:else}
         {@render mainContent()}
+        {#if !editMode && notes.content && primaryView === MARKDOWN_VIEW}
+          <!-- Wide screens: the empty gutter holds the note's outline. -->
+          <TocRail scrollEl={previewEl ?? null} />
+        {/if}
       {/if}
       {#if dropAt}
         <!-- Where the dragged note will land (edge highlight). -->
@@ -2174,9 +2179,6 @@
     </main>
   {/if}
 
-  {#if editorSettings.value.legend}
-    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim && !fx ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
-  {/if}
 
   <footer class="statusbar" data-testid="editor-status">
     {#if editMode && editSession && eff.vim}
@@ -2197,7 +2199,13 @@
       {/if}
       <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}</span>
     {/if}
-    <span class="sb-spacer"></span>
+    {#if editorSettings.value.legend}
+      <!-- One bar, not two: the which-key legend lives inside the status
+           line and shows as many keys as fit between its ends. -->
+      <span class="sb-legend"><CommandLegend embedded items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim && !fx ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} /></span>
+    {:else}
+      <span class="sb-spacer"></span>
+    {/if}
     {#if editMode && editSession}
       <span class="sb-item sync" class:pending={editSession.pending} class:offline={!editSession.pending && !editSession.liveSynced} data-testid="editor-sync-state" title={editSession.persistence
         ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
@@ -2598,6 +2606,9 @@
 <style>
   .vault-home {
     --mode: var(--mode-normal);
+    /* Chrome heights: one compact top row, one note bar per pane. */
+    --topbar-h: 38px;
+    --notebar-h: 36px;
     height: 100vh;
     height: 100dvh;
     background: var(--surface-0);
@@ -2618,8 +2629,8 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    height: 44px;
-    padding: 0 var(--sp-2) 0 var(--sp-3);
+    height: var(--topbar-h);
+    padding: 0 var(--sp-1) 0 var(--sp-2);
     background: color-mix(in oklch, var(--surface-1) 55%, var(--surface-0));
     box-shadow: 0 1px 0 var(--hairline-soft), 0 6px 16px -14px rgb(var(--shadow-rgb) / var(--shadow-a));
     flex: none;
@@ -2631,7 +2642,7 @@
     align-items: center;
     gap: 8px;
     max-width: 260px;
-    height: 30px;
+    height: 28px;
     padding: 0 10px 0 7px;
     border: 1px solid transparent;
     border-radius: var(--radius);
@@ -2724,7 +2735,9 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     mix-blend-mode: overlay;
   }
-  .home-inner { width: min(640px, 100%); padding: clamp(28px, 10vh, 112px) var(--sp-5) var(--sp-7); animation: home-in var(--spring-soft-ms) var(--spring-soft) both; }
+  /* The first screen is the book: title, actions and up to 12 recent
+     notes in as many columns as fit (2 on a laptop, 3 on a big screen). */
+  .home-inner { width: min(1120px, 100%); padding: clamp(16px, 5vh, 56px) clamp(var(--sp-3), 4vw, var(--sp-6)) var(--sp-6); animation: home-in var(--spring-soft-ms) var(--spring-soft) both; }
   @keyframes home-in { from { opacity: 0; transform: translateY(10px); } }
   .home-eyebrow { margin: 0 0 var(--sp-2); }
   .home-title {
@@ -2742,20 +2755,21 @@
   }
   .home-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: var(--sp-3) 0 0; font-size: var(--text-sm); color: var(--ink-3); }
   .home-dot { color: var(--ink-4); }
-  .home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-5) 0 var(--sp-6); }
+  .home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-5); }
   .home-actions .ui-btn { gap: 7px; height: 32px; padding: 0 14px; }
   .home-actions :global(kbd.on-primary) { background: color-mix(in oklch, black 18%, transparent); border-color: transparent; color: inherit; box-shadow: none; }
   .home-h { margin: 0 0 var(--sp-2); padding-left: 12px; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 500; letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--ink-3); }
-  .home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+  .home-recent { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: var(--row-gap) var(--sp-2); }
   .home-recent li { animation: recent-in var(--spring-gentle-ms) var(--spring-gentle) both; animation-delay: calc(min(var(--i, 0), 8) * 22ms + 80ms); }
   @keyframes recent-in { from { opacity: 0; transform: translateY(6px); } }
   .recent {
     width: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: baseline;
     gap: var(--sp-3);
-    padding: 10px 12px;
+    min-height: calc(var(--row-h) + 6px);
+    padding: 0 12px;
+    align-items: center;
     border: none;
     border-radius: var(--radius);
     background: transparent;
@@ -2773,7 +2787,7 @@
   .recent-dir { font-size: var(--text-2xs); color: var(--ink-4); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .recent-when { font-size: var(--text-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .home-empty { padding: var(--sp-5) 0; color: var(--ink-3); font-size: var(--text-sm); }
-  .home-keys { margin-top: var(--sp-6); padding-left: 12px; font-size: var(--text-xs); color: var(--ink-4); }
+  .home-keys { margin-top: var(--sp-4); padding-left: 12px; font-size: var(--text-xs); color: var(--ink-4); }
   .home-keys kbd { margin: 0 1px; }
   .home-skel, .reader-skel { display: flex; flex-direction: column; gap: 12px; padding-top: var(--sp-2); }
   .home-skel .skeleton { height: 36px; border-radius: var(--radius); }
@@ -2788,7 +2802,7 @@
     .breadcrumb .sep { display: none; }
     .palette-btn { min-width: 0; background: transparent; box-shadow: none; border-color: transparent; }
     .palette-label, .palette-btn kbd, .explorer-label, .explorer-btn kbd { display: none; }
-    .preview { padding: var(--sp-5) var(--sp-4); }
+    .preview { --pad-top: var(--sp-2); padding: var(--pad-top) var(--sp-3) var(--sp-6); }
     .sb-item:not(.sync):not(.stale) { display: none; }
     .recent { grid-template-columns: minmax(0, 1fr) auto; padding: 12px; }
     .recent-dir { display: none; }
@@ -2796,8 +2810,9 @@
   }
 
   .preview {
+    --pad-top: var(--sp-4);
     overflow-y: auto;
-    padding: var(--sp-6) var(--sp-6) var(--sp-7);
+    padding: var(--pad-top) clamp(var(--sp-4), 3vw, var(--sp-6)) var(--sp-7);
     outline: none;
   }
 
@@ -2811,7 +2826,8 @@
     min-width: 0;
     overflow-y: auto;
     outline: none;
-    padding: var(--sp-6) clamp(16px, 4%, 40px) var(--sp-7);
+    --pad-top: var(--sp-3);
+    padding: var(--pad-top) clamp(14px, 3%, 32px) var(--sp-7);
     background: var(--surface-0);
   }
   .primary-pane:has(> .editor-frame), .primary-pane:has(> .view-frame) { padding: 0; overflow: hidden; }
@@ -2922,15 +2938,15 @@
   .split-btn[aria-pressed='true'] { color: var(--accent-ink); background: var(--accent-soft); }
   .reading-head {
     position: sticky;
-    top: calc(-1 * var(--sp-6));
+    top: calc(-1 * var(--pad-top));
     z-index: 2;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    min-height: 30px;
-    margin: calc(-1 * var(--sp-6)) 0 var(--sp-5);
-    padding: var(--sp-3) 0;
+    min-height: 28px;
+    margin: calc(-1 * var(--pad-top)) 0 var(--sp-3);
+    padding: var(--sp-2) 0;
     font-family: var(--font-ui);
     font-size: var(--text-md);
     line-height: 1.4;
@@ -2983,8 +2999,9 @@
     align-items: center;
     gap: var(--sp-3);
     flex-wrap: wrap;
-    margin: var(--sp-2) var(--sp-3) 0;
-    padding: var(--sp-2) var(--sp-3);
+    margin: var(--sp-1) var(--sp-2) 0;
+    padding: 3px var(--sp-1) 3px var(--sp-3);
+    min-height: 28px;
     background: var(--accent-wash);
     border: 1px solid var(--accent-soft);
     border-radius: var(--radius);
@@ -3019,7 +3036,7 @@
     content: '';
     position: absolute;
     left: 0;
-    top: 44px;
+    top: var(--notebar-h);
     bottom: 0;
     width: 2px;
     background-color: var(--mode);
@@ -3039,8 +3056,8 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);
-    height: 44px;
-    padding: 0 var(--sp-3) 0 var(--sp-4);
+    height: var(--notebar-h);
+    padding: 0 var(--sp-2) 0 var(--sp-3);
     border-bottom: 1px solid var(--hairline-soft);
     background: color-mix(in oklch, var(--surface-1) 40%, var(--surface-0));
   }
@@ -3187,8 +3204,11 @@
   }
   .sync.pending::before { background: var(--color-warning); animation: sync-breathe 1.6s var(--ease-breath) infinite; }
   .sync.offline::before { background: var(--ink-4); box-shadow: none; }
-  .sb-path { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 40%; }
+  .sb-path { flex: none; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 24%; }
   .sb-spacer { flex: 1; }
+  .sb-item { flex: none; }
+  .sb-legend { flex: 1; min-width: 0; display: flex; align-self: stretch; align-items: center; padding-left: var(--sp-2); border-left: 1px solid var(--hairline-soft); }
+  .sb-legend > :global(.legend) { height: 100%; }
   .sb-help {
     align-self: stretch;
     width: 28px;

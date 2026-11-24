@@ -27,6 +27,13 @@
 
   // Settings → Reduce motion (on top of prefers-reduced-motion).
   $effect(() => setReduceMotion(editorSettings.value.reduceMotion));
+  // Settings → reading width + density: one attribute each on <html>;
+  // app.css maps them to --md-measure and the row-height tokens.
+  $effect(() => {
+    const root = document.documentElement;
+    root.dataset.measure = editorSettings.value.readingWidth;
+    root.dataset.density = editorSettings.value.density;
+  });
 
   let offAmbient: (() => void) | null = null;
   onMount(async () => {

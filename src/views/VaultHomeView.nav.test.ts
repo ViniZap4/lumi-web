@@ -547,7 +547,7 @@ describe('a 10k-note book', () => {
     expect(lb.querySelector('[role="option"]')!.getAttribute('aria-setsize')).toBe('8020');
     expect(fxRows().length).toBeLessThan(100);
     // The home lists only a handful of recent notes.
-    expect(home()!.querySelectorAll('.recent').length).toBe(8);
+    expect(home()!.querySelectorAll('.recent').length).toBe(12);
 
     const t1 = performance.now();
     await press('G');

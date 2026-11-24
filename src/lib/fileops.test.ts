@@ -70,3 +70,18 @@ describe('folders', () => {
     expect(copyTitle('A', new Set(['A copy', 'A copy 2']))).toBe('A copy 3');
   });
 });
+
+describe('canvas file ops (server contract: rename = move, kind never changes)', () => {
+  it('a name.canvas creates a canvas', () => {
+    expect(planCreate('work', 'Plan.canvas')).toEqual({ kind: 'note', title: 'Plan', folder: 'work', noteKind: 'canvas' });
+    expect(planCreate('', 'a/b/Map.canvas')).toEqual({ kind: 'note', title: 'Map', folder: 'a/b', noteKind: 'canvas' });
+  });
+  it('renaming a canvas is always a path move keeping .canvas', () => {
+    expect(planRename('work/plan.canvas', 'plan', 'Roadmap')).toEqual({ kind: 'note', path: 'work/Roadmap.canvas' });
+    expect(planRename('work/plan.canvas', 'plan', 'Roadmap.canvas')).toEqual({ kind: 'note', path: 'work/Roadmap.canvas' });
+    expect(planRename('work/plan.canvas', 'plan', '../x/')).toEqual({ kind: 'note', path: 'x/plan.canvas' });
+    expect(planRename('work/plan.canvas', 'plan', '/y/Z')).toEqual({ kind: 'note', path: 'y/Z.canvas' });
+    expect(planRename('work/plan.canvas', 'plan', 'plan')).toEqual({ kind: 'none' });
+    expect(planRename('work/plan.canvas', 'plan', 'x.md').kind).toBe('error');
+  });
+});

@@ -47,6 +47,12 @@ export type ShellAction =
   | { kind: 'close' }
   | { kind: 'hints' }
   | { kind: 'menu' }
+  /** Reader `-`: the floating explorer (SPEC-PARTE2 §2). */
+  | { kind: 'floatExplorer' }
+  /** Reader `K`: hover card for the focused link (§4). */
+  | { kind: 'hover' }
+  /** Reader `gf`: follow the focused link in this pane (§3). */
+  | { kind: 'follow' }
   /** First key of a chord (`g`, `z`) or a count digit: consumed. */
   | { kind: 'pending' };
 
@@ -138,6 +144,7 @@ export class ShellKeymap {
           if (ch === 'h') { this.count = null; return { kind: 'home' }; }
           if (ch === 'e') { this.count = null; return { kind: 'bottom' }; }
           if (ch === 'b') { this.count = null; return { kind: 'picker' }; }
+          if (ch === 'f' && context === 'reader') { this.count = null; return { kind: 'follow' }; }
         } else {
           if (ch === 'h') { this.count = null; return { kind: 'home' }; }
           if (ch === 'p') { this.count = null; return { kind: 'togglePreview' }; }
@@ -161,8 +168,8 @@ export class ShellKeymap {
       case 'j': return { kind: 'move', n: this.takeCount() };
       case 'k': return { kind: 'move', n: -this.takeCount() };
       case 'G': this.count = null; return { kind: 'bottom' };
-      case 'h':
-      case '-': this.count = null; return { kind: 'parent' };
+      case 'h': this.count = null; return { kind: 'parent' };
+      case '-': this.count = null; return context === 'reader' ? { kind: 'floatExplorer' } : { kind: 'parent' };
       case 'l': this.count = null; return { kind: 'open' };
       case 'H': this.count = null; return { kind: 'historyBack' };
       case 'L': this.count = null; return { kind: 'historyForward' };
@@ -206,6 +213,7 @@ export class ShellKeymap {
       case 'f': return { kind: 'page', dir: 1 };
       case 'b': return { kind: 'page', dir: -1 };
       case 'y': return { kind: 'yank' };
+      case 'K': return { kind: 'hover' };
       default: return null;
     }
   }

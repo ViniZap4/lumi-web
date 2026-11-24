@@ -10,6 +10,7 @@ import { notes } from './notes.svelte.ts';
 import { isAuthFailure, createNoteWsTicket, getNoteSnapshot, getNoteStateVector, getNote } from './api.ts';
 import { makeServerProbe } from './lineage.ts';
 import { serverLabel } from './serverurl.ts';
+import { SessionPool } from './session-pool.ts';
 import type { ConflictCopy, ReplicaRecord } from './offline-store.ts';
 import type {
   EditorSession,
@@ -209,4 +210,26 @@ export async function toggleTaskHeadless(vaultID: string, noteID: string, index:
   } finally {
     s.destroy();
   }
+}
+
+// ---- shared sessions for panes -------------------------------------------------
+
+
+/** Live sessions shared by every pane (SPEC-PARTE2 §3): two panes on
+ *  one note share one session / Y.Doc. */
+export const editorPool = new SessionPool<EditorSession>();
+
+/**
+ * Take a reference on the note's live session, joining it when no pane
+ * holds one yet. Returns a user-facing error string when the book's
+ * account cannot edit. Release with `editorPool.release(s)`.
+ */
+export async function acquireEditorSession(vaultID: string, noteID: string): Promise<EditorSession | string> {
+  const live = editorPool.peek(vaultID, noteID);
+  if (live) return editorPool.acquire(vaultID, noteID, () => live);
+  const Ctor = await loadEditorSession();
+  const plan = await planSession(vaultID, noteID);
+  if (typeof plan === 'string') return plan;
+  // Another pane may have joined while we planned: share it.
+  return editorPool.acquire(vaultID, noteID, () => startSession(Ctor, plan));
 }

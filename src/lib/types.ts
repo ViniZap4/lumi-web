@@ -204,7 +204,11 @@ export interface NoteSummary {
    *  equality only; changes when the server starts a new CRDT history
    *  for this id. Absent on servers that predate it. */
   crdt_epoch?: string | null;
+  /** `canvas` for `.canvas` files (JSON Canvas). Absent on older servers. */
+  kind?: NoteFileKind;
 }
+
+export type NoteFileKind = 'markdown' | 'canvas';
 
 export interface NoteContent {
   id: string;
@@ -212,6 +216,7 @@ export interface NoteContent {
   path: string;
   frontmatter: Record<string, unknown>;
   body: string;
+  kind?: NoteFileKind;
 }
 
 export interface NoteSnapshot {

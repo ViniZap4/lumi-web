@@ -543,6 +543,53 @@ describe('pane navigation (Ctrl-h/j/k/l, Ctrl-w)', () => {
   });
 });
 
+describe('note splits (SPEC-PARTE2 §3)', () => {
+  beforeEach(() => {
+    try { localStorage.clear(); } catch { /* none */ }
+  });
+  const panes = () => target.querySelectorAll('[data-testid="note-pane"]');
+  async function ctrl(key: string): Promise<void> {
+    const ev = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
+    (document.activeElement && document.activeElement !== document.body ? document.activeElement : window).dispatchEvent(ev);
+    await settle();
+  }
+
+  it('Ctrl-w v splits the note, Ctrl-w l/h move between panes, Ctrl-w q closes', async () => {
+    await mountView();
+    await press('G'); // Two
+    await waitFor(() => target.querySelector('.rendered'), 'preview');
+    await press('Enter');
+    await ctrl('w');
+    await press('v');
+    await waitFor(() => panes().length === 1 && target.querySelector('[data-testid="pane-host"]'), 'split');
+    expect(target.querySelector('[data-testid="primary-pane"]')).not.toBeNull();
+    // The new pane is focused and holds the same note.
+    await waitFor(() => panes()[0].querySelector('.md-body')?.textContent?.includes('body of two'), 'pane body');
+    await ctrl('w');
+    await press('h');
+    expect(target.querySelector('[data-testid="primary-pane"]')!.contains(document.activeElement)).toBe(true);
+    await ctrl('w');
+    await press('l');
+    expect(panes()[0].contains(document.activeElement)).toBe(true);
+    await ctrl('w');
+    await press('q');
+    await waitFor(() => panes().length === 0, 'closed');
+    expect(target.querySelector('[data-testid="pane-host"]')).toBeNull();
+  });
+
+  it('the layout is remembered per book', async () => {
+    await mountView();
+    await press('G');
+    await waitFor(() => target.querySelector('.rendered'), 'preview');
+    await press('Enter');
+    await ctrl('w');
+    await press('s');
+    await waitFor(() => panes().length === 1, 'split');
+    const saved = JSON.parse(localStorage.getItem('lumi.panes.v1:v1') ?? 'null');
+    expect(saved?.state?.root?.dir).toBe('col');
+  });
+});
+
 describe('miller browser — 10k notes performance smoke', () => {
   it('loads all pages, renders a bounded window, and jumps to the end quickly', async () => {
     const many: NoteSummary[] = [];

@@ -53,11 +53,16 @@ function ctxOf(m: VimrcMode): MapMode | undefined {
   return m === 'all' ? undefined : m;
 }
 
-/** lumi's built-in leader bindings (user vimrc maps win). */
+/** lumi's built-in bindings (user vimrc maps win). */
 export function defaultLeaderMaps(leader: string): PlannedMap[] {
   return [
     { lhs: `${LEADER_TOKEN}l`, rhs: ':link<CR>', ctx: 'normal', noremap: false, source: 'default', display: `${leader}l` },
     { lhs: `${LEADER_TOKEN}p`, rhs: ':preview split<CR>', ctx: 'normal', noremap: false, source: 'default', display: `${leader}p` },
+    { lhs: `${LEADER_TOKEN}e`, rhs: ':explore<CR>', ctx: 'normal', noremap: false, source: 'default', display: `${leader}e` },
+    // Panes (SPEC-PARTE2): `-` floating explorer, gf follow, K hover.
+    { lhs: '-', rhs: ':explore<CR>', ctx: 'normal', noremap: false, source: 'default' },
+    { lhs: 'gf', rhs: ':follow<CR>', ctx: 'normal', noremap: false, source: 'default' },
+    { lhs: 'K', rhs: ':hover<CR>', ctx: 'normal', noremap: false, source: 'default' },
   ];
 }
 

@@ -76,6 +76,7 @@
     keysLegend: ['keys', 'command legend bottom bar hints which-key'],
     paneNav: ['keys', 'panes ctrl-h ctrl-j ctrl-k ctrl-l ctrl-w window split navigate focus tmux'],
     previewCursor: ['keys', 'split preview cursor line return editor sync'],
+    hoverPreview: ['keys', 'hover link preview card popup K peek'],
     storage: ['storage', 'offline storage quota space persist local copies indexeddb'],
     conflicts: ['storage', 'conflict copies export download discard'],
     accounts: ['account', 'account sign in servers logout sair entrar'],
@@ -616,6 +617,12 @@
             <label class="row">
               <div class="row-text"><span class="row-title">Returning from the preview moves the cursor</span><span class="row-desc">Leaving the split preview by keyboard (<kbd>q</kbd>, <kbd>Esc</kbd>, <kbd>Ctrl-h</kbd>) puts the editor cursor on the source line at the top of the preview.</span></div>
               <input type="checkbox" class="ui-switch" checked={s.previewCursorSync} onchange={(e) => editorSettings.update({ previewCursorSync: checked(e) })} data-testid="preview-cursor-toggle" />
+            </label>
+          {/if}
+          {#if show('hoverPreview')}
+            <label class="row">
+              <div class="row-text"><span class="row-title">Preview links on hover</span><span class="row-desc">Resting the pointer on a note link for a moment shows a card with the start of the note. <kbd>K</kbd> on a link opens the same card from the keyboard; external links only show their address (nothing is fetched).</span></div>
+              <input type="checkbox" class="ui-switch" checked={s.hoverPreview} onchange={(e) => editorSettings.update({ hoverPreview: checked(e) })} data-testid="hover-preview-toggle" />
             </label>
           {/if}
           {#if show('keymap')}

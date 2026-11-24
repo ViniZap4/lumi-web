@@ -25,6 +25,12 @@ class UIState {
     this.settings = null;
   }
 
+  /** A deep link (`#/b/<vault>/n/<note>`) waiting for its book's notes
+   *  to load; VaultHomeView opens the note and clears it. */
+  pendingNote = $state<{ vault: string; note?: string; path?: string } | null>(null);
+  /** Short app-level notice (e.g. a deep link to an unknown book). */
+  notice = $state<string | null>(null);
+
   accountModal = $state<AccountModalState | null>(null);
   createBookOpen = $state(false);
 

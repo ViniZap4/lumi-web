@@ -26,6 +26,11 @@ export type PreviewAction =
   | { kind: 'back' }
   | { kind: 'help' }
   | { kind: 'command' }
+  /** `K`: hover card for the focused link; `gf`: follow it here. */
+  | { kind: 'hover' }
+  | { kind: 'follow' }
+  /** `-`: the floating explorer. */
+  | { kind: 'floatExplorer' }
   | { kind: 'pending' };
 
 export const PREVIEW_CHORD_MS = 800;
@@ -83,6 +88,7 @@ export class PreviewKeymap {
       this.prefix = null;
       if (armed) {
         if (p === 'g' && ch === 'g') { this.count = null; return { kind: 'top' }; }
+        if (p === 'g' && ch === 'f') { this.count = null; return { kind: 'follow' }; }
         if (p === '[' && ch === '[') return { kind: 'heading', dir: -1, n: this.takeCount() };
         if (p === ']' && ch === ']') return { kind: 'heading', dir: 1, n: this.takeCount() };
       }
@@ -121,6 +127,8 @@ export class PreviewKeymap {
       case 'i': this.count = null; return { kind: 'back' };
       case '?': this.count = null; return { kind: 'help' };
       case ':': this.count = null; return { kind: 'command' };
+      case 'K': this.count = null; return { kind: 'hover' };
+      case '-': this.count = null; return { kind: 'floatExplorer' };
     }
     this.count = null;
     return null;

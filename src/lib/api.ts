@@ -25,6 +25,7 @@ import {
   type SessionUser,
   type NoteSummary,
   type NoteContent,
+  type NoteFileKind,
   type NoteSnapshot,
   type NoteStateVector,
   type RemoteRole,
@@ -151,6 +152,8 @@ export interface CreateNoteInput {
   title: string;
   body?: string;
   tags?: string[];
+  /** `canvas` creates `<slug>.canvas` (empty body → empty canvas). */
+  kind?: NoteFileKind;
 }
 
 export interface UpdateNoteInput {

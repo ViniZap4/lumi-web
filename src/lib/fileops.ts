@@ -14,6 +14,9 @@
 //                       `/` = from the book root, `..` climbs) + retitle
 //   - `r dir/`        → move, keep the title
 //   - `r file.md`     → set the file name explicitly
+//   - `a name.canvas` → create a JSON Canvas (POST kind:"canvas")
+// Canvases have no title of their own (title = file name), so every
+// canvas rename is a move that keeps the `.canvas` extension.
 // Paths are validated with the server's canonical-form rules (no dot
 // segments, no backslashes, bounded) so errors show before a request.
 
@@ -23,7 +26,7 @@ export const MAX_PATH_BYTES = 512;
 
 export type CreatePlan =
   | { kind: 'folder'; path: string }
-  | { kind: 'note'; title: string; folder: string }
+  | { kind: 'note'; title: string; folder: string; noteKind?: 'canvas' }
   | { kind: 'error'; message: string };
 
 export type RenamePlan =
@@ -66,7 +69,7 @@ export function pathError(path: string): string | null {
 
 /** File stem used as a note title. */
 export function stem(path: string): string {
-  return baseName(path).replace(/\.md$/i, '');
+  return baseName(path).replace(/\.(md|canvas)$/i, '');
 }
 
 export function planCreate(dir: string, raw: string): CreatePlan {
@@ -80,6 +83,7 @@ export function planCreate(dir: string, raw: string): CreatePlan {
   if (isFolder) return { kind: 'folder', path: rel };
   const title = stem(rel).trim();
   if (!title) return { kind: 'error', message: 'the note needs a name' };
+  if (/\.canvas$/i.test(rel)) return { kind: 'note', title, folder: dirOf(rel), noteKind: 'canvas' };
   return { kind: 'note', title, folder: dirOf(rel) };
 }
 
@@ -90,6 +94,7 @@ export function planRename(notePath: string, title: string, raw: string): Rename
   if (!input) return { kind: 'error', message: 'type a new name' };
   const current = normalizePath(notePath);
   const dir = dirOf(current);
+  if (/\.canvas$/i.test(current)) return planCanvasRename(current, input);
   if (!input.includes('/')) {
     if (/\.md$/i.test(input)) {
       const path = dir ? `${dir}/${input}` : input;
@@ -111,6 +116,22 @@ export function planRename(notePath: string, title: string, raw: string): Rename
   if (path !== current) plan.path = path;
   if (last && !/\.md$/i.test(last) && last !== title) plan.title = last;
   return plan.path || plan.title ? plan : { kind: 'none' };
+}
+
+/** A canvas rename is always a move to `<name>.canvas` (the server
+ *  rejects title PATCHes on canvases and kind changes on moves). */
+function planCanvasRename(current: string, input: string): RenamePlan {
+  if (/\.md$/i.test(input)) return { kind: 'error', message: 'a canvas keeps its .canvas extension' };
+  const dir = dirOf(current);
+  const isFolder = input.endsWith('/');
+  const rel = input.includes('/') ? resolvePath(dir, input) : dir ? `${dir}/${input}` : input;
+  const folder = isFolder ? rel : dirOf(rel);
+  const last = isFolder ? '' : baseName(rel);
+  const file = !last ? baseName(current) : /\.canvas$/i.test(last) ? last : `${last}.canvas`;
+  const path = folder ? `${folder}/${file}` : file;
+  const err = pathError(path);
+  if (err) return { kind: 'error', message: err };
+  return path === current ? { kind: 'none' } : { kind: 'note', path };
 }
 
 /** Rename/move a folder (every note under it moves). */

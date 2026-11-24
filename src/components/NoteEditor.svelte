@@ -3,32 +3,60 @@
   import { installYankFlash } from '../lib/yank-flash.ts';
   import { motionAllowed } from '../lib/motion.ts';
 
-  // Vim ex commands are registered globally on the Vim singleton, so
-  // they dispatch to whichever editor is currently mounted.
-  let activeExit: (() => void) | null = null;
-  let activeSettings: (() => void) | null = null;
-  let activeToggleMode: (() => void) | null = null;
-  let activeLink: (() => void) | null = null;
-  let activeSplit: (() => void) | null = null;
+  /** Per-editor ex handlers. Vim ex commands are registered once on
+   *  the global Vim singleton; each dispatches to the editor it ran in
+   *  (the engine passes that editor's adapter, `cm.cm6` is its view),
+   *  so with several panes `:q` closes the right one. */
+  export interface ExHandlers {
+    exit(): void;
+    /** `:q` — the view decides: close the pane, or leave the editor. */
+    quit(): void;
+    settings(): void;
+    toggleMode(): void;
+    link(): void;
+    split(): void;
+    explore(): void;
+    follow(): void;
+    hover(): void;
+    /** `:vsplit [note]` / `:split [note]` / `:only` / `:close`. */
+    win(cmd: 'vsplit' | 'split' | 'only' | 'close', arg: string): void;
+  }
+  const handlers = new WeakMap<object, ExHandlers>();
+  let lastFocused: ExHandlers | null = null;
+  function target(cm: unknown): ExHandlers | null {
+    const v = (cm as { cm6?: object } | null)?.cm6;
+    return (v && handlers.get(v)) || lastFocused;
+  }
+  type ExParams = { args?: string[]; argString?: string };
+  const argOf = (p: ExParams | undefined) => (p?.argString ?? p?.args?.join(' ') ?? '').trim();
+
   let vimExRegistered = false;
   function registerVimEx(): void {
     if (vimExRegistered) return;
     vimExRegistered = true;
-    const exit = () => activeExit?.();
     // Edits are already persisted live; :w / :wq / :x just exit or no-op.
-    Vim.defineEx('quit', 'q', exit);
-    Vim.defineEx('wq', 'wq', exit);
-    Vim.defineEx('xit', 'x', exit);
+    Vim.defineEx('quit', 'q', (cm: unknown) => target(cm)?.quit());
+    Vim.defineEx('wq', 'wq', (cm: unknown) => target(cm)?.exit());
+    Vim.defineEx('xit', 'x', (cm: unknown) => target(cm)?.exit());
     Vim.defineEx('write', 'w', () => {});
     // :settings opens the editor settings; :preview flips live/source.
-    Vim.defineEx('settings', 'settings', () => activeSettings?.());
+    Vim.defineEx('settings', 'settings', (cm: unknown) => target(cm)?.settings());
     // `:preview split` toggles the side-by-side preview (Source mode).
-    Vim.defineEx('preview', 'preview', (_cm: unknown, params: { args?: string[] }) => {
-      if (params?.args?.[0] === 'split') activeSplit?.();
-      else activeToggleMode?.();
+    Vim.defineEx('preview', 'preview', (cm: unknown, params: ExParams) => {
+      if (params?.args?.[0] === 'split') target(cm)?.split();
+      else target(cm)?.toggleMode();
     });
     // :link (and the default <leader>l) opens the markdown link helper.
-    Vim.defineEx('link', 'link', () => activeLink?.());
+    Vim.defineEx('link', 'link', (cm: unknown) => target(cm)?.link());
+    // Panes (SPEC-PARTE2 §2–4): :explore (- and <leader>e), :follow (gf),
+    // :hover (K), :vsplit / :split [note], :only, :close.
+    Vim.defineEx('explore', 'exp', (cm: unknown) => target(cm)?.explore());
+    Vim.defineEx('follow', 'fol', (cm: unknown) => target(cm)?.follow());
+    Vim.defineEx('hover', 'hov', (cm: unknown) => target(cm)?.hover());
+    Vim.defineEx('vsplit', 'vs', (cm: unknown, p: ExParams) => target(cm)?.win('vsplit', argOf(p)));
+    Vim.defineEx('split', 'sp', (cm: unknown, p: ExParams) => target(cm)?.win('split', argOf(p)));
+    Vim.defineEx('only', 'on', (cm: unknown) => target(cm)?.win('only', ''));
+    Vim.defineEx('close', 'clo', (cm: unknown) => target(cm)?.win('close', ''));
     // Neovim-style yank highlight (purely visual).
     installYankFlash(Vim as never, () => !motionAllowed());
   }
@@ -59,7 +87,8 @@
   import type { EditorSettings } from '../lib/editor-settings.ts';
   import type { NoteSummary } from '../lib/types.ts';
   import { applyVimConfig, appliedMappings, effectiveSettings, feedLeader, leaderKeyName, type EffectiveSettings } from '../lib/vim-config.ts';
-  import { PaneKeys, editorPaneRoute, fallsThroughWithoutTarget, vimMidCommand, type PaneDir, type VimModeName } from '../lib/pane-nav.ts';
+  import { PaneKeys, editorPaneRoute, fallsThroughWithoutTarget, vimMidCommand, type PaneDir, type VimModeName, type WinCmd } from '../lib/pane-nav.ts';
+  import { linkAt, type LinkAt, type OpenWhere } from '../lib/link-open.ts';
   import { livePreview, noteLinkHandler } from '../lib/live-preview.ts';
   import { linkHelper, insertLink } from '../lib/link-helper.ts';
   import { relativeLineNumbers } from '../lib/editor-gutter.ts';
@@ -91,9 +120,24 @@
     onpane?: (dir: PaneDir) => boolean;
     /** A `Ctrl-w` prefix is armed / done (legend). */
     onpanepending?: (pending: boolean) => void;
+    /** `:q`: close this pane when there are several; else leave the
+     *  editor (defaults to `onexit`). */
+    onquit?: () => void;
+    /** `Ctrl-w v/s/q/o/=/f/F/</>/+/-` and `:vsplit`/`:split [note]`/
+     *  `:only`/`:close`. `link` is the link under the cursor (for f/F). */
+    onwin?: (cmd: WinCmd, o: { link: LinkAt | null; arg?: string }) => void;
+    /** Follow a link (gf / Enter on a link in NORMAL; Cmd/Ctrl-click in
+     *  Live Preview). */
+    onfollow?: (link: LinkAt, where: OpenWhere) => void;
+    /** `K` on a link: the hover card, anchored at `rect`. */
+    onhover?: (link: LinkAt, rect: { left: number; top: number; bottom: number }) => void;
+    /** `-` / `<leader>e` / `:explore`: the floating explorer. */
+    onexplore?: () => void;
+    /** The editor got focus (pane focus tracking). */
+    onfocus?: () => void;
   };
 
-  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate, onpane, onpanepending }: Props = $props();
+  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate, onpane, onpanepending, onquit, onwin, onfollow, onhover, onexplore, onfocus }: Props = $props();
   const paneKeys = new PaneKeys();
 
   // The vimrc's `set` options override the device settings while vim
@@ -324,14 +368,6 @@
     const initialDoc = session.ytext.toString();
     registerVimEx();
     applyVimConfig(Vim, eff);
-    activeExit = () => onexit?.();
-    activeSettings = () => onopensettings?.();
-    activeToggleMode = () => ontogglemode?.();
-    activeLink = () => {
-      if (view) insertLink(view, linkDeps);
-    };
-    activeSplit = () => ontogglesplit?.();
-
     const s = eff;
     // Order matters: our highest-precedence keymap runs before vim (so
     // Mod-E works even where vim binds Ctrl-E); vim() MUST precede
@@ -352,6 +388,15 @@
           const cm = getCM(v);
           if (!cm) return false;
           if (onpane && routePaneKey(e, cm)) return true;
+          if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && normalIdle(cm)) {
+            // Enter on a link in NORMAL follows it (else vim's Enter).
+            const l = linkUnderCursor();
+            if (l && onfollow) {
+              e.preventDefault();
+              onfollow(l, 'current');
+              return true;
+            }
+          }
           const handled = feedLeader((t) => Vim.handleKey(cm, t, 'user'), cm.state.vim as never, leaderKeyName(e), eff.leader);
           if (!handled) return false;
           e.preventDefault();
@@ -385,7 +430,18 @@
       }),
       EditorView.updateListener.of(scheduleStats),
       linkHelper(linkDeps),
-      noteLinkHandler.of((href) => onopennote?.(href)),
+      noteLinkHandler.of((href, ev) => {
+        // Live Preview Cmd/Ctrl-click (Shift: horizontal split).
+        if (onfollow) onfollow({ href, wiki: false, from: 0, to: 0 }, ev?.shiftKey ? 'hsplit' : 'vsplit');
+        else onopennote?.(href);
+      }),
+      EditorView.domEventHandlers({
+        focus: () => {
+          lastFocused = exHandlers;
+          onfocus?.();
+          return false;
+        },
+      }),
       EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'off', 'aria-label': 'Note editor' }),
       EditorView.theme(EDITOR_THEME),
     ];
@@ -394,6 +450,8 @@
       state: EditorState.create({ doc: initialDoc, extensions }),
       parent: container,
     });
+    handlers.set(view, exHandlers);
+    lastFocused = exHandlers;
     watchVim();
     emitStats();
     view.focus();
@@ -416,7 +474,10 @@
     });
     if (wasPending !== paneKeys.pending) onpanepending?.(paneKeys.pending);
     if (!r) return false;
-    if (r.kind === 'nav') {
+    if (r.kind === 'win') {
+      if (mode === 'visual') Vim.handleKey(cm, '<Esc>', 'user');
+      onwin?.(r.cmd, { link: linkUnderCursor() });
+    } else if (r.kind === 'nav') {
       const moved = onpane?.(r.dir) ?? false;
       if (!moved && fallsThroughWithoutTarget(r)) return false;
       // Leaving the window ends visual mode, as in vim.
@@ -426,6 +487,44 @@
     e.stopPropagation();
     return true;
   }
+
+  /** Vim NORMAL with nothing pending. */
+  function normalIdle(cm: NonNullable<ReturnType<typeof getCM>>): boolean {
+    const st = cm.state.vim as { insertMode?: boolean; visualMode?: boolean; inputState?: Parameters<typeof vimMidCommand>[0] } | undefined;
+    return !!st && !st.insertMode && !st.visualMode && !vimMidCommand(st.inputState);
+  }
+
+  /** The link under the main cursor, in document offsets. */
+  export function linkUnderCursor(): LinkAt | null {
+    if (!view) return null;
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    const l = linkAt(line.text, head - line.from);
+    return l ? { ...l, from: l.from + line.from, to: l.to + line.from } : null;
+  }
+
+  const exHandlers: ExHandlers = {
+    exit: () => onexit?.(),
+    quit: () => (onquit ?? onexit)?.(),
+    settings: () => onopensettings?.(),
+    toggleMode: () => ontogglemode?.(),
+    link: () => {
+      if (view) insertLink(view, linkDeps);
+    },
+    split: () => ontogglesplit?.(),
+    explore: () => onexplore?.(),
+    follow: () => {
+      const l = linkUnderCursor();
+      if (l) onfollow?.(l, 'current');
+    },
+    hover: () => {
+      const l = linkUnderCursor();
+      if (!l || !view) return;
+      const c = view.coordsAtPos(l.from) ?? view.coordsAtPos(view.state.selection.main.head);
+      if (c) onhover?.(l, { left: c.left, top: c.top, bottom: c.bottom });
+    },
+    win: (cmd, arg) => onwin?.(cmd, { link: linkUnderCursor(), arg }),
+  };
 
   /** Put the cursor at the start of a 1-based line (split preview →
    *  editor with "move cursor" on). */
@@ -522,11 +621,7 @@
   });
 
   function destroyEditor(): void {
-    activeLink = null;
-    activeSplit = null;
-    activeExit = null;
-    activeSettings = null;
-    activeToggleMode = null;
+    if (lastFocused === exHandlers) lastFocused = null;
     if (statsTimer) {
       clearTimeout(statsTimer);
       statsTimer = null;

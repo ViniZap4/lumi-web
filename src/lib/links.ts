@@ -135,7 +135,7 @@ export function resolveNoteHref(fromPath: string, href: string): string | null {
   }
   if (parts.length === 0) return null;
   let p = parts.join('/');
-  if (!/\.md$/i.test(p)) p += '.md';
+  if (!/\.(md|canvas)$/i.test(p)) p += '.md';
   return p;
 }
 

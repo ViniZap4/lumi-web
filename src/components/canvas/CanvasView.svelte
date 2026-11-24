@@ -886,10 +886,10 @@
     <button class="ui-btn ghost sm" type="button" onclick={() => addTextAt(nextSlot(250))} disabled={!editable} title="Add text card (a)">+ Card</button>
     <button class="ui-btn ghost sm" type="button" onclick={() => openPicker()} disabled={!editable} title="Add note (f)">+ Note</button>
     <span class="cv-sep" aria-hidden="true"></span>
-    <button class="ui-btn ghost sm icon" type="button" onclick={() => setView(zoomAt(view, w / 2, h / 2, 1 / 1.2), true)} aria-label="Zoom out" title="Zoom out (-)">−</button>
+    <button class="ui-btn ghost sm icon" type="button" onclick={() => setView(zoomAt(view, w / 2, h / 2, 1 / 1.2), true)} aria-label="Zoom out" title="Zoom out (_ zo ⌘-)">−</button>
     <span class="cv-zoom" aria-live="polite">{zoomPct}%</span>
-    <button class="ui-btn ghost sm icon" type="button" onclick={() => setView(zoomAt(view, w / 2, h / 2, 1.2), true)} aria-label="Zoom in" title="Zoom in (+)">+</button>
-    <button class="ui-btn ghost sm" type="button" onclick={() => fitAll()} title="Fit (0)">Fit</button>
+    <button class="ui-btn ghost sm icon" type="button" onclick={() => setView(zoomAt(view, w / 2, h / 2, 1.2), true)} aria-label="Zoom in" title="Zoom in (+ zi ⌘+)">+</button>
+    <button class="ui-btn ghost sm" type="button" onclick={() => fitAll()} title="Fit (0 zf)">Fit</button>
   </div>
 
   {#if picker}

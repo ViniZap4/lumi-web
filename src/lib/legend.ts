@@ -61,7 +61,8 @@ export interface LegendExtras {
 /** Canvas in Reading: look, never change (SPEC-PARTE2 §5a). */
 export const CANVAS_READ_ITEMS: LegendItem[] = [
   { keys: 'h j k l', label: 'pan' },
-  { keys: '+ - 0', label: 'zoom/fit' },
+  { keys: '+ _ 0', label: 'zoom/fit', tip: 'Zoom in: + = zi ⌘+ · out: _ zo ⌘- · fit: 0 zf' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'Tab', label: 'next node' },
   { keys: '⏎ gf', label: 'open', tip: 'Open the selected file / link node' },
   { keys: '⌃w f', label: 'open in split' },
@@ -80,6 +81,8 @@ export const CANVAS_EDIT_ITEMS: LegendItem[] = [
   { keys: 'c 1-6', label: 'color' },
   { keys: 'u ⌃r', label: 'undo/redo' },
   { keys: 'h j k l', label: 'pan' },
+  { keys: '+ _ 0', label: 'zoom/fit', tip: 'Zoom in: + = zi ⌘+ · out: _ zo ⌘- · fit: 0 zf' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'Esc', label: 'reading', tip: 'Esc / q with nothing selected: back to Reading (also ⌘E)' },
   { keys: '?', label: 'keys', do: 'shell:help' },
 ];
@@ -90,6 +93,7 @@ export const BOARD_READ_ITEMS: LegendItem[] = [
   { keys: 'j k', label: 'card' },
   { keys: '⏎', label: 'follow link' },
   { keys: '/', label: 'filter' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'e i', label: 'edit', tip: 'Edit mode (also ⌘E / the switch)' },
   { keys: 'space', label: 'commands', do: 'shell:palette' },
   { keys: '?', label: 'keys', do: 'shell:help' },
@@ -104,6 +108,7 @@ export const BOARD_EDIT_ITEMS: LegendItem[] = [
   { keys: 'x', label: 'done' },
   { keys: 'dd', label: 'delete' },
   { keys: 'u ⌃r', label: 'undo/redo' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'The floating explorer (- works in every mode)' },
   { keys: 'Esc', label: 'reading', tip: 'Esc / q: back to Reading (also ⌘E)' },
   { keys: '?', label: 'keys', do: 'shell:help' },
 ];

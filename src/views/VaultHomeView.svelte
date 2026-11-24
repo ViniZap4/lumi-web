@@ -1930,12 +1930,28 @@
 
   // ---- palette ------------------------------------------------------------------
 
+  /** Palette → the focused canvas: replay a zoom key on its root (the
+   *  canvas keymap is the one place that owns zoom keys). */
+  function canvasKey(key: string): void {
+    const root = [...document.querySelectorAll<HTMLElement>('[data-testid=canvas-view]')].pop();
+    if (!root) return;
+    root.focus({ preventScroll: true });
+    root.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  }
+
   const paletteCommands: PaletteCommand[] = $derived([
     // Canvas / board modes (SPEC-PARTE2 §5a) for the view that had the keyboard.
     ...(structuredFocus.last
       ? ([
           { id: 'structuredRead', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Reading mode`, keys: 'Esc', group: 'mode view read only canvas board kanban', run: () => structuredFocus.last?.set('read') },
           { id: 'structuredEdit', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Edit mode`, keys: 'e', group: 'mode edit canvas board kanban', run: () => structuredFocus.last?.set('edit') },
+          ...(structuredFocus.last.kind === 'canvas'
+            ? [
+                { id: 'canvasZoomIn', title: 'Canvas: Zoom in', keys: '+ zi ⌘+', group: 'canvas zoom in bigger magnify', run: () => canvasKey('+') },
+                { id: 'canvasZoomOut', title: 'Canvas: Zoom out', keys: '_ zo ⌘-', group: 'canvas zoom out smaller', run: () => canvasKey('_') },
+                { id: 'canvasFit', title: 'Canvas: Fit', keys: '0 zf', group: 'canvas zoom fit all overview', run: () => canvasKey('0') },
+              ]
+            : []),
           ...(structuredFocus.last.source ? [{ id: 'structuredSource', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Source`, group: 'mode source json markdown raw canvas board kanban', run: () => structuredFocus.last?.source?.() }] : []),
         ] as PaletteCommand[])
       : []),

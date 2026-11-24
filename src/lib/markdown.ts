@@ -16,6 +16,7 @@
 
 import { Marked, Renderer, type Tokens, type Token } from 'marked';
 import DOMPurify from 'dompurify';
+import { isMermaidLang, mermaidKind } from './mermaid-detect.ts';
 
 // Allow-list of iframe sources for media embeds. Anything else gets
 // scrubbed during sanitisation.
@@ -60,12 +61,17 @@ DOMPurify.addHook('uponSanitizeElement', (node, data) => {
   el.setAttribute('referrerpolicy', 'no-referrer');
 });
 
+/** Tags and attributes note HTML may never carry. Shared with the
+ *  mermaid SVG sanitiser (lib/mermaid.ts), which extends this base. */
+export const FORBID_TAGS = ['style', 'script', 'object', 'embed', 'form', 'button', 'textarea', 'select', 'meta', 'link'];
+export const FORBID_ATTR = ['style', 'onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'formaction', 'name'];
+
 const PURIFY_CONFIG = {
   USE_PROFILES: { html: true },
   ADD_TAGS: ['iframe'],
   ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'loading', 'decoding', 'referrerpolicy', 'target', 'rel'],
-  FORBID_TAGS: ['style', 'script', 'object', 'embed', 'form', 'button', 'textarea', 'select', 'meta', 'link'],
-  FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'formaction', 'name'],
+  FORBID_TAGS,
+  FORBID_ATTR,
 };
 
 function sanitize(html: string): string {
@@ -237,6 +243,11 @@ markedInstance.use({
       const cls = l ? ` class="language-${l}"` : '';
       if (l === 'math' || l === 'latex' || l === 'tex') {
         return `<div class="md-math" data-lang="math"><code>${escapeHTML(text)}</code></div>\n`;
+      }
+      if (isMermaidLang(l)) {
+        // Drawn by lib/mermaid.ts (lazy chunk) after the DOM pass; until
+        // then — and on surfaces without that pass — the source shows.
+        return `<div class="md-mermaid" data-lang="mermaid" data-kind="${mermaidKind(text)}"><pre class="md-mermaid-src"><code class="language-mermaid">${escapeHTML(text)}</code></pre></div>\n`;
       }
       return `<div class="md-code" data-lang="${l}"><pre><code${cls}>${escapeHTML(text)}</code></pre></div>\n`;
     },

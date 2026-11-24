@@ -22,6 +22,8 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { renderMarkdown } from './markdown.ts';
+import { isMermaidLang } from './mermaid-detect.ts';
+import { createMermaidBlock, paintMermaid, setMermaidSource } from './mermaid.ts';
 import { modName } from './platform.ts';
 
 // ---------------------------------------------------------------------------
@@ -104,7 +106,8 @@ export type LPWidget =
   | { kind: 'checkbox'; checked: boolean }
   | { kind: 'bullet' }
   | { kind: 'image'; src: string | null; alt: string }
-  | { kind: 'table'; source: string };
+  | { kind: 'table'; source: string }
+  | { kind: 'mermaid'; source: string };
 
 export type LPSpec =
   | { type: 'hide'; from: number; to: number }
@@ -263,6 +266,19 @@ export function computeLivePreview(state: EditorState, active: Set<number> = act
         }
         case 'FencedCode':
         case 'CodeBlock': {
+          if (name === 'FencedCode') {
+            // A closed ```mermaid fence draws as a diagram unless the
+            // cursor is inside it (then the source is edited as code).
+            const info = node.getChild('CodeInfo');
+            const first = doc.lineAt(from);
+            const last = doc.lineAt(to);
+            if (info && isMermaidLang(doc.sliceString(info.from, info.to)) && last.number > first.number + 1
+              && /^\s*(`{3,}|~{3,})\s*$/.test(last.text) && !revealed(first.from, last.to)) {
+              const source = doc.sliceString(doc.line(first.number + 1).from, doc.line(last.number - 1).to);
+              specs.push({ type: 'widget', from: first.from, to: last.to, block: true, widget: { kind: 'mermaid', source } });
+              return false;
+            }
+          }
           eachLine(from, to, 'cm-lp-codeblock');
           if (name === 'FencedCode') {
             specs.push({ type: 'line', pos: doc.lineAt(from).from, cls: 'cm-lp-fence cm-lp-fence-open' });
@@ -375,12 +391,47 @@ class TableWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+/** A ```mermaid block drawn in place (lib/mermaid.ts). Source edits
+ *  that arrive while it is shown (collaborators) update the same DOM,
+ *  debounced, so the old drawing stays until the new one is ready. */
+class MermaidWidget extends WidgetType {
+  constructor(readonly source: string) { super(); }
+  eq(o: MermaidWidget) { return o.source === this.source; }
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-lp-mermaid md-body';
+    const block = createMermaidBlock(this.source);
+    block.dataset.surface = 'editor';
+    wrap.append(block);
+    paintMermaid(block);
+    wrap.addEventListener('mousedown', (e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      // Clicking the drawing drops the cursor into its source.
+      e.preventDefault();
+      const line = view.state.doc.lineAt(view.posAtDOM(wrap));
+      const inner = Math.min(line.to + 1, view.state.doc.length);
+      view.dispatch({ selection: { anchor: inner } });
+      view.focus();
+    });
+    return wrap;
+  }
+  updateDOM(dom: HTMLElement): boolean {
+    const block = dom.querySelector<HTMLElement>('.md-mermaid');
+    if (!block) return false;
+    setMermaidSource(block, this.source);
+    paintMermaid(block, { debounce: 300 });
+    return true;
+  }
+  ignoreEvent() { return true; }
+}
+
 function widgetFor(w: LPWidget): WidgetType {
   switch (w.kind) {
     case 'checkbox': return new CheckboxWidget(w.checked);
     case 'bullet': return new BulletWidget();
     case 'image': return new ImageWidget(w.src, w.alt);
     case 'table': return new TableWidget(w.source);
+    case 'mermaid': return new MermaidWidget(w.source);
   }
 }
 

@@ -435,11 +435,54 @@ html { scroll-behavior: smooth; }
   --md-code-border: color-mix(in srgb, var(--color-text) 10%, var(--color-background));
   --md-inline-bg: color-mix(in srgb, var(--color-text) 7%, transparent);
   --md-inline-fg: var(--color-text);
-  --md-link: var(--color-primary);
-  --md-link-line: color-mix(in srgb, var(--color-primary) 38%, transparent);
-  --md-mark-bg: color-mix(in srgb, var(--color-warning) 32%, transparent);
-  --md-quote-bar: color-mix(in srgb, var(--color-primary) 40%, var(--md-rule));
+  --md-link: var(--color-accent);
+  --md-link-line: color-mix(in srgb, var(--md-link) 40%, transparent);
+    --md-quote-bar: var(--md-h2);
   --md-shadow: color-mix(in srgb, var(--color-text) 16%, transparent);
+  /* Rich palette (§2.5). lib/prose-palette.ts writes contrast-checked
+     values per theme on <html>; these are the token-only fallbacks. */
+  --md-h1: var(--color-primary);
+  --md-h2: var(--color-secondary);
+  --md-h3: color-mix(in srgb, var(--color-accent) 62%, var(--color-text));
+  --md-h4: color-mix(in srgb, var(--color-primary) 42%, var(--color-text));
+  --md-h5: color-mix(in srgb, var(--color-secondary) 40%, var(--color-text));
+  --md-strong: color-mix(in srgb, var(--color-warning) 30%, var(--color-text));
+  --md-em: color-mix(in srgb, var(--color-secondary) 30%, var(--color-text));
+  --md-del: var(--md-marker);
+  --md-list-marker: var(--color-primary);
+  --md-green: var(--ok);
+  --md-code-fg: var(--ok);
+  --md-code-bg-hue: var(--ok);
+  --md-mark-bg: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  --md-mark-fg: var(--color-text);
+  --md-quote-fg: var(--md-dim);
+  --md-th-fg: var(--color-primary);
+  --syn-keyword: var(--color-secondary);
+  --syn-string: var(--ok);
+  --syn-number: var(--color-warning);
+  --syn-function: var(--color-primary);
+  --syn-type: var(--color-accent);
+  --syn-property: color-mix(in srgb, var(--color-info) 70%, var(--color-text));
+  --syn-tag: var(--color-error);
+  --syn-comment: var(--md-marker);
+  --syn-punct: var(--md-dim);
+  --md-callout-note: var(--color-info);
+  --md-callout-info: var(--color-info);
+  --md-callout-todo: var(--color-primary);
+  --md-callout-abstract: var(--color-accent);
+  --md-callout-tip: var(--ok);
+  --md-callout-success: var(--ok);
+  --md-callout-question: var(--color-secondary);
+  --md-callout-example: var(--color-secondary);
+  --md-callout-warning: var(--color-warning);
+  --md-callout-danger: var(--color-error);
+  --md-callout-quote: var(--color-muted);
+  --md-tag-0: var(--color-primary);
+  --md-tag-1: var(--color-secondary);
+  --md-tag-2: var(--color-accent);
+  --md-tag-3: var(--ok);
+  --md-tag-4: var(--color-warning);
+  --md-code-tint: color-mix(in srgb, var(--color-primary) 4.5%, color-mix(in srgb, var(--color-text) 1.5%, var(--color-background)));
 }
 .lumi-prose[data-prose='serif'], .note-editor-host[data-prose='serif'] { --prose-font: var(--font-serif); --prose-size: 18px; --prose-leading: 1.6; }
 .lumi-prose[data-prose='mono'], .note-editor-host[data-prose='mono'] { --prose-font: var(--font-mono); --prose-size: 14.5px; --prose-leading: 1.7; }
@@ -492,26 +535,38 @@ html { scroll-behavior: smooth; }
    so a heading belongs to the text that follows it. */
 .md-body .md-h {
   position: relative;
-  color: var(--md-heading);
   font-weight: 650;
   line-height: 1.25;
   letter-spacing: -0.012em;
   text-wrap: balance;
   scroll-margin-top: var(--sp-5);
 }
-.md-body h1 { font-size: 1.95em; font-weight: 720; line-height: 1.14; letter-spacing: -0.026em; margin: 1.5em 0 0.55em; }
-.md-body h2 { font-size: 1.45em; line-height: 1.22; letter-spacing: -0.016em; margin: 1.75em 0 0.6em; }
-.md-body h3 { font-size: 1.2em; line-height: 1.3; margin: 1.65em 0 0.45em; }
-.md-body h4 { font-size: 1.02em; margin: 1.55em 0 0.4em; }
-.md-body h5 { font-size: 0.86em; margin: 1.5em 0 0.35em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--md-dim); }
-.md-body h6 { font-size: 0.8em; margin: 1.5em 0 0.35em; text-transform: uppercase; letter-spacing: 0.07em; color: var(--md-marker); }
+.md-body h1 { font-size: 2.05em; font-weight: 760; line-height: 1.12; letter-spacing: -0.03em; margin: 1.5em 0 0.55em; color: var(--md-h1); }
+.md-body h2 { font-size: 1.5em; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin: 1.75em 0 0.6em; color: var(--md-h2); }
+.md-body h3 { font-size: 1.22em; font-weight: 670; line-height: 1.3; letter-spacing: -0.012em; margin: 1.65em 0 0.45em; color: var(--md-h3); }
+.md-body h4 { font-size: 1.04em; font-weight: 650; margin: 1.55em 0 0.4em; color: var(--md-h4); }
+.md-body h5 { font-size: 0.82em; font-weight: 680; margin: 1.5em 0 0.35em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--md-h5); }
+.md-body h6 { font-size: 0.78em; font-weight: 640; margin: 1.5em 0 0.35em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--md-dim); }
+/* h1 carries a short accent bar beneath, h2 a rule that starts in its
+   own colour and fades into a hairline. */
+.md-body h1::after {
+  content: '';
+  display: block;
+  width: 2.2em;
+  height: 3px;
+  margin-top: 0.32em;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--md-h1), var(--md-h2));
+  opacity: 0.85;
+}
 .md-body h2::after {
   content: '';
   display: block;
   height: 1px;
   margin-top: 0.45em;
-  background: linear-gradient(to right, color-mix(in oklch, var(--color-primary) 30%, var(--md-rule)), var(--md-rule) 30%, transparent);
+  background: linear-gradient(to right, color-mix(in srgb, var(--md-h2) 70%, transparent), var(--md-rule) 32%, transparent);
 }
+.lumi-prose.compact h1::after { display: none; }
 .md-anchor {
   margin-left: 0.3em;
   padding: 0 0.15em;
@@ -526,31 +581,44 @@ html { scroll-behavior: smooth; }
 .md-anchor:hover { color: var(--md-link); }
 
 .md-body p { text-wrap: pretty; }
-.md-body strong { font-weight: 650; }
-.md-body em { font-style: italic; }
-.md-body del, .md-body s { text-decoration-thickness: 0.06em; color: var(--md-dim); }
+.md-body strong { font-weight: 680; color: var(--md-strong); }
+.md-body em { font-style: italic; color: var(--md-em); }
+.md-body strong em, .md-body em strong { color: var(--md-strong); }
+.md-body .md-h strong, .md-body .md-h em, .md-body a strong, .md-body a em { color: inherit; }
+.md-body del, .md-body s { text-decoration-thickness: 0.08em; text-decoration-color: color-mix(in srgb, var(--color-error) 70%, transparent); color: var(--md-del); }
 .md-body mark {
   background: var(--md-mark-bg);
-  color: inherit;
-  border-radius: 3px;
-  padding: 0.05em 0.18em;
+  color: var(--md-mark-fg);
+  border-radius: 4px;
+  padding: 0.04em 0.24em;
+  box-shadow: inset 0 -0.12em 0 color-mix(in srgb, var(--color-warning) 45%, transparent);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 .md-body a {
   color: var(--md-link);
-  text-decoration: underline;
-  text-decoration-thickness: max(1px, 0.065em);
-  text-decoration-color: var(--md-link-line);
-  text-underline-offset: 0.22em;
-  text-decoration-skip-ink: auto;
+  text-decoration: none;
   border-radius: 3px;
-  transition: text-decoration-color var(--dur-fade) var(--ease), color var(--dur-fade) var(--ease), background-color var(--dur-fade) var(--ease), text-underline-offset var(--spring-snappy-ms) var(--spring-snappy);
+  /* Two underlines: a quiet resting line and a solid one that draws
+     in from the left on hover (spring), per line fragment. */
+  background-image: linear-gradient(var(--md-link-line), var(--md-link-line)), linear-gradient(currentColor, currentColor);
+  background-size: 100% 1px, 0% 1.5px;
+  background-position: 0 calc(100% - 0.06em), 0 calc(100% - 0.06em);
+  background-repeat: no-repeat;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background-size var(--spring-glide-ms) var(--spring-glide), color var(--dur-fade) var(--ease), background-color var(--dur-fade) var(--ease);
 }
-/* Hover: the underline lifts to the text and a faint wash appears. */
-.md-body a:hover { text-decoration-color: currentColor; text-underline-offset: 0.16em; background-color: var(--accent-wash); }
-.md-body a:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); text-decoration-color: currentColor; }
-.md-body a:not([href*=':']):not([href^='#']) { text-decoration-style: dotted; }
+.md-body a:hover { background-size: 100% 1px, 100% 1.5px; background-color: var(--accent-wash); }
+.md-body a:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); background-size: 100% 1px, 100% 1.5px; }
+/* Internal (note) links: a dotted resting line. */
+.md-body a:not([href*=':']):not([href^='#']) {
+  background-image: radial-gradient(circle at 1px 0.5px, var(--md-link-line) 0.75px, transparent 1px), linear-gradient(currentColor, currentColor);
+  background-size: 4px 1.5px, 0% 1.5px;
+  background-repeat: repeat-x, no-repeat;
+}
+.md-body a:not([href*=':']):not([href^='#']):hover { background-size: 4px 1.5px, 100% 1.5px; }
+.md-body a:has(img), .md-body .md-anchor, .md-body .md-fn-ref a, .md-body .md-fn-back { background-image: none; }
 /* External links say so (a small arrow; never on image links). */
 .md-body a[href^='http']:not(:has(img))::after {
   content: '↗';
@@ -571,8 +639,8 @@ html { scroll-behavior: smooth; }
 .md-body li:has(> p) { margin: 0.45em 0; }
 .md-body li > p { margin: 0.4em 0; }
 .md-body li > ul, .md-body li > ol { margin: 0.3em 0 0.1em; }
-.md-body li::marker { color: var(--md-marker); }
-.md-body ol > li::marker { font-variant-numeric: tabular-nums; font-size: 0.94em; }
+.md-body li::marker { color: var(--md-list-marker); }
+.md-body ol > li::marker { font-variant-numeric: tabular-nums; font-size: 0.94em; font-weight: 650; }
 .md-body ul ul { list-style-type: circle; }
 .md-body ul ul ul { list-style-type: square; }
 
@@ -591,7 +659,7 @@ html { scroll-behavior: smooth; }
   width: 1.02em;
   height: 1.02em;
   margin: 0;
-  border: 1.5px solid color-mix(in srgb, var(--color-text) 38%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--md-list-marker) 70%, transparent);
   border-radius: 0.3em;
   background: transparent;
   display: inline-grid;
@@ -614,7 +682,7 @@ html { scroll-behavior: smooth; }
 .md-body input.md-task:not(:disabled), .cm-lp-checkbox { cursor: pointer; }
 .md-body input.md-task:not(:disabled):hover, .cm-lp-checkbox:hover { border-color: var(--color-primary); }
 .md-body input.md-task:disabled { opacity: 1; }
-.md-body li.md-task-item.done { color: var(--md-dim); }
+.md-body li.md-task-item.done { color: var(--md-del); }
 .md-body li.md-task-item.done > :not(ul):not(ol) { text-decoration: line-through; text-decoration-color: var(--md-rule); }
 .md-body li.md-task-item.done li { color: var(--color-text); }
 .md-body li.md-task-item > input.md-task:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
@@ -622,10 +690,12 @@ html { scroll-behavior: smooth; }
 
 /* Quotes + callouts. */
 .md-body blockquote {
-  padding: 0.05em 0 0.05em 1.1em;
-  border-left: 3px solid var(--md-quote-bar);
-  border-radius: 1px;
-  color: var(--md-dim);
+  padding: 0.6em 1em 0.6em 1.15em;
+  border-radius: 2px var(--radius) var(--radius) 2px;
+  background:
+    linear-gradient(to bottom, var(--md-h2), var(--md-h1)) left / 3px 100% no-repeat,
+    color-mix(in srgb, var(--color-secondary) var(--md-quote-a, 6%), transparent);
+  color: var(--md-quote-fg);
   font-style: italic;
 }
 .md-body blockquote blockquote { margin: 0.5em 0; }
@@ -633,26 +703,31 @@ html { scroll-behavior: smooth; }
 .md-body blockquote > :first-child { margin-top: 0; }
 .md-body blockquote > :last-child { margin-bottom: 0; }
 .md-callout {
-  --c: var(--color-primary);
+  --c: var(--md-callout-note);
+  --ci: var(--md-callout-note-ink, var(--c));
   padding: 0.75em 1.05em 0.8em;
-  border: 1px solid color-mix(in srgb, var(--c) 24%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 26%, transparent);
   border-left: 3px solid var(--c);
   border-radius: var(--radius);
-  background: linear-gradient(to right, color-mix(in srgb, var(--c) 9%, transparent), color-mix(in srgb, var(--c) 5%, transparent));
+  background: linear-gradient(to right, color-mix(in srgb, var(--c) calc(var(--md-callout-a, 10%) * 1.2), transparent), color-mix(in srgb, var(--c) calc(var(--md-callout-a, 10%) * 0.6), transparent));
 }
 .md-callout + .md-callout { margin-top: 0.7em; }
-.md-callout[data-callout='info'], .md-callout[data-callout='todo'] { --c: var(--color-info); }
-.md-callout[data-callout='tip'], .md-callout[data-callout='success'], .md-callout[data-callout='abstract'] { --c: var(--color-accent); }
-.md-callout[data-callout='question'], .md-callout[data-callout='example'] { --c: var(--color-secondary); }
-.md-callout[data-callout='warning'] { --c: var(--color-warning); }
-.md-callout[data-callout='danger'] { --c: var(--color-error); }
-.md-callout[data-callout='quote'] { --c: var(--color-text-dim); }
+.md-callout[data-callout='info'] { --c: var(--md-callout-info); --ci: var(--md-callout-info-ink, var(--c)); }
+.md-callout[data-callout='todo'] { --c: var(--md-callout-todo); --ci: var(--md-callout-todo-ink, var(--c)); }
+.md-callout[data-callout='abstract'] { --c: var(--md-callout-abstract); --ci: var(--md-callout-abstract-ink, var(--c)); }
+.md-callout[data-callout='tip'] { --c: var(--md-callout-tip); --ci: var(--md-callout-tip-ink, var(--c)); }
+.md-callout[data-callout='success'] { --c: var(--md-callout-success); --ci: var(--md-callout-success-ink, var(--c)); }
+.md-callout[data-callout='question'] { --c: var(--md-callout-question); --ci: var(--md-callout-question-ink, var(--c)); }
+.md-callout[data-callout='example'] { --c: var(--md-callout-example); --ci: var(--md-callout-example-ink, var(--c)); }
+.md-callout[data-callout='warning'] { --c: var(--md-callout-warning); --ci: var(--md-callout-warning-ink, var(--c)); }
+.md-callout[data-callout='danger'] { --c: var(--md-callout-danger); --ci: var(--md-callout-danger-ink, var(--c)); }
+.md-callout[data-callout='quote'] { --c: var(--md-callout-quote); --ci: var(--md-callout-quote-ink, var(--c)); }
 .md-callout-title {
   display: flex;
   align-items: center;
   gap: 0.5em;
   margin: 0 !important;
-  color: color-mix(in srgb, var(--c) 72%, var(--color-text));
+  color: var(--ci);
   font-weight: 650;
   font-size: 0.95em;
 }
@@ -686,18 +761,20 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 .md-body :not(pre) > code {
   padding: 0.14em 0.4em;
   border-radius: 5px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 6%, transparent);
-  background: var(--md-inline-bg);
-  color: var(--md-inline-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-code-bg-hue) 22%, transparent);
+  background: color-mix(in srgb, var(--md-code-bg-hue) var(--md-inline-a, 12%), transparent);
+  color: var(--md-code-fg);
   white-space: break-spaces;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 .md-body a > code { color: inherit; }
 .md-code {
-  border: 1px solid var(--md-code-border);
+  --md-code-bg: var(--md-code-tint);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 16%, var(--md-code-border));
   border-radius: var(--radius);
   background: var(--md-code-bg);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-primary) 10%, transparent);
   overflow: hidden;
 }
 .md-code-head {
@@ -710,9 +787,20 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1;
-  color: var(--md-marker);
+  color: var(--md-h4);
   letter-spacing: 0.04em;
   text-transform: lowercase;
+}
+.md-code-head > :first-child::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.6em;
+  border-radius: 50%;
+  background: var(--md-h1);
+  box-shadow: 0 0 6px var(--accent-glow);
+  vertical-align: 0.05em;
 }
 .md-code-tools { display: inline-flex; gap: 2px; }
 .md-copy, .md-wrap {
@@ -758,15 +846,16 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
   overflow-x: auto;
 }
 /* Syntax tokens (classHighlighter), same palette as the editor. */
-.tok-keyword, .tok-modifier, .tok-operatorKeyword, .tok-controlKeyword { color: var(--color-secondary); }
-.tok-string, .tok-string2, .tok-regexp, .tok-special { color: var(--color-accent); }
-.tok-number, .tok-bool, .tok-atom, .tok-literal { color: var(--color-warning); }
-.tok-comment { color: var(--md-marker); font-style: italic; }
-.tok-function, .tok-variableName.tok-definition { color: var(--color-info); }
-.tok-typeName, .tok-className, .tok-namespace, .tok-macroName { color: var(--color-primary); }
-.tok-propertyName, .tok-attributeName { color: color-mix(in srgb, var(--color-info) 70%, var(--color-text)); }
-.tok-tagName, .tok-angleBracket { color: var(--color-error); }
-.tok-meta, .tok-punctuation, .tok-operator { color: var(--md-dim); }
+.tok-keyword, .tok-modifier, .tok-operatorKeyword, .tok-controlKeyword { color: var(--syn-keyword); }
+.tok-keyword { font-weight: 560; }
+.tok-string, .tok-string2, .tok-regexp, .tok-special { color: var(--syn-string); }
+.tok-number, .tok-bool, .tok-atom, .tok-literal { color: var(--syn-number); }
+.tok-comment { color: var(--syn-comment); font-style: italic; }
+.tok-function, .tok-variableName.tok-definition, .tok-variableName2 { color: var(--syn-function); }
+.tok-typeName, .tok-className, .tok-namespace, .tok-macroName { color: var(--syn-type); }
+.tok-propertyName, .tok-attributeName { color: var(--syn-property); }
+.tok-tagName, .tok-angleBracket { color: var(--syn-tag); }
+.tok-meta, .tok-punctuation, .tok-operator { color: var(--syn-punct); }
 .tok-heading { color: var(--color-primary); font-weight: 650; }
 .tok-link, .tok-url { color: var(--color-primary); }
 .tok-inserted { color: var(--color-accent); }
@@ -777,7 +866,7 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
    sticky header when long. */
 .md-table {
   overflow-x: auto;
-  border: 1px solid var(--md-rule);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--md-rule));
   border-radius: var(--radius);
   background:
     linear-gradient(to right, var(--color-background) 35%, transparent) left / 2.5em 100% no-repeat local,
@@ -808,13 +897,16 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--md-code-bg);
-  color: var(--color-text);
-  font-weight: 620;
+  background: color-mix(in srgb, var(--color-primary) var(--md-th-a, 10%), var(--color-background));
+  color: var(--md-th-fg);
+  font-weight: 650;
+  font-size: 0.94em;
+  letter-spacing: 0.01em;
   white-space: nowrap;
+  border-bottom-color: color-mix(in srgb, var(--color-primary) 30%, var(--md-rule));
 }
-.md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--color-text) 1.6%, transparent); }
-.md-table tbody tr:hover td { background: color-mix(in srgb, var(--color-text) 3.5%, transparent); }
+.md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--color-primary) 3.5%, transparent); }
+.md-table tbody tr:hover td { background: color-mix(in srgb, var(--color-primary) 7%, transparent); }
 .md-table td code { white-space: nowrap; }
 
 /* Rules, media, footnotes, keys, definitions. */
@@ -822,7 +914,7 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
   border: none;
   height: 1px;
   margin: 2.4em 0;
-  background: linear-gradient(to right, transparent, var(--md-rule) 15%, var(--md-rule) 85%, transparent);
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--md-h1) 55%, transparent) 22%, color-mix(in srgb, var(--md-h2) 55%, transparent) 78%, transparent);
 }
 .md-body img, .md-body video {
   max-width: 100%;
@@ -839,7 +931,7 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 .md-body iframe { width: 100%; aspect-ratio: 16 / 9; height: auto; border: 0; border-radius: var(--radius); background: var(--md-code-bg); box-shadow: 0 0 0 1px var(--md-rule); }
 .md-body video { box-shadow: 0 0 0 1px var(--md-rule); background: var(--md-code-bg); }
 .md-fn-ref { font-size: 0.72em; line-height: 0; }
-.md-fn-ref a { text-decoration: none !important; padding: 0 0.12em 0 0.06em; font-variant-numeric: tabular-nums; font-weight: 600; }
+.md-fn-ref a { text-decoration: none !important; padding: 0 0.28em; margin-left: 0.08em; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--md-link); background: color-mix(in srgb, var(--md-link) 12%, transparent); border-radius: 999px; }
 .md-footnotes {
   margin-top: 3em;
   padding-top: 1.1em;
@@ -853,7 +945,7 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 .md-fn-back { margin-left: 0.25em; text-decoration: none !important; color: var(--md-marker); }
 .md-fn-back:hover { color: var(--md-link); }
 .md-fn-ref a { border-radius: 3px; }
-.md-fn-ref a:hover { background: var(--tint-primary); }
+.md-fn-ref a:hover { background: color-mix(in srgb, var(--md-link) 22%, transparent); }
 .md-footnotes li::marker { color: var(--md-marker); font-variant-numeric: tabular-nums; }
 .md-body :target { animation: md-target 1.2s var(--ease); }
 @keyframes md-target { from { background: var(--tint-active); } }
@@ -872,6 +964,27 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
   vertical-align: 0.08em;
 }
 
+/* Tags: chips with a stable per-name hue (lib/prose-palette.ts). */
+.md-tag {
+  --t: var(--md-tag-0);
+  --ti: var(--md-tag-0-ink, var(--t));
+  display: inline-block;
+  padding: 0.02em 0.5em 0.04em;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--t) var(--md-tag-a, 14%), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t) 26%, transparent);
+  color: var(--ti);
+  font-size: 0.84em;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+}
+.md-tag[data-hue='1'] { --t: var(--md-tag-1); --ti: var(--md-tag-1-ink, var(--t)); }
+.md-tag[data-hue='2'] { --t: var(--md-tag-2); --ti: var(--md-tag-2-ink, var(--t)); }
+.md-tag[data-hue='3'] { --t: var(--md-tag-3); --ti: var(--md-tag-3-ink, var(--t)); }
+.md-tag[data-hue='4'] { --t: var(--md-tag-4); --ti: var(--md-tag-4-ink, var(--t)); }
+
 /* ── Live Preview (CodeMirror) ────────────────────────────────────
    The same tokens as .md-body, applied to editor lines, so editing in
    Live Preview looks like the reader. Selectors carry `.cm-line` to
@@ -880,24 +993,26 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 @media (hover: none) { .note-editor-host .cm-foldGutter { display: none; } }
 /* Same line breaking as `.md-body p` (text-wrap: pretty). */
 .note-editor-host[data-mode='live'] .cm-line { text-wrap: pretty; }
-.cm-line.cm-lp-h { color: var(--md-heading); font-weight: 650; line-height: 1.25; letter-spacing: -0.012em; }
-.cm-line.cm-lp-h1 { font-size: 1.875em; font-weight: 700; letter-spacing: -0.022em; padding-top: 0.5em; padding-bottom: 0.1em; }
-.cm-line.cm-lp-h2 { font-size: 1.45em; letter-spacing: -0.016em; padding-top: 0.55em; padding-bottom: 0.1em; }
-.cm-line.cm-lp-h3 { font-size: 1.2em; padding-top: 0.5em; }
-.cm-line.cm-lp-h4 { font-size: 1.02em; padding-top: 0.4em; }
-.cm-line.cm-lp-h5 { font-size: 0.86em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--md-dim); padding-top: 0.4em; }
+.cm-line.cm-lp-h { font-weight: 650; line-height: 1.25; letter-spacing: -0.012em; }
+.cm-line.cm-lp-h1 { font-size: 2.05em; font-weight: 760; letter-spacing: -0.03em; padding-top: 0.5em; padding-bottom: 0.1em; color: var(--md-h1); }
+.cm-line.cm-lp-h2 { font-size: 1.5em; font-weight: 700; letter-spacing: -0.02em; padding-top: 0.55em; padding-bottom: 0.1em; color: var(--md-h2); }
+.cm-line.cm-lp-h3 { font-size: 1.22em; font-weight: 670; padding-top: 0.5em; color: var(--md-h3); }
+.cm-line.cm-lp-h4 { font-size: 1.04em; padding-top: 0.4em; color: var(--md-h4); }
+.cm-line.cm-lp-h5 { font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--md-h5); padding-top: 0.4em; }
 .cm-line.cm-lp-h6 { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.07em; color: var(--md-marker); padding-top: 0.4em; }
 .cm-content > .cm-line.cm-lp-h1:first-child { padding-top: 0; }
-.cm-lp-em { font-style: italic; }
-.cm-lp-strong { font-weight: 650; }
-.cm-lp-strike { text-decoration: line-through; color: var(--md-dim); }
+.cm-lp-em { font-style: italic; color: var(--md-em); }
+.cm-lp-strong { font-weight: 680; color: var(--md-strong); }
+.cm-lp-h .cm-lp-em, .cm-lp-h .cm-lp-strong { color: inherit; }
+.cm-lp-strike { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--color-error) 70%, transparent); color: var(--md-del); }
 .cm-lp-inline-code {
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.14em 0.4em;
   border-radius: 5px;
-  background: var(--md-inline-bg);
-  color: var(--md-inline-fg);
+  background: color-mix(in srgb, var(--md-code-bg-hue) var(--md-inline-a, 12%), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-code-bg-hue) 22%, transparent);
+  color: var(--md-code-fg);
 }
 .cm-lp-link {
   color: var(--md-link);
@@ -912,9 +1027,12 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 .cm-line.cm-lp-quote {
   border-left: 3px solid var(--md-quote-bar);
   padding-left: 1.1em;
-  color: var(--md-dim);
+  background: color-mix(in srgb, var(--color-secondary) var(--md-quote-a, 6%), transparent);
+  color: var(--md-quote-fg);
+  font-style: italic;
 }
-.cm-line.cm-lp-hr { background: linear-gradient(var(--md-rule), var(--md-rule)) center / 100% 1px no-repeat; }
+.cm-line.cm-lp-hr { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--md-h1) 55%, transparent) 22%, color-mix(in srgb, var(--md-h2) 55%, transparent) 78%, transparent) center / 100% 1px no-repeat; }
+.cm-lp-bullet { color: var(--md-list-marker) !important; }
 .cm-line.cm-lp-codeblock {
   font-family: var(--font-mono);
   font-size: 0.84em;

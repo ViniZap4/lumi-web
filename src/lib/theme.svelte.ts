@@ -8,6 +8,7 @@
 
 import { themes, type Theme, type ThemeSettings } from './themes.ts';
 import type { ThemeMode } from './types.ts';
+import { proseVars } from './prose-palette.ts';
 
 const STORAGE_KEY = 'lumi.v2.theme';
 
@@ -71,6 +72,8 @@ function applyToDocument(theme: Theme): void {
   r.setProperty('--color-warning', theme.warning);
   r.setProperty('--color-info', theme.info);
   theme.logoColors.forEach((c, i) => r.setProperty(`--color-logo-${i}`, c));
+  // Rich prose palette, contrast-checked per theme (lib/prose-palette.ts).
+  for (const [k, v] of Object.entries(proseVars(theme))) r.setProperty(k, v);
   // Native controls (scrollbars, form widgets) follow the theme.
   r.setProperty('color-scheme', theme.isDark ? 'dark' : 'light');
   document.documentElement.dataset.theme = theme.isDark ? 'dark' : 'light';

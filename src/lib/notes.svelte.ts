@@ -3,6 +3,7 @@
 // 4.3 adds mutating actions (create/edit/delete), 4.4 swaps the
 // editor for a Yjs-bound CodeMirror.
 
+import { rememberNoteCount } from './book-counts.ts';
 import { ApiError, type NoteSummary, type NoteContent } from './types.ts';
 import * as api from './api.ts';
 import { isNetworkError } from './api.ts';
@@ -138,6 +139,7 @@ class NotesStore {
       const all = await this.fetchAll(vaultID, ctrl.signal, () => seq === this.listSeq && vaultID === this.vaultID);
       if (seq !== this.listSeq || vaultID !== this.vaultID) return;
       this.list = all;
+      rememberNoteCount(vaultID, all.length);
       this.fresh = true;
       this.stale = false;
       this.staleAt = null;

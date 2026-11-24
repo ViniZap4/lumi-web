@@ -277,29 +277,70 @@ describe('floating explorer — books level (switching books floats too)', () =>
   const bookRows = () => Array.from(target.querySelectorAll('[data-testid="fx-books-list"] [role="option"] .fx-row-name')).map((e) => e.textContent);
   const bookCursor = () => target.querySelector('[data-testid="fx-books-list"] [aria-selected="true"] .fx-row-name')?.textContent ?? null;
 
-  it('opens at the books level on the active book; Enter on another book switches', async () => {
+  it('opens on the Livros shelf: one list grouped by account, cursor on the active book; Enter switches', async () => {
     const onbook = vi.fn();
     await open('sites', { level: 'books', onbook });
     expect(target.querySelector('[data-testid="floating-explorer"]')!.getAttribute('data-level')).toBe('books');
-    expect(bookRows()).toEqual(['Work', 'Notes']);
+    // Two accounts: no accounts layer, every book in one list.
+    expect(bookRows()).toEqual(['Work', 'Notes', 'Home']);
+    // Account headers are section headers, not rows (not options, no chevron).
+    const heads = Array.from(target.querySelectorAll('[data-testid="fx-books-list"] .fx-acct'));
+    expect(heads.map((h) => h.querySelector('.fx-acct-name')?.textContent)).toEqual(['ana', 'bo']);
+    expect(heads.every((h) => !h.closest('[role="option"]'))).toBe(true);
+    expect(target.querySelector('[data-testid="fx-books-list"] .chev')).toBeNull();
     expect(bookCursor()).toBe('Work');
     await key('j');
     expect(bookCursor()).toBe('Notes');
+    await key('j'); // crosses into bo's group
+    expect(bookCursor()).toBe('Home');
     await key('Enter');
-    expect(onbook).toHaveBeenCalledWith('v2');
+    expect(onbook).toHaveBeenCalledWith('v3');
   });
 
-  it('h climbs from the book root to the books, then to the accounts; l comes back down', async () => {
+  it('breadcrumb names the scope with its own icon; pt-BR plurals in the footer', async () => {
+    await open('sites', { level: 'books' });
+    const crumbs = target.querySelector('[data-testid="fx-crumbs"]')!;
+    expect(crumbs.textContent?.trim()).toBe('Livros');
+    expect(crumbs.querySelector('[aria-current="location"] .lv-shelf')).not.toBeNull();
+    expect(target.querySelector('[data-testid="fx-stat"]')!.textContent).toBe('3 livros · 2 contas');
+    expect(target.querySelector('[data-testid="floating-explorer"]')!.getAttribute('aria-label')).toBe('Livros');
+  });
+
+  it('h climbs from the book root to Livros; with few accounts h stays there (no accounts layer)', async () => {
     const onlevel = vi.fn();
     await open('w', { onlevel });
-    await key('h'); // book root → books
+    const files = target.querySelector('[data-testid="fx-crumbs"]')!;
+    expect(files.querySelector('[data-level="shelf"]')?.textContent).toBe('Livros');
+    expect(files.querySelector('[data-level="book"] .lv-book')).not.toBeNull();
+    await key('h'); // book root → Livros
     expect(onlevel).toHaveBeenLastCalledWith('books');
-    expect(bookRows()).toEqual(['Work', 'Notes']);
-    await key('h'); // → accounts
-    expect(bookRows()).toEqual(['ana', 'bo']);
+    expect(bookRows()).toEqual(['Work', 'Notes', 'Home']);
+    await key('h');
+    expect(bookRows()).toEqual(['Work', 'Notes', 'Home']);
+    expect(target.querySelector('[data-testid="fx-books"]')!.getAttribute('data-layer')).toBe('books');
+    expect(target.querySelector('.fx-flash')?.textContent).toContain('Livros é o topo');
+  });
+
+  it('many accounts: h opens "Contas e servidores" (cards, no chevron); breadcrumb Contas › user@host › Livros', async () => {
+    const { books } = await import('../lib/books.svelte.ts');
+    const { accounts } = await import('../lib/accounts.svelte.ts');
+    await accounts.add({ server_url: 'https://c.example', username: 'cy', user_id: 'u3', display_name: 'Cy', added_at: '', expires_at: null, remember: false }, 'tk3');
+    books.addCreated({ id: 'v4', name: 'Lab', slug: 'lab', created_by: 'u3', created_at: '', owner_user_id: 'u3' }, 'https://c.example#cy');
+    const onbook = vi.fn();
+    await open('sites', { level: 'books', onbook });
+    const crumbText = () => Array.from(target.querySelectorAll('[data-testid="fx-crumbs"] .fx-crumb')).map((c) => c.textContent?.trim());
+    expect(crumbText()).toEqual(['Contas', 'ana@a.example', 'Livros']);
+    await key('h');
+    expect(target.querySelector('[data-testid="fx-books"]')!.getAttribute('data-layer')).toBe('accounts');
+    expect(crumbText()).toEqual(['Contas e servidores']);
+    expect(bookRows()).toEqual(['ana', 'bo', 'cy']);
+    expect(target.querySelector('[data-testid="fx-books-list"] .chev')).toBeNull();
+    expect(target.querySelectorAll('[data-testid="fx-books-list"] .fx-acct-row').length).toBe(3);
     await key('j');
-    await key('l');
-    expect(bookRows()).toEqual(['Home']);
+    await key('l'); // bo → Livros, cursor on bo's first book
+    expect(target.querySelector('[data-testid="fx-books"]')!.getAttribute('data-layer')).toBe('books');
+    expect(bookCursor()).toBe('Home');
+    expect(crumbText()).toEqual(['Contas', 'bo@b.example', 'Livros']);
   });
 
   it('Enter on the open book goes back to its files; g2 opens book 2', async () => {

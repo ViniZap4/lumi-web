@@ -13,6 +13,7 @@
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { acquireEditorSession, editorPool, toggleTaskHeadless } from '../lib/editor-boot.ts';
   import { motionAllowed } from '../lib/motion.ts';
+  import { focusPane } from '../lib/view-focus.ts';
   import { keyLabel } from '../lib/platform.ts';
   import { resolveView, viewsFor, MARKDOWN_VIEW } from '../lib/note-views.ts';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
@@ -182,6 +183,7 @@
 
   export function focus(): void {
     if (editing && session && editorRef) editorRef.focus();
+    else if (view !== MARKDOWN_VIEW) focusPane(root);
     else scroller?.focus({ preventScroll: true });
   }
 

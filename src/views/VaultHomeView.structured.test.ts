@@ -156,4 +156,49 @@ describe('VaultHomeView structured notes', () => {
     await waitFor(() => target.querySelector('article.rendered'), 'reader');
     expect(target.querySelector('[data-testid="structured-note"]')).toBeNull();
   });
+
+  // Owner: "o canvas trava ao abrir, depois de dar reload ele volta".
+  // In-app opens run inside a view transition and focused the reader
+  // wrapper when it finished, i.e. AFTER the canvas focused itself on
+  // mount: the canvas then ignored every key until a click.
+  it('a canvas opened from the explorer keeps the keyboard after the view transition', async () => {
+    const d = document as any;
+    const had = d.startViewTransition;
+    d.startViewTransition = (cb: () => unknown) => {
+      const done = Promise.resolve().then(cb).then(() => new Promise((r) => setTimeout(r, 40)));
+      return { finished: done, ready: Promise.resolve(), updateCallbackDone: done };
+    };
+    try {
+      cmp = mount(VaultHomeView, { target });
+      await waitFor(() => notes.vaultID === 'v1' && !notes.loadingList && notes.list.length > 0, 'notes');
+      await settle();
+      const press = async (k: string) => {
+        const el = document.activeElement && document.activeElement !== document.body ? document.activeElement : window;
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+        await settle();
+      };
+      const rows = () => Array.from(target.querySelectorAll('[data-testid="col-fx-cur"] [role="option"] .name')).map((e) => e.textContent);
+      const openRow = async (name: string) => {
+        if (!target.querySelector('[data-testid="floating-explorer"]')) target.querySelector<HTMLButtonElement>('[data-testid="explorer-button"]')!.click();
+        await waitFor(() => document.activeElement?.closest('[data-testid="floating-explorer"]'), 'explorer focus');
+        await press('g');
+        await press('g');
+        for (let k = 0; k < rows().indexOf(name); k++) await press('j');
+        await press('Enter');
+        await waitFor(() => !target.querySelector('[data-testid="floating-explorer"]'), 'explorer closed');
+      };
+      await openRow('Plan');
+      const cv = await waitFor(() => target.querySelector<HTMLElement>('[data-testid="canvas-view"]'), 'canvas');
+      await new Promise((r) => setTimeout(r, 80)); // past the transition
+      await settle();
+      expect(document.activeElement).toBe(cv);
+      // …and it acts on the keys: `l` pans the view.
+      const world = cv.querySelector<HTMLElement>('.cv-world')!;
+      const before = world.style.transform;
+      key(cv, 'l');
+      expect(world.style.transform).not.toBe(before);
+    } finally {
+      d.startViewTransition = had;
+    }
+  });
 });

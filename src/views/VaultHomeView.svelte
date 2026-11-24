@@ -43,6 +43,7 @@
   import { linkCandidates } from '../lib/links.ts';
   import { PreviewKeymap, type PreviewAction } from '../lib/preview-keys.ts';
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
+  import { focusPane } from '../lib/view-focus.ts';
   import { withViewTransition, sharedTransition, animate, scrollBehavior } from '../lib/motion.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
   import ToastStack from '../components/ToastStack.svelte';
@@ -341,7 +342,7 @@
   async function focusPaneEl(to: PaneId, from: PaneId | null = activePane): Promise<void> {
     switch (to) {
       case 'main':
-        readerEl()?.focus({ preventScroll: true });
+        focusPane(readerEl());
         return;
       case 'split':
         await splitRef?.focusPreview();
@@ -1198,7 +1199,7 @@
         noteHistory.visit(plan.note);
         pane = 'note';
         void notes.select(plan.note);
-        void tick().then(() => readerEl()?.focus({ preventScroll: true }));
+        void tick().then(() => focusPane(readerEl()));
       } else {
         pane = 'home';
         if (plan.explore && !fx && !overlayOpen()) openFloating({ auto: true });
@@ -1252,7 +1253,8 @@
       await tick();
     };
     const run = o.from && seed ? sharedTransition('note-title', o.from, update) : withViewTransition(update);
-    void run.then(() => readerEl()?.focus({ preventScroll: true }));
+    // A canvas / board that already took focus on mount keeps it.
+    void run.then(() => focusPane(readerEl()));
   }
 
   /** Follow an href found in the note at `fromPath`. */

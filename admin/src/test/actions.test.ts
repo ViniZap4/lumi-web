@@ -22,7 +22,7 @@ describe('login', () => {
 	it('never sends a malformed token to the API', async () => {
 		const api = fakeApi({});
 		const ev = actionEvent({ path: '/entrar', form: { token: 'lpa_short' }, session: null });
-		const r = await run(loginActions.default, ev);
+		const r = await run(loginActions.token, ev);
 		expect(r.value).toMatchObject({ status: 400 });
 		expect(api.calls).toHaveLength(0);
 	});
@@ -30,7 +30,7 @@ describe('login', () => {
 	it('refuses a token the API rejects, without a session or cookie', async () => {
 		fakeApi({ 'GET /status': () => json({ error: 'unauthorized' }, 401) });
 		const ev = actionEvent({ path: '/entrar', form: { token: TOKEN }, session: null });
-		const r = await run(loginActions.default, ev);
+		const r = await run(loginActions.token, ev);
 		expect(r.value).toMatchObject({ status: 401, data: { message: 'Token inválido, expirado ou revogado.' } });
 		expect(ev.cookies.jar.size).toBe(0);
 	});
@@ -38,7 +38,7 @@ describe('login', () => {
 	it('starts a server-side session with an HttpOnly cookie that holds only a random id', async () => {
 		const api = fakeApi({ 'GET /status': () => json(status()) });
 		const ev = actionEvent({ path: '/entrar', form: { token: ` ${TOKEN} ` }, session: null });
-		const r = await run(loginActions.default, ev);
+		const r = await run(loginActions.token, ev);
 		expect(r.redirect).toEqual({ status: 303, location: '/' });
 		expect(api.calls[0].headers.get('X-Forwarded-For')).toBe('100.64.0.7');
 		const [[name, cookie]] = [...ev.cookies.jar.entries()];
@@ -51,10 +51,10 @@ describe('login', () => {
 	it('throttles repeated failures per address', async () => {
 		fakeApi({ 'GET /status': () => json({ error: 'unauthorized' }, 401) });
 		for (let i = 0; i < 5; i++) {
-			await run(loginActions.default, actionEvent({ path: '/entrar', form: { token: TOKEN }, session: null }));
+			await run(loginActions.token, actionEvent({ path: '/entrar', form: { token: TOKEN }, session: null }));
 		}
 		const api = fakeApi({ 'GET /status': () => json(status()) });
-		const r = await run(loginActions.default, actionEvent({ path: '/entrar', form: { token: TOKEN }, session: null }));
+		const r = await run(loginActions.token, actionEvent({ path: '/entrar', form: { token: TOKEN }, session: null }));
 		expect(r.value).toMatchObject({ status: 429 });
 		expect(api.calls).toHaveLength(0);
 	});

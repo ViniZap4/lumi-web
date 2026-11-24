@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { isUUID } from '#lib/admin.ts';
+import { credentialLabel, isUUID } from '#lib/admin.ts';
 import { act, field, invalid, read } from '#lib/server/api.ts';
 import { cursorOf } from '#lib/server/guard.ts';
 import { cookieName, cookieOptions, sessions } from '#lib/server/sessions.ts';
@@ -18,10 +18,16 @@ export const actions: Actions = {
 		const page = await read(event, (api) => api.tokens({ limit: 200 }));
 		const token = page.items.find((t) => t.id === id);
 		if (!token) return invalid('Token não encontrado na primeira página da lista.');
-		if (!confirmed(field(data, 'confirm'), token.name)) {
-			return invalid('Digite o nome do token exatamente para confirmar.');
+		const label = credentialLabel(token);
+		if (!confirmed(field(data, 'confirm'), label)) {
+			return invalid(
+				token.kind === 'session'
+					? 'Digite o nome de usuário da sessão exatamente para confirmar.'
+					: 'Digite o nome do token exatamente para confirmar.'
+			);
 		}
-		const result = await act(event, `Token “${token.name}” revogado.`, (api) => api.revokeToken(id));
+		const done = token.kind === 'session' ? `Sessão de “${label}” encerrada.` : `Token “${label}” revogado.`;
+		const result = await act(event, done, (api) => api.revokeToken(id));
 		if ('ok' in result && result.ok) {
 			sessions.deleteToken(id);
 			if (token.current) {

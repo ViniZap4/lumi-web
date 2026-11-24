@@ -38,7 +38,8 @@
 		} else if (s.pendingMigrations < 0) {
 			out.push({ tone: 'warn', text: 'O servidor não conseguiu contar as migrações pendentes (diretório de migrações ausente?).' });
 		}
-		if (days < 7) {
+		// A password session lasts at most 12 h by design: only terminal tokens get the "renew it" alert.
+		if (s.token.kind === 'token' && days < 7) {
 			out.push({ tone: days < 1 ? 'alert' : 'warn', text: `O token “${s.token.name}” expira ${formatRelative(s.token.expiresAt)}. Crie outro no terminal antes disso.`, href: '/tokens', cta: 'Tokens' });
 		}
 		if (s.usersLocked > 0) {

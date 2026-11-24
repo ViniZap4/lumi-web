@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AdminToken } from '#lib/admin.ts';
+	import { type AdminToken, credentialLabel } from '#lib/admin.ts';
 	import ConfirmDialog from '#lib/components/ConfirmDialog.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import Icon from '#lib/components/Icon.svelte';
@@ -18,8 +18,8 @@
 	<title>Tokens · lumi · Administração</title>
 </svelte:head>
 
-<PageHeader eyebrow="Servidor" title="Tokens de administração"
-	subtitle="Quem pode usar este painel e a API de admin. Criados só no terminal; aqui dá para ver o uso e revogar." />
+<PageHeader eyebrow="Servidor" title="Tokens e sessões de administração"
+	subtitle="Quem pode usar este painel e a API de admin: tokens criados no terminal e sessões abertas com usuário e senha. Aqui dá para ver o uso e revogar." />
 
 <div class="table-card">
 	{#if data.items.length === 0}
@@ -42,7 +42,11 @@
 						{@const soon = t.state === 'active' && daysUntil(t.expiresAt) < 7}
 						<tr class:dim={t.state !== 'active'}>
 							<td class="primary">
-								<span class="name"><Icon name="key" size={15} /> <strong>{t.name}</strong></span>
+								{#if t.kind === 'session'}
+									<span class="name"><Icon name="users" size={15} /> <strong>{t.user?.username ?? '—'}</strong> <span class="muted">sessão</span></span>
+								{:else}
+									<span class="name"><Icon name="key" size={15} /> <strong>{t.name}</strong> <span class="muted">token</span></span>
+								{/if}
 								<span class="muted mono" title={t.id}>{shortId(t.id)}</span>
 								{#if t.current}<StatePill state="active" label="este painel" />{/if}
 							</td>
@@ -81,12 +85,19 @@
 </section>
 
 {#if target}
-	<ConfirmDialog bind:open title="Revogar o token {target.name}?" action="?/revoke" fields={{ token: target.id }}
-		confirmLabel="Revogar" danger requireText={target.name} requireLabel="Para confirmar, digite o nome do token">
+	{@const session = target.kind === 'session'}
+	<ConfirmDialog bind:open title={session ? `Encerrar a sessão de ${credentialLabel(target)}?` : `Revogar o token ${target.name}?`}
+		action="?/revoke" fields={{ token: target.id }} confirmLabel={session ? 'Encerrar' : 'Revogar'} danger
+		requireText={credentialLabel(target)}
+		requireLabel={session ? 'Para confirmar, digite o nome de usuário' : 'Para confirmar, digite o nome do token'}>
 		{#if target.current}
-			<div class="banner alert"><p>Este é o token que o painel está usando: você sai logo em seguida.</p></div>
+			<div class="banner alert"><p>É o acesso que o painel está usando: você sai logo em seguida.</p></div>
 		{/if}
-		<p>Scripts e painéis que usam esse token deixam de funcionar na próxima chamada. Não há como desfazer.</p>
+		{#if session}
+			<p>Quem entrou com essa conta sai do painel na próxima ação. A conta continua podendo entrar de novo.</p>
+		{:else}
+			<p>Scripts e painéis que usam esse token deixam de funcionar na próxima chamada. Não há como desfazer.</p>
+		{/if}
 	</ConfirmDialog>
 {/if}
 

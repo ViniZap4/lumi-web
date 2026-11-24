@@ -23,6 +23,7 @@
 	let disableOpen = $state(false);
 	let deleteOpen = $state(false);
 	let logoutOpen = $state(false);
+	let adminOpen = $state(false);
 	let revoking = $state<{ id: string; label: string } | null>(null);
 	let revokeOpen = $state(false);
 	let busy = $state<string | null>(null);
@@ -74,6 +75,7 @@
 		<h1>{user.username}</h1>
 		<p class="row">
 			<StatePill state={user.state} />
+			{#if user.serverAdmin}<StatePill state="admin" label="admin do servidor" />{/if}
 			{#if user.displayName}<span>{user.displayName}</span>{/if}
 			<span class="muted">conta criada em {formatDate(user.createdAt)}</span>
 			<span class="muted mono" title={user.id}>{shortId(user.id)}</span>
@@ -86,6 +88,9 @@
 				<button class="btn" type="submit" disabled={busy === 'unlock'}><Icon name="unlock" size={16} /> Desbloquear</button>
 			</form>
 		{/if}
+		<button class="btn" type="button" onclick={() => (adminOpen = true)} aria-pressed={user.serverAdmin}>
+			<Icon name="shield" size={16} /> {user.serverAdmin ? 'Tirar admin do servidor' : 'Tornar admin do servidor'}
+		</button>
 		{#if user.sessions > 0}
 			<button class="btn" type="button" onclick={() => (logoutOpen = true)}><Icon name="logout" size={16} /> Encerrar sessões</button>
 		{/if}
@@ -112,6 +117,7 @@
 	<div class="fact"><span class="k">Sessões ativas</span><span class="v">{formatInt(user.sessions)}</span></div>
 	<div class="fact"><span class="k">Cofres</span><span class="v">{formatInt(user.vaults)} <small>dono de {formatInt(user.ownedVaults)}</small></span></div>
 	<div class="fact" class:warn={user.failedLogins > 0}><span class="k">Falhas seguidas</span><span class="v">{formatInt(user.failedLogins)}</span></div>
+	<div class="fact"><span class="k">Admin do servidor</span><span class="v">{user.serverAdmin ? 'sim' : 'não'}</span></div>
 </div>
 
 <div class="grid-2">
@@ -207,6 +213,17 @@
 
 <ConfirmDialog bind:open={logoutOpen} title="Encerrar as sessões de {user.username}?" action="?/logoutAll" confirmLabel="Encerrar todas" danger>
 	<p>{plural(user.sessions, 'sessão ativa é encerrada', 'sessões ativas são encerradas')}: cada aparelho precisa entrar de novo. A senha não muda.</p>
+</ConfirmDialog>
+
+<ConfirmDialog bind:open={adminOpen}
+	title={user.serverAdmin ? `Tirar ${user.username} dos administradores do servidor?` : `Tornar ${user.username} administrador do servidor?`}
+	action="?/serverAdmin" fields={{ enabled: user.serverAdmin ? 'false' : 'true' }}
+	confirmLabel={user.serverAdmin ? 'Tirar admin' : 'Tornar admin'} danger={!user.serverAdmin}>
+	{#if user.serverAdmin}
+		<p>A conta deixa de entrar neste painel com a senha e as sessões dela aqui são encerradas. O servidor recusa se for o último administrador ativo.</p>
+	{:else}
+		<p>A conta passa a entrar neste painel com usuário e senha, com acesso total à administração do servidor: usuários, cofres, tokens e auditoria.</p>
+	{/if}
 </ConfirmDialog>
 
 <ConfirmDialog bind:open={disableOpen} title="Desativar {user.username}?" action="?/disable" confirmLabel="Desativar" danger>

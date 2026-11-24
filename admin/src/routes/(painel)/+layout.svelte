@@ -97,8 +97,13 @@
 			<div class="account">
 				<span class="key"><Icon name="key" size={16} /></span>
 				<span class="meta">
-					<strong title={data.token.name}>{data.token.name}</strong>
-					<small class:warn={days < 7}>token · expira em {days} {days === 1 ? 'dia' : 'dias'}</small>
+					{#if data.token.kind === 'session' && data.token.username}
+						<strong title={data.token.username}>{data.token.username}</strong>
+						<small>sessão · até {new Date(data.token.expiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small>
+					{:else}
+						<strong title={data.token.name}>{data.token.name}</strong>
+						<small class:warn={days < 7}>token · expira em {days} {days === 1 ? 'dia' : 'dias'}</small>
+					{/if}
 				</span>
 				<form method="POST" action="/sair" use:enhance>
 					<button class="logout" type="submit" title="Sair do painel">

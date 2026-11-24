@@ -1,4 +1,4 @@
-import type { TokenRef } from '../admin.ts';
+import type { CredentialKind, TokenRef } from '../admin.ts';
 
 const SESSION_COOKIE = 'lumi_admin';
 export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -6,9 +6,19 @@ const MAX_SESSIONS = 200;
 
 export interface PanelSession {
 	readonly id: string;
-	/** The lpa_ token. Lives only here, in this process's memory; never sent to the browser. */
+	/**
+	 * The lpa_ token or the lps_ session token. Lives only here, in this process's memory; never sent to the browser.
+	 */
 	readonly token: string;
-	readonly meta: { readonly id: string; readonly name: string; readonly expiresAt: number };
+	readonly meta: {
+		readonly id: string;
+		readonly name: string;
+		readonly expiresAt: number;
+		/** "session" when signed in with a username + password: "Sair" then revokes it on the server too. */
+		readonly kind?: CredentialKind;
+		readonly userId?: string;
+		readonly username?: string;
+	};
 	readonly createdAt: number;
 	readonly expiresAt: number;
 }
@@ -19,7 +29,14 @@ export function randomId(): string {
 
 export function tokenMeta(ref: TokenRef): PanelSession['meta'] {
 	const expiresAt = Date.parse(ref.expiresAt);
-	return { id: ref.id, name: ref.name, expiresAt: Number.isNaN(expiresAt) ? 0 : expiresAt };
+	return {
+		id: ref.id,
+		name: ref.name,
+		expiresAt: Number.isNaN(expiresAt) ? 0 : expiresAt,
+		kind: ref.kind,
+		userId: ref.user?.id,
+		username: ref.user?.username
+	};
 }
 
 /**
@@ -84,9 +101,9 @@ export class SessionStore {
 }
 
 /**
- * Failed logins per IP: a guard on the calls this panel makes to the API, not against guessing (a token has 256
- * random bits). Short backoff (1 s, 2 s, 4 s… up to a minute) after a few free failures; a malformed token never
- * reaches the API and isn't counted. The API keeps its own failure budget as well.
+ * Failed logins per key (an IP, or "user:<name>" for the password form): a guard on the calls this panel makes to
+ * the API. Short backoff (1 s, 2 s, 4 s… up to a minute) after a few free failures; a malformed token never reaches
+ * the API and isn't counted. The API keeps its own limits as well (per IP and per user, and the account lockout).
  */
 export class LoginThrottle {
 	readonly #failures = new Map<string, { count: number; last: number }>();

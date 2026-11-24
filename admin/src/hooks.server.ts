@@ -1,5 +1,5 @@
 import type { Handle } from '@sveltejs/kit/hooks';
-import { isPublic } from '#lib/server/guard.ts';
+import { isPublic, sameOrigin } from '#lib/server/guard.ts';
 import { cookieName, sessions } from '#lib/server/sessions.ts';
 import { THEME_COOKIE, themeOf } from '#lib/theme.ts';
 
@@ -29,6 +29,9 @@ function seeOther(location: string): Response {
 export const handle: Handle = async ({ event, resolve }) => {
 	if (event.url.pathname === '/healthz') {
 		return secure(new Response('ok\n', { headers: { 'Content-Type': 'text/plain' } }));
+	}
+	if (event.request && !sameOrigin(event.request, event.url)) {
+		return secure(new Response('Origem não permitida.\n', { status: 403, headers: { 'Content-Type': 'text/plain' } }));
 	}
 	const cookie = event.cookies.get(cookieName(event.url));
 	event.locals.session = sessions.get(cookie);

@@ -10,10 +10,27 @@ export type FederationStatus = 'active' | 'revoked' | 'severed';
 export type FederationRole = 'home' | 'follower';
 export type InviteState = 'active' | 'expired' | 'revoked' | 'exhausted';
 
+/** "token": an lpa_ token made in the terminal; "session": an lps_ session from a username + password login. */
+export type CredentialKind = 'token' | 'session';
+
 export interface TokenRef {
 	readonly id: string;
 	readonly name: string;
 	readonly expiresAt: string;
+	readonly kind: CredentialKind;
+	/** The signed-in user of a session; null for a token. */
+	readonly user: Ref | null;
+}
+
+/** What confirms revoking a credential: a session's username, a token's name. */
+export function credentialLabel(t: Pick<AdminToken, 'kind' | 'name' | 'user'>): string {
+	return t.kind === 'session' && t.user ? t.user.username : t.name;
+}
+
+/** POST /session: the lps_ token (kept by the panel's server, never sent to the browser) and what it is. */
+export interface AdminLogin {
+	readonly token: string;
+	readonly ref: TokenRef;
 }
 
 export interface AdminStatus {
@@ -57,6 +74,8 @@ export interface AdminUser {
 	readonly lastLoginAt: string | null;
 	/** Newest use of any live session. */
 	readonly lastSeenAt: string | null;
+	/** May sign in to this panel with the account's password (users.server_admin). */
+	readonly serverAdmin: boolean;
 	/** Only from GET /users/{id}. */
 	readonly ownedVaultIds: readonly string[] | null;
 }
@@ -150,6 +169,8 @@ export interface AdminToken {
 	readonly expiresAt: string;
 	readonly revokedAt: string | null;
 	readonly current: boolean;
+	readonly kind: CredentialKind;
+	readonly user: Ref | null;
 }
 
 export interface AuditEntry {
@@ -282,6 +303,8 @@ const fieldMessages: Record<string, string> = {
 };
 
 const conflictMessages: [RegExp, string][] = [
+	[/last_server_admin/, 'É o último administrador do servidor ativo: marque outra conta antes de tirar esta.'],
+	[/not an admin session/i, 'Este acesso é por token: revogue o token na página Tokens.'],
 	[/username/i, 'Esse nome de usuário já está em uso.'],
 	[/not active|already revoked|revoked/i, 'Esse vínculo de federação já não estava ativo.']
 ];
@@ -411,6 +434,8 @@ export function decodeUser(raw: unknown): AdminUser {
 		createdAt: str(o.created_at),
 		lastLoginAt: strOrNull(o.last_login_at),
 		lastSeenAt: strOrNull(o.last_seen_at),
+		// Absent on a server before migration 0009: nobody is a server admin there.
+		serverAdmin: o.server_admin === undefined ? false : bool(o.server_admin),
 		ownedVaultIds: o.owned_vault_ids === undefined ? null : list(o.owned_vault_ids, uuid)
 	};
 }
@@ -533,8 +558,33 @@ function decodeToken(raw: unknown): AdminToken {
 		lastUsedAt: strOrNull(o.last_used_at),
 		expiresAt: str(o.expires_at),
 		revokedAt: strOrNull(o.revoked_at),
-		current: bool(o.current)
+		current: bool(o.current),
+		...credential(o)
 	};
+}
+
+/** kind + user of a token or session; a server before migration 0009 sends neither (always a token). */
+function credential(o: Record<string, unknown>): { kind: CredentialKind; user: Ref | null } {
+	const kind = o.kind === undefined ? 'token' : oneOf(o.kind, ['token', 'session'] as const);
+	const user = o.user === undefined || o.user === null ? null : ref(o.user);
+	if (kind === 'session' && user === null) throw new Shape('session without user');
+	return { kind, user: kind === 'session' ? user : null };
+}
+
+export function decodeTokenRef(raw: unknown): TokenRef {
+	const t = object(raw);
+	return { id: uuid(t.id), name: str(t.name), expiresAt: str(t.expires_at), ...credential(t) };
+}
+
+/** The lps_ format of lumi-server (internal/admin/token.go): lps_ + base64url of 32 bytes. */
+const SESSION_TOKEN = /^lps_[A-Za-z0-9_-]{43}$/;
+
+export function decodeLogin(raw: unknown): AdminLogin {
+	const o = object(raw);
+	const token = str(o.token);
+	const ref = decodeTokenRef(o);
+	if (!SESSION_TOKEN.test(token) || ref.kind !== 'session') throw new Shape('admin session');
+	return { token, ref };
 }
 
 function decodeAudit(raw: unknown): AuditEntry {
@@ -553,7 +603,6 @@ function decodeAudit(raw: unknown): AuditEntry {
 
 export function decodeStatus(raw: unknown): AdminStatus {
 	const o = object(raw);
-	const t = object(o.token);
 	return {
 		version: str(o.version),
 		schemaVersion: int(o.schema_version),
@@ -567,7 +616,7 @@ export function decodeStatus(raw: unknown): AdminStatus {
 		feedConnections: int(o.feed_connections),
 		wsConnections: int(o.ws_connections),
 		startedAt: str(o.started_at),
-		token: { id: uuid(t.id), name: str(t.name), expiresAt: str(t.expires_at) },
+		token: decodeTokenRef(o.token),
 		dbLatencyMs: num(o.db_latency_ms),
 		usersDisabled: int(o.users_disabled),
 		usersLocked: int(o.users_locked),
@@ -615,6 +664,7 @@ export class AdminClient {
 	readonly #timeoutMs: number;
 	readonly #forwardedFor: string | undefined;
 
+	/** token '' makes a client without credentials: only login() works with it. */
 	constructor(baseURL: string, token: string, options: AdminClientOptions = {}) {
 		const url = new URL(baseURL);
 		if (url.protocol !== 'http:' && url.protocol !== 'https:') {
@@ -631,8 +681,33 @@ export class AdminClient {
 		return this.#json('GET', '/status', undefined, decodeStatus);
 	}
 
-	async users(o: PageOptions & { q?: string; state?: UserStateFilter } = {}): Promise<Page<AdminUser>> {
-		const qs = query({ q: o.q, state: o.state, after: o.after, limit: o.limit });
+	/**
+	 * POST /session (no token): a server admin's username + password become an lps_ session. Every refusal is the
+	 * same 401 (kind "unauthorized"); throttling is 429.
+	 */
+	async login(username: string, password: string): Promise<AdminLogin> {
+		return this.#json('POST', '/session', { username, password }, decodeLogin);
+	}
+
+	/** DELETE /session: revokes this client's own lps_ session ("Sair"). */
+	async logout(): Promise<void> {
+		return this.#empty('DELETE', '/session');
+	}
+
+	async setServerAdmin(id: string, enabled: boolean): Promise<void> {
+		return this.#empty('POST', `/users/${pathId(id)}/server-admin`, { enabled });
+	}
+
+	async users(
+		o: PageOptions & { q?: string; state?: UserStateFilter; serverAdmin?: boolean } = {}
+	): Promise<Page<AdminUser>> {
+		const qs = query({
+			q: o.q,
+			state: o.state,
+			server_admin: o.serverAdmin ? true : undefined,
+			after: o.after,
+			limit: o.limit
+		});
 		return this.#json('GET', `/users${qs}`, undefined, (r) => page(r, decodeUser));
 	}
 
@@ -788,10 +863,8 @@ export class AdminClient {
 	}
 
 	async #send(method: string, path: string, body: unknown): Promise<Response> {
-		const headers: Record<string, string> = {
-			Authorization: `Bearer ${this.#token}`,
-			Accept: 'application/json'
-		};
+		const headers: Record<string, string> = { Accept: 'application/json' };
+		if (this.#token) headers.Authorization = `Bearer ${this.#token}`;
 		if (this.#forwardedFor) headers['X-Forwarded-For'] = this.#forwardedFor;
 		if (body !== undefined) headers['Content-Type'] = 'application/json';
 		let res: Response;

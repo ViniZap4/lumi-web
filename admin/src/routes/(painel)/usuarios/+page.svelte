@@ -114,7 +114,10 @@
 									<span>{u.username}{#if u.displayName}<span class="sub">{u.displayName}</span>{/if}</span>
 								</a>
 							</td>
-							<td data-label="Estado"><StatePill state={u.state} /></td>
+							<td data-label="Estado">
+								<StatePill state={u.state} />
+								{#if u.serverAdmin}<StatePill state="admin" label="admin do servidor" />{/if}
+							</td>
 							<td data-label="Último acesso" title={formatDateTime(u.lastSeenAt ?? u.lastLoginAt)}>
 								{u.lastSeenAt || u.lastLoginAt ? formatRelative(u.lastSeenAt ?? u.lastLoginAt) : 'nunca'}
 							</td>

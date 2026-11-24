@@ -30,3 +30,14 @@ export function searchOf(url: URL): string | undefined {
 
 /** The token format of lumi-server (internal/admin/token.go): lpa_ + base64url of 32 bytes. */
 export const TOKEN_RE = /^lpa_[A-Za-z0-9_-]{43}$/;
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Every state-changing request must come from this panel's own pages. Kit checks the Origin of form posts already;
+ * this covers every other content type too, and the login (which has no session cookie yet for SameSite to guard).
+ */
+export function sameOrigin(request: Request, url: URL): boolean {
+	if (SAFE_METHODS.has(request.method)) return true;
+	return request.headers.get('origin') === url.origin;
+}

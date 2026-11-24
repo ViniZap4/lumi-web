@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { type AdminVault, isSessionId, isUUID } from '#lib/admin.ts';
-import { act, field, invalid, read, readOptional } from '#lib/server/api.ts';
+import { act, field, invalid, read, readOptional, signOut } from '#lib/server/api.ts';
 import { generatePassword } from '#lib/server/password.ts';
 import { confirmed, passwordProblem } from '#lib/rules.ts';
 import type { Actions, PageServerLoad } from './$types';
@@ -63,6 +63,29 @@ export const actions: Actions = {
 			api.disableUser(userId(event.params.id))
 		),
 	enable: (event) => act(event, 'Usuário reativado.', (api) => api.enableUser(userId(event.params.id))),
+	/**
+	 * The server_admin flag (SPEC-PARTE2 §10): lets the account sign in to this panel with its password. The API
+	 * refuses to clear the last active server admin (409), whoever asks.
+	 */
+	serverAdmin: async (event) => {
+		const id = userId(event.params.id);
+		const raw = field(await event.request.formData(), 'enabled');
+		if (raw !== 'true' && raw !== 'false') return invalid('Valor inválido.');
+		const enabled = raw === 'true';
+		const result = await act(
+			event,
+			enabled
+				? 'Agora a conta é administradora do servidor e pode entrar no painel com a senha.'
+				: 'A conta deixou de ser administradora do servidor; as sessões dela no painel foram encerradas.',
+			(api) => api.setServerAdmin(id, enabled)
+		);
+		// Losing the flag ends this panel's own session too when it was that account's (the API revoked it).
+		const self = event.locals.session;
+		if (!enabled && 'ok' in result && result.ok && self?.meta.kind === 'session' && self.meta.userId === id) {
+			signOut(event, self);
+		}
+		return result;
+	},
 	unlock: (event) =>
 		act(event, 'Usuário desbloqueado: falhas de login zeradas.', (api) => api.unlockUser(userId(event.params.id))),
 	revokeSession: async (event) => {

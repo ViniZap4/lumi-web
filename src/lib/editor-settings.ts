@@ -68,7 +68,20 @@ export interface EditorSettings {
   /** Hovering a note link for ~350 ms shows a preview card (`K` always
    *  works from the keyboard). */
   hoverPreview: boolean;
+  /** Reading measure for the reader, Live Preview and split preview
+   *  ("Largura de leitura"): narrow 68ch, medium 84ch (default), wide
+   *  110ch, full = the whole pane with a comfortable gutter. */
+  readingWidth: ReadingWidth;
+  /** Row density of the explorer and lists ("Densidade"). */
+  density: Density;
 }
+
+export type ReadingWidth = 'narrow' | 'medium' | 'wide' | 'full';
+export type Density = 'comfortable' | 'compact';
+export const READING_WIDTHS: readonly ReadingWidth[] = ['narrow', 'medium', 'wide', 'full'];
+export const DENSITIES: readonly Density[] = ['comfortable', 'compact'];
+/** CSS value of --md-measure per reading width (app.css mirrors this). */
+export const READING_MEASURE: Record<ReadingWidth, string> = { narrow: '68ch', medium: '84ch', wide: '110ch', full: '100%' };
 
 export const STORAGE_KEY = 'lumi.v2.editor';
 
@@ -103,6 +116,8 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   paneNav: true,
   previewCursorSync: false,
   hoverPreview: true,
+  readingWidth: 'medium',
+  density: 'comfortable',
 });
 
 export const PREVIEW_RATIO_MIN = 0.25;
@@ -207,6 +222,8 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     paneNav: bool(o.paneNav, d.paneNav),
     previewCursorSync: bool(o.previewCursorSync, d.previewCursorSync),
     hoverPreview: bool(o.hoverPreview, d.hoverPreview),
+    readingWidth: (READING_WIDTHS as readonly unknown[]).includes(o.readingWidth) ? (o.readingWidth as ReadingWidth) : d.readingWidth,
+    density: (DENSITIES as readonly unknown[]).includes(o.density) ? (o.density as Density) : d.density,
   };
 }
 

@@ -145,9 +145,11 @@
     }
     view = v;
   }
+  /** Height of the floating title bar (.cv-bar) over the board. */
+  const BAR_H = 36;
   function fitAll(ease = true): void {
-    setView(fitRect(boundsOf(nodes), w, h - 44, 56), ease);
-    view = { ...view, y: view.y + 44 };
+    setView(fitRect(boundsOf(nodes), w, h - BAR_H, 40), ease);
+    view = { ...view, y: view.y + BAR_H };
   }
   $effect(() => {
     if (!fitted && w > 0 && h > 0 && parsed.ok) {
@@ -172,8 +174,8 @@
   function reveal(n: CanvasNode): void {
     const a = toScreen(view, { x: n.x, y: n.y });
     const b = toScreen(view, { x: n.x + n.width, y: n.y + n.height });
-    if (a.x >= 0 && a.y >= 44 && b.x <= w && b.y <= h) return;
-    setView({ ...view, x: w / 2 - (n.x + n.width / 2) * view.zoom, y: (h + 44) / 2 - (n.y + n.height / 2) * view.zoom }, true);
+    if (a.x >= 0 && a.y >= BAR_H && b.x <= w && b.y <= h) return;
+    setView({ ...view, x: w / 2 - (n.x + n.width / 2) * view.zoom, y: (h + BAR_H) / 2 - (n.y + n.height / 2) * view.zoom }, true);
   }
 
   // Wheel: non-passive so Ctrl/Cmd+wheel (and trackpad pinch) can zoom.
@@ -1078,12 +1080,12 @@
     left: 0;
     right: 0;
     top: 0;
-    height: 44px;
+    height: 36px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 0 16px;
+    padding: 0 8px 0 14px;
     background: color-mix(in srgb, var(--color-background) 86%, transparent);
     backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--hairline);
@@ -1091,7 +1093,7 @@
     z-index: 5;
   }
   .cv-lead { display: flex; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; }
-  .cv-title { font-weight: 600; font-size: var(--text-lg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cv-title { font-weight: 600; font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cv-meta, .cv-status { color: var(--color-text-dim); font-size: var(--text-xs); white-space: nowrap; }
   .cv-status { padding: 1px 6px; border-radius: 999px; background: var(--tint-hover); }
   .cv-pending { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-primary); }
@@ -1110,7 +1112,7 @@
     z-index: 5;
   }
   .cv-banner.warn { background: color-mix(in srgb, var(--color-warning) 14%, var(--color-background)); border-color: color-mix(in srgb, var(--color-warning) 40%, transparent); }
-  .cv-empty { position: absolute; inset: 44px 0 0; display: grid; place-items: center; color: var(--color-text-dim); font-size: var(--text-sm); pointer-events: none; }
+  .cv-empty { position: absolute; inset: 36px 0 0; display: grid; place-items: center; color: var(--color-text-dim); font-size: var(--text-sm); pointer-events: none; }
   .cv-tools {
     position: absolute;
     right: 16px;

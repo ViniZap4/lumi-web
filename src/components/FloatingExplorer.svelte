@@ -155,7 +155,8 @@
   // Narrow screens: a full-height sheet with touch-sized rows.
   let mqNarrow = $state(false);
   const sheet = $derived(narrowProp ?? mqNarrow);
-  const rowH = $derived(sheet ? 44 : 30);
+  // Settings → Densidade: compact rows (24 px) fit ~25% more per column.
+  const rowH = $derived(sheet ? 44 : editorSettings.value.density === 'compact' ? 24 : 30);
 
   // Start at the current note's folder, cursor on the note.
   untrack(() => {
@@ -1038,8 +1039,10 @@
   }
   .fx {
     position: relative;
-    width: min(1200px, 80vw);
-    height: min(820px, 80vh);
+    /* Most of the viewport (the note behind is dimmed anyway), capped
+       so a 2560 px screen does not get a sprawling panel. */
+    width: min(1680px, 90vw);
+    height: min(1180px, 86vh);
     display: flex;
     flex-direction: column;
     background: var(--glass-bg);

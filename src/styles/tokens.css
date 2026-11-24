@@ -129,7 +129,7 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-pill: 999px;
-  --bar-h: 26px;
+  --bar-h: 24px;
 
   /* 5 ── motion (lib/motion.ts SPRING; pair each easing with its -ms) */
   --spring-snappy: linear(0, 0.039, 0.135, 0.245, 0.371, 0.481, 0.59, 0.676, 0.749, 0.814, 0.861, 0.902, 0.93, 0.953, 0.969, 0.98, 0.989, 0.994, 0.998, 1, 1.002, 1);

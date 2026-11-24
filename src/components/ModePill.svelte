@@ -48,13 +48,14 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     line-height: 1.5em;
-    background: color-mix(in srgb, var(--m) 16%, transparent);
+    background: color-mix(in oklch, var(--m) 16%, transparent);
     color: var(--m);
-    transition: width var(--spring-snappy-ms, 200ms) var(--spring-snappy, ease-out), background 140ms ease, color 140ms ease;
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--m) 28%, transparent), 0 0 12px -3px color-mix(in oklch, var(--m) 55%, transparent);
+    transition: width var(--spring-glide-ms, 220ms) var(--spring-glide, ease-out), background var(--dur-fade) ease, color var(--dur-fade) ease, box-shadow var(--dur-fade) ease;
   }
-  .mode-pill[data-mode='insert'] { --m: var(--color-accent); }
-  .mode-pill[data-mode='visual'] { --m: var(--color-secondary); }
-  .mode-pill[data-mode='replace'] { --m: var(--color-error); }
+  .mode-pill[data-mode='insert'] { --m: var(--mode-insert); }
+  .mode-pill[data-mode='visual'] { --m: var(--mode-visual); }
+  .mode-pill[data-mode='replace'] { --m: var(--mode-replace); }
   .mode-pill[data-mode='plain'] { display: none; }
   .txt { grid-area: 1 / 1; white-space: nowrap; }
   .measure { position: absolute; visibility: hidden; white-space: nowrap; pointer-events: none; }

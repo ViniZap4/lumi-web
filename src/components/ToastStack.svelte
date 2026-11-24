@@ -29,7 +29,7 @@
       out:fly={{ y: 8, duration: dur(140), opacity: 0 }}
       onclick={() => toasts.dismiss(t.id)}
       title="Dismiss"
-    >{t.text}</button>
+    ><span class="tone-dot" aria-hidden="true"></span>{t.text}</button>
   {/each}
 </div>
 
@@ -52,9 +52,11 @@
     padding: 6px 14px;
     border: 1px solid var(--hairline);
     border-radius: 999px;
-    background: color-mix(in srgb, var(--color-overlay-bg) 40%, var(--color-background));
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
     color: var(--color-text);
-    box-shadow: var(--shadow-pop);
+    box-shadow: var(--elev-3), var(--edge-light);
     font-size: var(--text-xs);
     font-family: var(--font-ui);
     text-align: center;
@@ -63,6 +65,13 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .toast.warn { border-color: color-mix(in srgb, var(--color-warning) 45%, transparent); background: color-mix(in srgb, var(--color-warning) 12%, var(--color-background)); }
-  .toast.error { border-color: color-mix(in srgb, var(--color-error) 45%, transparent); background: color-mix(in srgb, var(--color-error) 12%, var(--color-background)); }
+  .toast { display: inline-flex; align-items: center; gap: 8px; transition: transform var(--spring-snappy-ms) var(--spring-snappy); }
+  .toast:hover { transform: translateY(-1px); }
+  .toast:active { transform: scale(0.97); }
+  /* Tone: a small dot, never a whole coloured slab; an error shakes once. */
+  .tone-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: pop-in var(--spring-bouncy-ms) var(--spring-bouncy) 80ms both; }
+  .toast.warn { border-color: color-mix(in oklch, var(--color-warning) 40%, transparent); }
+  .toast.warn .tone-dot { background: var(--color-warning); box-shadow: 0 0 8px color-mix(in oklch, var(--color-warning) 60%, transparent); }
+  .toast.error { border-color: color-mix(in oklch, var(--color-error) 45%, transparent); animation: shake 360ms var(--ease) 120ms both; }
+  .toast.error .tone-dot { background: var(--color-error); box-shadow: 0 0 8px color-mix(in oklch, var(--color-error) 60%, transparent); }
 </style>

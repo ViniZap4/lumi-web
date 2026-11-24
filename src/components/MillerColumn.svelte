@@ -236,11 +236,11 @@
     height: 100%;
     min-height: 0;
     outline: none;
-    padding: 0 4px;
+    padding: 0 6px;
   }
   .spacer {
     position: relative;
-    margin: 4px 0;
+    margin: 6px 0;
   }
   .row {
     position: absolute;
@@ -248,40 +248,53 @@
     right: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 8px;
+    gap: 9px;
+    padding: 0 10px;
     box-sizing: border-box;
     cursor: pointer;
     border-radius: var(--radius-sm);
     color: var(--color-text);
     font-size: var(--text-sm);
+    letter-spacing: var(--tracking-ui);
     user-select: none;
+    transition: background var(--dur-tap) var(--ease), color var(--dur-fade) var(--ease);
   }
   .row:hover { background: var(--tint-hover); }
   .row.cursor { background: var(--tint-hover); }
-  .miller-col.active .row.cursor {
-    background: transparent;
-  }
+  .miller-col.active .row.cursor { background: transparent; }
+  /* The cursor is a lit slab that GLIDES between rows (glide spring, a
+     1% overshoot so it arrives and settles); its accent edge and soft
+     under-glow make it read as "where you are" from across the room. */
   .glide {
     position: absolute;
     left: 0;
     right: 0;
     top: 0;
     border-radius: var(--radius-sm);
-    background: var(--tint-active);
-    box-shadow: inset 2px 0 0 var(--color-primary);
-    transition: transform var(--dur-1, 140ms) var(--spring-snappy, cubic-bezier(0.2, 0.9, 0.3, 1.1));
+    background: linear-gradient(90deg, var(--accent-soft), color-mix(in oklch, var(--color-primary) 6%, transparent));
+    box-shadow: inset 0 0 0 1px var(--accent-wash), 0 8px 20px -12px var(--accent-glow);
+    transition: transform var(--spring-glide-ms) var(--spring-glide);
     will-change: transform;
     pointer-events: none;
   }
-  .miller-col.active:focus-visible .glide { box-shadow: inset 2px 0 0 var(--color-primary), inset 0 0 0 1px var(--ring); }
-  .row.open .name { color: var(--color-primary); font-weight: 550; }
+  .glide::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 5px;
+    bottom: 5px;
+    width: 2.5px;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  .miller-col.active:focus-visible .glide { box-shadow: inset 0 0 0 1px var(--ring), 0 8px 20px -12px var(--accent-glow); }
+  .row.open .name { color: var(--accent-ink); font-weight: 600; }
   .row.yanked .name { text-decoration: underline dashed var(--color-warning); text-underline-offset: 3px; }
   .row.virtual { opacity: 0.75; }
   .row.drop-target {
-    background: var(--tint-active);
-    outline: 1px dashed var(--color-primary);
-    outline-offset: -1px;
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent-line), 0 0 16px -4px var(--accent-glow);
   }
   .row.virtual .icon { color: var(--color-warning); }
   .icon {
@@ -289,26 +302,61 @@
     height: 14px;
     flex: none;
     display: inline-flex;
-    color: var(--color-text-dim);
+    color: var(--ink-3);
+    transition: color var(--dur-fade) var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy);
   }
-  .row.folder .icon { color: var(--color-secondary); }
-  .row.cursor .icon { color: var(--color-primary); }
+  .row.folder .icon { color: color-mix(in oklch, var(--color-secondary) 85%, var(--color-text)); }
+  .row.cursor .icon { color: var(--accent); }
+  .miller-col.active .row.cursor.folder .icon { transform: scale(1.08); }
   .name {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .miller-col.active .row.cursor .name { font-weight: 550; }
   .count {
     flex: none;
     font-family: var(--font-mono);
     font-size: var(--text-2xs);
-    color: var(--color-text-dim);
+    color: var(--ink-4);
   }
-  .chev { flex: none; color: var(--color-text-dim); font-size: 14px; line-height: 1; margin-left: -2px; }
+  .chev { flex: none; color: var(--ink-4); font-size: 14px; line-height: 1; margin-left: -2px; transition: transform var(--spring-snappy-ms) var(--spring-snappy), color var(--dur-fade) var(--ease); }
+  .row.cursor .chev { color: var(--accent); transform: translateX(2px); }
+  /* Inline actions (Open · Open right · Open below): on the hovered row
+     and the cursor row; they slide in from the right edge. */
+  .row-acts {
+    flex: none;
+    display: inline-flex;
+    gap: 2px;
+    margin-right: -6px;
+    opacity: 0;
+    transform: translateX(6px);
+    pointer-events: none;
+    transition: opacity var(--dur-fade) var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy);
+  }
+  .row:hover .row-acts, .miller-col.active .row.cursor .row-acts { opacity: 1; transform: none; pointer-events: auto; }
+  .row-acts button {
+    display: inline-grid;
+    place-items: center;
+    height: 20px;
+    min-width: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--hairline-soft);
+    border-radius: var(--radius-xs);
+    background: var(--surface-1);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--dur-tap) var(--ease), color var(--dur-fade) var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy), border-color var(--dur-fade) var(--ease);
+  }
+  .row-acts button:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
+  .row-acts button:active { transform: scale(0.92); }
   .empty {
-    padding: var(--sp-5) var(--sp-3);
-    color: var(--color-text-dim);
+    padding: var(--sp-6) var(--sp-3);
+    color: var(--ink-3);
     font-size: var(--text-xs);
     text-align: center;
   }

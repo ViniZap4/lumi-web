@@ -202,7 +202,7 @@
     font-size: var(--text-lg);
     color: var(--color-text);
   }
-  .input::placeholder { color: var(--color-text-dim); }
+  .input::placeholder { color: var(--ink-3); }
   .list {
     list-style: none;
     overflow-y: auto;
@@ -220,8 +220,9 @@
     cursor: pointer;
     font-size: var(--text-sm);
   }
-  .item.cursor { background: var(--tint-active); }
-  .icon { color: var(--color-text-dim); display: inline-flex; }
+  .item.cursor { background: linear-gradient(90deg, var(--accent-soft), var(--accent-wash)); box-shadow: inset 2px 0 0 var(--accent), 0 6px 16px -12px var(--accent-glow); }
+  .item.cursor .icon { color: var(--accent); }
+  .icon { color: var(--ink-3); display: inline-flex; }
   .item.cursor .icon { color: var(--color-primary); }
   .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .detail {
@@ -232,7 +233,7 @@
     white-space: nowrap;
     font-family: var(--font-mono);
     font-size: var(--text-2xs);
-    color: var(--color-text-dim);
+    color: var(--ink-3);
   }
-  .none { padding: var(--sp-4); color: var(--color-text-dim); font-size: var(--text-sm); text-align: center; }
+  .none { padding: var(--sp-4); color: var(--ink-3); font-size: var(--text-sm); text-align: center; }
 </style>

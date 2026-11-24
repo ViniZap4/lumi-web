@@ -58,7 +58,7 @@
   import { selectorOrder } from '../lib/books-model.ts';
   import { STATE_LABEL } from '../lib/bookstatus.ts';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
-  import { stagger } from '../lib/motion.ts';
+  import { stagger, animate, SPRING } from '../lib/motion.ts';
   import type { OpenWhere } from '../lib/link-open.ts';
   import MillerColumn from './MillerColumn.svelte';
   import MarkdownView from './MarkdownView.svelte';
@@ -270,6 +270,29 @@
     const host = level === 'books' ? booksEl : colEl;
     if (host) stagger(Array.from(host.querySelectorAll<HTMLElement>('[role="option"]')).slice(0, 14));
   }
+
+  // Folder travel (l / h): the columns shift like a camera moving one
+  // step deeper or back — the new current column slides in from the
+  // side you are heading to, its rows ripple in, the preview fades up.
+  // Fire-and-forget; keys typed mid-animation apply at once.
+  let lastDir: string | null = null;
+  $effect(() => {
+    const d = nav.dir;
+    const prev = untrack(() => lastDir);
+    lastDir = d;
+    if (prev == null || prev === d || level !== 'files') return;
+    const deeper = d.length > prev.length && d.startsWith(prev);
+    const s = SPRING.gentle;
+    void tick().then(() => {
+      const cols = rootEl?.querySelectorAll<HTMLElement>('.fx-col');
+      if (!cols || cols.length < 3) return;
+      const dx = deeper ? 14 : -14;
+      animate(cols[0], [{ opacity: 0.5, transform: `translateX(${dx * 0.6}px)` }, { opacity: 1, transform: 'none' }], s.ms, s.easing);
+      animate(cols[1], [{ opacity: 0.35, transform: `translateX(${dx}px)` }, { opacity: 1, transform: 'none' }], s.ms, s.easing);
+      animate(cols[2], [{ opacity: 0 }, { opacity: 1 }], s.ms, s.easing, 40);
+      if (colEl) stagger(Array.from(colEl.querySelectorAll<HTMLElement>('[role="option"]')).slice(0, 12), { step: 14, max: 120, y: 0 });
+    });
+  });
 
   function runInitial(): void {
     switch (initial) {
@@ -997,6 +1020,9 @@
 {/if}
 
 <style>
+  /* The explorer floats: a dim, slightly vignetted scrim (no blur — the
+     panel's own glass does the blurring, one layer only) and a glass
+     panel lit from above. */
   .fx-scrim {
     position: fixed;
     inset: 0;
@@ -1004,46 +1030,67 @@
     display: grid;
     place-items: center;
     padding: var(--sp-4);
-    background: color-mix(in srgb, var(--color-overlay-bg) 45%, rgba(0, 0, 0, 0.4));
-    backdrop-filter: blur(3px) saturate(1.1);
-    animation: ui-fade 160ms var(--ease);
+    background:
+      radial-gradient(120% 90% at 50% 40%, transparent 40%, rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.55))),
+      var(--scrim);
+    animation: ui-fade var(--dur-fade) var(--ease);
+    transition: background-color var(--dur-fade) var(--ease), opacity var(--dur-fade) var(--ease);
   }
   .fx {
+    position: relative;
     width: min(1200px, 80vw);
     height: min(820px, 80vh);
     display: flex;
     flex-direction: column;
-    background: var(--color-background);
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
     border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pop), 0 0 0 1px color-mix(in srgb, var(--color-text) 4%, transparent);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--elev-4), var(--edge-light);
     overflow: hidden;
     outline: none;
-    /* Settles with a slight spring (app.css tokens). */
-    animation: settle-in var(--dur-3, 260ms) var(--spring-bouncy, cubic-bezier(0.2, 0.9, 0.3, 1.15)) both;
-    transform-origin: 50% 40%;
+    /* Settles with a slight spring. */
+    animation: fx-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+    transform-origin: 50% 35%;
+    transition: opacity var(--dur-fade) var(--ease), transform var(--spring-gentle-ms) var(--spring-gentle);
   }
+  @keyframes fx-in { from { opacity: 0; transform: translateY(10px) scale(0.965); } 30% { opacity: 1; } }
+  /* A faint wash of the accent along the top edge: the panel's "light". */
+  .fx::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 120px;
+    background: radial-gradient(60% 100% at 30% 0%, var(--accent-wash), transparent 70%);
+    pointer-events: none;
+  }
+  /* Dragging a note out to a pane edge: the overlay steps aside. */
+  .fx-scrim.dragging-out { pointer-events: none; background: transparent; }
+  .fx-scrim.dragging-out .fx { opacity: 0.22; transform: scale(0.94); }
   .fx-head {
+    position: relative;
     flex: none;
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    height: 40px;
-    padding: 0 var(--sp-2) 0 var(--sp-3);
-    border-bottom: 1px solid var(--hairline);
-    background: color-mix(in srgb, var(--color-overlay-bg) 35%, var(--color-background));
+    height: 44px;
+    padding: 0 var(--sp-2) 0 var(--sp-4);
+    border-bottom: 1px solid var(--hairline-soft);
   }
-  .fx-glyph { flex: none; color: var(--color-primary); }
+  .fx-glyph { flex: none; color: var(--accent); filter: drop-shadow(0 0 6px var(--accent-glow)); }
   .fx-up { flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin-left: -6px; border: none; border-radius: var(--radius); background: transparent; color: var(--color-text); cursor: pointer; }
   .fx-up:active { background: var(--tint-active); }
   .fx-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; font-size: var(--text-sm); }
-  .fx-crumb { border: none; background: transparent; color: var(--color-text-dim); padding: 3px 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: inherit; }
+  .fx-crumb { border: none; background: transparent; color: var(--ink-3); padding: 3px 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: inherit; transition: background var(--dur-tap) var(--ease), color var(--dur-fade) var(--ease); }
   .fx-crumb.static { cursor: default; }
   .fx-crumb:not(.static):hover { background: var(--tint-hover); color: var(--color-text); }
-  .fx-crumb[aria-current='location'] { color: var(--color-text); font-weight: 600; }
-  .fx-sep { color: var(--color-text-dim); opacity: 0.5; }
+  .fx-crumb[aria-current='location'] { color: var(--color-text); font-weight: 600; animation: crumb-in var(--spring-gentle-ms) var(--spring-gentle) both; }
+  @keyframes crumb-in { from { opacity: 0; transform: translateX(-4px); } }
+  .fx-sep { color: var(--ink-4); }
   .fx-pending { color: var(--color-warning); font-size: var(--text-xs); }
   .fx-cols {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: grid;
@@ -1051,72 +1098,79 @@
   }
   .fx.no-preview .fx-cols { grid-template-columns: minmax(140px, 0.85fr) minmax(0, 3fr) 0; }
   .fx.no-preview .fx-preview { display: none; }
-  .fx-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--hairline); }
-  .fx-parent { background: color-mix(in srgb, var(--color-overlay-bg) 30%, var(--color-background)); }
-  .fx-preview { border-right: none; overflow-y: auto; }
-  .fx-book { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-4) var(--sp-3); cursor: pointer; border-radius: var(--radius); margin: 4px; }
+  .fx-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--hairline-soft); }
+  .fx-parent { background: color-mix(in oklch, var(--surface-sunk) 45%, transparent); }
+  .fx-parent :global(.row) { color: var(--ink-2); }
+  .fx-preview { border-right: none; overflow-y: auto; background: color-mix(in oklch, var(--surface-0) 55%, transparent); }
+  .fx-book { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-4) var(--sp-3); cursor: pointer; border-radius: var(--radius); margin: 6px; transition: background var(--dur-tap) var(--ease); }
   .fx-book:hover { background: var(--tint-hover); }
-  .fx-book-name { font-weight: 600; }
-  .fx-book-meta { font-size: var(--text-xs); color: var(--color-text-dim); }
-  .fx-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px; outline: none; }
+  .fx-book-name { font-weight: 650; letter-spacing: var(--tracking-ui); }
+  .fx-book-meta { font-size: var(--text-xs); color: var(--ink-3); }
+  .fx-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; outline: none; }
   .fx-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 8px;
+    padding: 0 10px;
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
     cursor: pointer;
     user-select: none;
-    transition: background var(--dur-1, 120ms) var(--ease);
+    transition: background var(--dur-tap) var(--ease);
   }
   .fx-row:hover { background: var(--tint-hover); }
   .fx-row.cursor { background: var(--tint-hover); }
-  .fx-list.active .fx-row.cursor { background: var(--tint-active); box-shadow: inset 2px 0 0 var(--color-primary); }
-  .fx-list.active:focus-visible .fx-row.cursor { box-shadow: inset 2px 0 0 var(--color-primary), inset 0 0 0 1px var(--ring); }
-  .fx-row.current .fx-row-name { color: var(--color-primary); font-weight: 600; }
+  .fx-list.active .fx-row.cursor {
+    background: linear-gradient(90deg, var(--accent-soft), var(--accent-wash));
+    box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px var(--accent-wash), 0 6px 18px -10px var(--accent-glow);
+  }
+  .fx-list.active:focus-visible .fx-row.cursor { box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px var(--ring); }
+  .fx-row.current .fx-row-name { color: var(--accent-ink); font-weight: 600; }
   .fx-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fx-row-meta { flex: none; font-size: var(--text-2xs); color: var(--color-text-dim); }
-  .chev { flex: none; color: var(--color-text-dim); }
+  .fx-row-meta { flex: none; font-size: var(--text-2xs); color: var(--ink-3); }
+  .chev { flex: none; color: var(--ink-3); }
   .fx-bookline { margin: 0 0 var(--sp-2); font-size: var(--text-sm); }
-  .fx-bookline.dim { color: var(--color-text-dim); font-size: var(--text-xs); }
-  .fx-mini { margin: 0; padding-left: 1.1em; font-size: var(--text-sm); color: var(--color-text-dim); }
-  .fx-filter { display: flex; align-items: center; gap: var(--sp-2); height: 32px; padding: 0 var(--sp-3); border-bottom: 1px solid var(--hairline); background: var(--tint-primary); }
-  .fx-slash { font-family: var(--font-mono); color: var(--color-primary); font-weight: 700; }
+  .fx-bookline.dim { color: var(--ink-3); font-size: var(--text-xs); }
+  .fx-mini { margin: 0; padding-left: 1.1em; font-size: var(--text-sm); color: var(--ink-3); }
+  .fx-filter { display: flex; align-items: center; gap: var(--sp-2); height: 34px; padding: 0 var(--sp-3); border-bottom: 1px solid var(--accent-soft); background: var(--accent-wash); animation: ui-rise var(--spring-snappy-ms) var(--spring-snappy); }
+  .fx-slash { font-family: var(--font-mono); color: var(--accent); font-weight: 700; }
   .fx-filter-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--color-text); font-family: var(--font-mono); font-size: var(--text-sm); }
-  .fx-count { font-size: var(--text-2xs); color: var(--color-text-dim); }
-  .fx-note { padding: var(--sp-4) var(--sp-5) var(--sp-6); }
-  .fx-note-head { display: flex; flex-direction: column; gap: 2px; padding-bottom: var(--sp-3); margin-bottom: var(--sp-3); border-bottom: 1px solid color-mix(in srgb, var(--hairline) 60%, transparent); }
-  .fx-note-title { font-weight: 650; font-size: var(--text-lg); letter-spacing: -0.01em; }
-  .fx-note-meta { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-dim); }
-  .fx-empty { padding: var(--sp-6); text-align: center; color: var(--color-text-dim); font-size: var(--text-sm); }
+  .fx-count { font-size: var(--text-2xs); color: var(--ink-3); }
+  /* The preview: a note card that resolves out of its skeleton. */
+  .fx-note { padding: var(--sp-5) var(--sp-5) var(--sp-6); animation: resolve-in var(--spring-gentle-ms) var(--spring-gentle) both; }
+  .fx-note-head { display: flex; flex-direction: column; gap: 3px; padding-bottom: var(--sp-3); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--hairline-soft); }
+  .fx-note-title { font-weight: 700; font-size: var(--text-xl); letter-spacing: var(--tracking-tight); line-height: 1.2; }
+  .fx-note-meta { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--ink-3); }
+  .fx-empty { padding: var(--sp-6); text-align: center; color: var(--ink-3); font-size: var(--text-sm); }
   .fx-empty.err { color: var(--color-error); }
   .fx-skel { display: flex; flex-direction: column; gap: 10px; }
   .fx-skel span { display: block; height: 10px; border-radius: 5px; }
   .fx-skel .short { width: 55%; }
   .fx-skel .mid { width: 78%; }
   .fx-bar, .fx-status {
+    position: relative;
     flex: none;
     display: flex;
     align-items: center;
-    gap: var(--sp-2);
+    gap: var(--sp-3);
     min-height: 34px;
-    padding: 0 var(--sp-3);
-    border-top: 1px solid var(--hairline);
+    padding: 0 var(--sp-3) 0 var(--sp-4);
+    border-top: 1px solid var(--hairline-soft);
     font-size: var(--text-xs);
   }
-  .fx-bar { background: color-mix(in srgb, var(--color-overlay-bg) 55%, var(--color-background)); animation: ui-rise 160ms var(--spring-snappy, var(--ease)); }
-  .fx-bar.danger { background: color-mix(in srgb, var(--color-error) 8%, var(--color-background)); font-size: var(--text-sm); }
-  .fx-tag { padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-primary); color: var(--color-background); }
-  .fx-dir { color: var(--color-text-dim); }
+  .fx-bar { background: var(--surface-1); animation: ui-rise var(--spring-snappy-ms) var(--spring-snappy); }
+  .fx-bar.danger { background: color-mix(in oklch, var(--color-error) 9%, var(--surface-1)); font-size: var(--text-sm); animation: ui-rise var(--spring-snappy-ms) var(--spring-snappy), shake 360ms var(--ease) 60ms; }
+  .fx-status { background: color-mix(in oklch, var(--surface-sunk) 50%, transparent); }
+  .fx-stat { flex: none; color: var(--ink-4); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+  .fx-tag { padding: 2px 8px; border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-primary); color: var(--color-background); box-shadow: 0 0 12px -2px var(--accent-glow); }
+  .fx-dir { color: var(--ink-3); }
   .fx-input { flex: 1; min-width: 60px; border: none; outline: none; background: transparent; color: var(--color-text); font-size: var(--text-sm); }
-  .fx-hint { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-dim); }
+  .fx-hint { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
   .fx-hint.err { color: var(--color-error); }
-  .fx-status { color: var(--color-text-dim); font-size: var(--text-2xs); }
-  .fx-flash { color: var(--color-text); background: var(--tint-active); padding: 1px 8px; border-radius: 4px; animation: ui-rise 160ms var(--spring-snappy, var(--ease)); }
-  .fx-link { border: none; background: transparent; color: var(--color-text-dim); font: inherit; cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm); }
+  .fx-flash { flex: none; color: var(--color-text); background: var(--accent-soft); padding: 1px 8px; border-radius: var(--radius-xs); font-size: var(--text-2xs); animation: badge-pop var(--spring-bouncy-ms) var(--spring-bouncy) both; }
+  @keyframes badge-pop { from { opacity: 0; transform: scale(0.85) translateY(3px); } }
+  .fx-link { flex: none; border: none; background: transparent; color: var(--ink-3); font: inherit; font-size: var(--text-2xs); cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm); }
   .fx-link:hover { color: var(--color-text); background: var(--tint-hover); }
-  .fx-spacer { flex: 1; }
   .mono { font-family: var(--font-mono); }
 
   /* ── narrow: a full-height sheet, one column, touch-sized rows ── */
@@ -1125,19 +1179,17 @@
     width: 100%;
     height: calc(100% - 12px);
     height: calc(100dvh - 12px);
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-bottom: none;
-    animation: sheet-up var(--dur-3, 280ms) var(--spring-gentle, cubic-bezier(0.2, 0.9, 0.3, 1)) both;
+    animation: sheet-up var(--spring-gentle-ms) var(--spring-gentle) both;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
   @keyframes sheet-up { from { transform: translateY(100%); } }
-  .fx-grab { flex: none; width: 36px; height: 4px; margin: 6px auto 0; border-radius: 2px; background: color-mix(in srgb, var(--color-text) 22%, transparent); }
+  .fx-grab { flex: none; width: 36px; height: 4px; margin: 6px auto 0; border-radius: 2px; background: color-mix(in oklch, var(--color-text) 22%, transparent); }
   .fx.sheet .fx-head { height: 48px; background: transparent; }
   .fx.sheet .fx-cols { grid-template-columns: minmax(0, 1fr); }
   .fx.sheet .fx-parent, .fx.sheet .fx-preview { display: none; }
   .fx.sheet .fx-current { border-right: none; }
   .fx.sheet .fx-row { font-size: var(--text-md); }
   .fx.sheet .fx-current :global(.row) { font-size: var(--text-md); }
-  @media (max-width: 720px) {
-    }
 </style>

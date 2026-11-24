@@ -233,8 +233,42 @@
       from: { backgroundColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)' },
       to: { backgroundColor: 'color-mix(in srgb, var(--color-accent) 0%, transparent)' },
     },
-    '.cm-ySelectionCaret': { borderLeftWidth: '2px' },
-    '.cm-ySelectionInfo': { fontFamily: 'var(--font-sans)', fontSize: '11px', fontWeight: '600', padding: '1px 5px', borderRadius: '4px 4px 4px 0', top: '-1.4em' },
+    // Collaborators (y-codemirror): a 2px caret in their colour with a
+    // glowing head; the name tag shows while they move/type and fades
+    // after ~2.5 s idle, the caret dims when idle (app.css keyframes —
+    // every move re-creates the widget, restarting both). Hover any
+    // caret to see the name again.
+    '.cm-ySelection': { borderRadius: '2px', mixBlendMode: 'normal' },
+    '.cm-ySelectionCaret': {
+      borderLeftWidth: '2px',
+      borderRightWidth: '0',
+      marginRight: '0',
+      animation: 'peer-caret-idle 12s linear forwards',
+    },
+    '.cm-ySelectionCaretDot': {
+      width: '6px',
+      height: '6px',
+      top: '-4px',
+      left: '-4px',
+      boxShadow: '0 0 0 2px var(--color-background)',
+    },
+    '.cm-ySelectionInfo': {
+      fontFamily: 'var(--font-sans)',
+      fontSize: '10.5px',
+      fontWeight: '650',
+      letterSpacing: '0.01em',
+      lineHeight: '1.5',
+      padding: '1px 6px',
+      borderRadius: '5px 5px 5px 1px',
+      top: '-1.55em',
+      left: '-2px',
+      color: 'var(--color-background)',
+      boxShadow: '0 2px 8px -2px rgb(0 0 0 / 0.35)',
+      opacity: '1',
+      transformOrigin: 'bottom left',
+      animation: 'peer-label-in 220ms var(--spring-bouncy) both, peer-label 3.2s linear 0.2s forwards',
+    },
+    '.cm-ySelectionCaret:hover > .cm-ySelectionInfo': { opacity: '1', animation: 'none' },
     '.cm-panels': {
       background: 'color-mix(in srgb, var(--color-overlay-bg) 70%, var(--color-background))',
       color: 'var(--color-text)',

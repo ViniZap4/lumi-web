@@ -21,20 +21,24 @@
   import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
   import { editorSettings } from './lib/editor-settings.svelte.ts';
   import { setReduceMotion } from './lib/motion.ts';
+  import { installAmbient } from './lib/ambient.ts';
   import { parseDeepLink, resolveBook } from './lib/deeplink.ts';
   import { vaults } from './lib/vaults.svelte.ts';
 
   // Settings → Reduce motion (on top of prefers-reduced-motion).
   $effect(() => setReduceMotion(editorSettings.value.reduceMotion));
 
+  let offAmbient: (() => void) | null = null;
   onMount(async () => {
     theme.init();
+    offAmbient = installAmbient();
     await boot();
     followDeepLink();
     window.addEventListener('hashchange', followDeepLink);
   });
 
   onDestroy(() => {
+    offAmbient?.();
     theme.destroy();
     window.removeEventListener('hashchange', followDeepLink);
   });

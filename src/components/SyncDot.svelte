@@ -68,17 +68,19 @@
     display: inline-block;
     box-sizing: border-box;
   }
-  .dot-up_to_date { background: var(--color-success, #9ece6a); }
+  .dot-up_to_date { background: var(--ok); box-shadow: 0 0 6px color-mix(in oklch, var(--ok) 55%, transparent); }
   .dot-box { position: relative; display: inline-grid; place-items: center; }
   .dot-syncing {
     background: var(--color-info, var(--color-secondary));
-    animation: sync-breathe 1.6s ease-in-out infinite;
+    animation: sync-breathe 1.6s var(--ease-breath) infinite;
+    box-shadow: 0 0 8px color-mix(in oklch, var(--color-info, var(--color-secondary)) 60%, transparent);
   }
   .ping {
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    border: 1.5px solid var(--color-primary);
+    border: 1.5px solid var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
     pointer-events: none;
     animation: sync-ping 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
   }

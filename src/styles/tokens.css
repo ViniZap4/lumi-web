@@ -1,0 +1,185 @@
+/* ── lumi design tokens: the ONE source ────────────────────────────────
+   docs/DESIGN-LANGUAGE.md explains every token; lib/motion.ts holds the
+   spring numbers (a test checks the linear() strings below match).
+
+   Layers:
+   1. theme inputs  — --color-* (set on :root by lib/theme.svelte.ts from
+      the shared theme catalogue; tokyo-night is the fallback here);
+   2. derived ramps — surfaces, ink, accent, lines (oklch mixes of the
+      inputs, so EVERY theme gets the same structure);
+   3. depth         — elevation shadows, glass;
+   4. type, space, shape;
+   5. motion        — springs, durations, easings.
+   Components use layers 2–5, never raw hex. */
+
+:root {
+  /* 1 ── theme inputs (fallback: tokyo-night) */
+  --color-primary: #7aa2f7;
+  --color-secondary: #bb9af7;
+  --color-accent: #7dcfff;
+  --color-muted: #565f89;
+  --color-background: #1a1b26;
+  --color-selected-bg: #292e42;
+  --color-overlay-bg: #16161e;
+  --color-text: #c0caf5;
+  --color-text-dim: #565f89;
+  --color-border: #3b4261;
+  --color-separator: #292e42;
+  --color-error: #f7768e;
+  --color-warning: #e0af68;
+  --color-info: #7dcfff;
+  --color-logo-0: #7aa2f7;
+  --color-logo-1: #7dcfff;
+  --color-logo-2: #bb9af7;
+  --color-logo-3: #7aa2f7;
+  --color-logo-4: #7dcfff;
+  --color-logo-5: #bb9af7;
+
+  /* 2 ── derived ramps (oklch: perceptually even steps in every theme) */
+  /* Surfaces, from sunk to floating. */
+  --surface-sunk: color-mix(in oklch, var(--color-overlay-bg) 55%, var(--color-background));
+  --surface-0: var(--color-background);
+  --surface-1: color-mix(in oklch, var(--color-text) 3.5%, var(--color-background));
+  --surface-2: color-mix(in oklch, var(--color-text) 6%, var(--color-background));
+  --surface-3: color-mix(in oklch, var(--color-text) 9%, var(--color-background));
+  /* Ink: text emphasis. ink-3 replaces the theme's (often too faint)
+     text-dim for anything a person must read; ink-4 is decoration. */
+  --ink-1: var(--color-text);
+  --ink-2: color-mix(in oklch, var(--color-text) 78%, var(--color-background));
+  --ink-3: color-mix(in oklch, var(--color-text) 58%, var(--color-background));
+  --ink-4: color-mix(in oklch, var(--color-text) 36%, var(--color-background));
+  /* Accent: the theme's primary, in four strengths. */
+  --accent: var(--color-primary);
+  --accent-ink: color-mix(in oklch, var(--color-primary) 82%, var(--color-text));
+  --accent-wash: color-mix(in oklch, var(--color-primary) 9%, transparent);
+  --accent-soft: color-mix(in oklch, var(--color-primary) 16%, transparent);
+  --accent-line: color-mix(in oklch, var(--color-primary) 45%, transparent);
+  --accent-glow: color-mix(in oklch, var(--color-primary) 34%, transparent);
+  /* Lines. */
+  --hairline: color-mix(in oklch, var(--color-border) 62%, transparent);
+  --hairline-soft: color-mix(in oklch, var(--color-border) 36%, transparent);
+  --hairline-strong: color-mix(in oklch, var(--color-border) 90%, transparent);
+  /* Interaction tints (kept for existing components). */
+  --tint-hover: color-mix(in oklch, var(--color-text) 6%, transparent);
+  --tint-active: color-mix(in oklch, var(--color-primary) 15%, transparent);
+  --tint-primary: var(--accent-wash);
+  --ring: color-mix(in oklch, var(--color-primary) 60%, transparent);
+  --focus-ring: 0 0 0 2px var(--color-background), 0 0 0 4px var(--ring);
+  /* Vim / editor mode colours (the edge tint and the mode pill). */
+  --mode-normal: var(--color-primary);
+  --mode-insert: var(--color-accent);
+  --mode-visual: var(--color-secondary);
+  --mode-replace: var(--color-error);
+  /* Status. */
+  --ok: var(--color-success, #9ece6a);
+
+  /* 3 ── depth */
+  /* Shadow colour: a deep, slightly cool black in dark themes; light
+     themes override it (below) with an ink-tinted one. */
+  --shadow-rgb: 4 6 14;
+  --shadow-a: 0.5;
+  /* A 1px top highlight sells the "lit from above" glass edge. */
+  --edge-light: inset 0 1px 0 color-mix(in oklch, white 7%, transparent);
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.35)), 0 0 0 1px var(--hairline-soft);
+  --elev-2: 0 2px 4px -1px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.3)), 0 8px 20px -6px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.45)), 0 0 0 1px var(--hairline-soft);
+  --elev-3: 0 4px 10px -2px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.35)), 0 18px 40px -10px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.6)), 0 0 0 1px var(--hairline);
+  --elev-4: 0 10px 24px -6px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.45)), 0 40px 90px -20px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.85)), 0 0 0 1px var(--hairline);
+  /* Legacy names → elevation. */
+  --shadow-1: var(--elev-1);
+  --shadow-pop: var(--elev-4);
+  --surface-raised: var(--surface-1);
+  /* Glass: only on surfaces that float over content (explorer, palette,
+     hover card, menus, toasts). Never two glass layers stacked. */
+  --glass-bg: color-mix(in oklch, var(--surface-1) 80%, transparent);
+  --glass-bg-strong: color-mix(in oklch, var(--surface-1) 90%, transparent);
+  --glass-blur: blur(22px) saturate(1.5);
+  --scrim: color-mix(in oklch, var(--color-overlay-bg) 52%, rgb(0 0 0 / 0.38));
+
+  /* 4 ── type, space, shape */
+  /* System stacks only (CSP: no font CDNs). */
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, Roboto, 'Helvetica Neue', sans-serif;
+  --font-serif: 'Iowan Old Style', 'Charter', 'Source Serif Pro', Georgia, ui-serif, serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
+  --font-ui: var(--font-sans);
+  /* UI scale (px; chrome is dense and never scales with the prose). */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --text-3xl: 40px;
+  --tracking-tight: -0.022em;
+  --tracking-ui: -0.006em;
+  --tracking-caps: 0.08em;
+  /* Space: a 4px grid. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  /* Shape: radii grow with the surface. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+  --bar-h: 26px;
+
+  /* 5 ── motion (lib/motion.ts SPRING; pair each easing with its -ms) */
+  --spring-snappy: linear(0, 0.039, 0.135, 0.245, 0.371, 0.481, 0.59, 0.676, 0.749, 0.814, 0.861, 0.902, 0.93, 0.953, 0.969, 0.98, 0.989, 0.994, 0.998, 1, 1.002, 1);
+  --spring-glide: linear(0, 0.066, 0.217, 0.381, 0.536, 0.677, 0.783, 0.862, 0.922, 0.96, 0.984, 0.999, 1.007, 1.01, 1.01, 1.009, 1.008, 1.006, 1.004, 1.003, 1.002, 1);
+  --spring-gentle: linear(0, 0.038, 0.13, 0.239, 0.362, 0.472, 0.579, 0.666, 0.745, 0.805, 0.857, 0.895, 0.926, 0.949, 0.966, 0.978, 0.987, 0.993, 0.997, 1, 1.001, 1);
+  --spring-bouncy: linear(0, 0.106, 0.329, 0.586, 0.795, 0.947, 1.039, 1.083, 1.09, 1.077, 1.056, 1.033, 1.015, 1.003, 0.995, 0.992, 0.992, 0.993, 0.995, 0.997, 0.999, 1);
+  --spring-soft: linear(0, 0.049, 0.157, 0.285, 0.413, 0.53, 0.631, 0.716, 0.784, 0.838, 0.88, 0.912, 0.937, 0.955, 0.968, 0.978, 0.985, 0.989, 0.993, 0.995, 0.997, 1);
+  --spring-snappy-ms: 220ms;
+  --spring-glide-ms: 260ms;
+  --spring-gentle-ms: 300ms;
+  --spring-bouncy-ms: 320ms;
+  --spring-soft-ms: 420ms;
+  --dur-tap: 90ms;
+  --dur-fade: 140ms;
+  --dur-exit: 120ms;
+  --dur-flash: 700ms;
+  --dur-breath: 2400ms;
+  --dur-ambient: 48s;
+  /* Legacy durations + curves. */
+  --dur-1: 120ms;
+  --dur-2: 160ms;
+  --dur-3: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-breath: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* Light themes: shadows are softer and ink-tinted, glass is denser, the
+   top edge light is a white line instead of a faint one. */
+:root[data-theme='light'] {
+  --shadow-rgb: 40 48 80;
+  --shadow-a: 0.22;
+  --edge-light: inset 0 1px 0 rgb(255 255 255 / 0.6);
+  --glass-bg: color-mix(in oklch, var(--color-overlay-bg) 78%, transparent);
+  --glass-bg-strong: color-mix(in oklch, var(--color-overlay-bg) 90%, transparent);
+  --surface-1: color-mix(in oklch, var(--color-overlay-bg) 55%, var(--color-background));
+  --surface-2: color-mix(in oklch, var(--color-overlay-bg) 85%, var(--color-background));
+  --surface-3: color-mix(in oklch, var(--color-text) 5%, var(--color-overlay-bg));
+  --scrim: color-mix(in oklch, var(--color-text) 14%, rgb(20 24 40 / 0.18));
+  --hairline: color-mix(in oklch, var(--color-border) 70%, transparent);
+  --ink-3: color-mix(in oklch, var(--color-text) 66%, var(--color-background));
+}
+
+@supports not (animation-timing-function: linear(0, 1)) {
+  :root {
+    --spring-snappy: cubic-bezier(0.22, 0.9, 0.3, 1);
+    --spring-glide: cubic-bezier(0.2, 0.9, 0.25, 1.02);
+    --spring-gentle: cubic-bezier(0.2, 0.8, 0.25, 1);
+    --spring-bouncy: cubic-bezier(0.3, 1.35, 0.5, 1);
+    --spring-soft: cubic-bezier(0.25, 0.8, 0.3, 1);
+  }
+}

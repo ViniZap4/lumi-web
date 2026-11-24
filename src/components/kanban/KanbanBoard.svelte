@@ -14,7 +14,7 @@
   import { planKanban, type KanbanOp } from '../../lib/kanban/kanban-edits.ts';
   import { KanbanKeys, clampCursor, type KanbanCursor } from '../../lib/kanban/kanban-keys.ts';
   import { renderMarkdown } from '../../lib/markdown.ts';
-  import { motionAllowed, animate } from '../../lib/motion.ts';
+  import { motionAllowed, animate, SPRING } from '../../lib/motion.ts';
   import { modeKey, type StructuredMode } from '../../lib/structured-mode.svelte.ts';
 
   interface Props {
@@ -440,8 +440,12 @@
     y: number;
     toLane: number;
     toIndex: number;
+    /** Lean (deg) from the pointer's horizontal velocity: the card
+     *  swings like a held object and settles upright when still. */
+    tilt: number;
   }
   let drag = $state<Drag | null>(null);
+  let tiltTimer: ReturnType<typeof setTimeout> | null = null;
   let press: { kind: 'card' | 'lane'; key: string; lane: number; index: number; x0: number; y0: number; el: HTMLElement; html: string } | null = null;
   const PH = '\u0000placeholder';
 
@@ -519,12 +523,17 @@
         y: e.clientY,
         toLane: press.lane,
         toIndex: press.index,
+        tilt: 0,
       };
       if (press.kind === 'lane') ghostTitle = lanesVM[press.lane]?.lane.title ?? '';
     }
     e.preventDefault();
     const t = dropTarget(e.clientX, e.clientY, drag);
-    drag = { ...drag, x: e.clientX, y: e.clientY, toLane: t.lane, toIndex: t.index };
+    const vx = e.clientX - drag.x;
+    const tilt = Math.max(-7, Math.min(7, drag.tilt * 0.6 + vx * 0.35));
+    drag = { ...drag, x: e.clientX, y: e.clientY, toLane: t.lane, toIndex: t.index, tilt };
+    if (tiltTimer) clearTimeout(tiltTimer);
+    tiltTimer = setTimeout(() => { if (drag) drag = { ...drag, tilt: 0 }; }, 90);
     autoScroll(e.clientX);
   }
   let ghostTitle = $state('');
@@ -564,7 +573,10 @@
       const el = root?.querySelector<HTMLElement>(sel);
       if (!el) return;
       const r = el.getBoundingClientRect();
-      animate(el, [{ transform: `translate(${ghost.x - r.left}px, ${ghost.y - r.top}px)` }, { transform: 'none' }], 180);
+      // Lands: from the lifted ghost (scaled, leaning) into the slot on
+      // the glide spring — a 1% overshoot reads as weight.
+      const lean = motionAllowed() ? d.tilt : 0;
+      animate(el, [{ transform: `translate(${ghost.x - r.left}px, ${ghost.y - r.top}px) rotate(${lean}deg) scale(1.035)` }, { transform: 'none' }], SPRING.glide.ms, SPRING.glide.easing);
     });
   }
 
@@ -664,6 +676,7 @@
           class="kb-lane"
           class:kb-lane-ph={l.placeholder}
           class:active={!l.placeholder && cur.lane === laneIdx}
+          class:drop-target={!l.placeholder && drag?.kind === 'card' && drag.toLane === laneIdx}
           data-lane-index={l.placeholder ? undefined : laneIdx}
           data-placeholder={l.placeholder ? '1' : undefined}
           data-lane-key={l.key}
@@ -759,7 +772,7 @@
       class="kb-ghost"
       class:lane={drag.kind === 'lane'}
       class:moving={motionAllowed()}
-      style="width: {drag.w}px; {drag.kind === 'lane' ? `height: ${Math.min(drag.h, 160)}px;` : ''} transform: translate({drag.x - drag.ox}px, {drag.y - drag.oy}px)"
+      style="width: {drag.w}px; {drag.kind === 'lane' ? `height: ${Math.min(drag.h, 160)}px;` : ''} transform: translate({drag.x - drag.ox}px, {drag.y - drag.oy}px); --tilt: {drag.tilt}deg; transform-origin: {drag.ox}px {drag.oy}px"
       aria-hidden="true"
     >
       {#if drag.kind === 'card'}
@@ -774,8 +787,8 @@
 <style>
   .kb {
     --kb-lane-w: 280px;
-    --kb-surface: color-mix(in srgb, var(--color-text) 3.5%, var(--color-background));
-    --kb-card: color-mix(in srgb, var(--color-text) 1.5%, var(--color-background));
+    --kb-surface: var(--surface-1);
+    --kb-card: var(--surface-0);
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -796,7 +809,7 @@
   }
   .kb-lead { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
   .kb-title { font-weight: 600; font-size: var(--text-lg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .kb-meta, .kb-status { color: var(--color-text-dim); font-size: var(--text-xs); }
+  .kb-meta, .kb-status { color: var(--ink-3); font-size: var(--text-xs); }
   .kb-status { padding: 1px 6px; border-radius: 999px; background: var(--tint-hover); }
   .kb-pending { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-primary); }
   .kb-notice { font-size: var(--text-xs); color: var(--color-warning); }
@@ -825,12 +838,20 @@
     display: flex;
     flex-direction: column;
     background: var(--kb-surface);
-    border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+    border: 1px solid var(--hairline-soft);
     border-radius: var(--radius-lg);
     padding: 6px;
     box-sizing: border-box;
+    box-shadow: var(--edge-light);
+    transition: border-color var(--dur-fade) var(--ease), box-shadow var(--spring-gentle-ms) var(--spring-gentle), background var(--dur-fade) var(--ease);
   }
-  .kb-lane.active { border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border)); }
+  .kb-lane.active { border-color: var(--hairline-strong); }
+  /* The column under a dragged card glows: it is where the card lands. */
+  .kb-lane.drop-target {
+    border-color: var(--accent-line);
+    background: linear-gradient(to bottom, var(--accent-wash), transparent 70%), var(--kb-surface);
+    box-shadow: 0 0 0 1px var(--accent-soft), 0 0 32px -8px var(--accent-glow), var(--edge-light);
+  }
   .kb-lane-ph {
     min-height: 120px;
     align-self: stretch;
@@ -853,7 +874,7 @@
     text-align: center;
     padding: 0 6px;
     border-radius: 999px;
-    color: var(--color-text-dim);
+    color: var(--ink-3);
     background: var(--tint-hover);
     font-variant-numeric: tabular-nums;
   }
@@ -891,23 +912,27 @@
     align-items: flex-start;
     padding: 8px 10px;
     background: var(--kb-card);
-    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    border: 1px solid var(--hairline-soft);
     border-radius: var(--radius);
-    box-shadow: 0 1px 2px color-mix(in srgb, #000 10%, transparent);
+    box-shadow: var(--elev-1), var(--edge-light);
     cursor: grab;
     user-select: none;
     touch-action: none;
-    transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
+    transition: border-color var(--dur-fade) var(--ease), box-shadow var(--dur-fade) var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy);
   }
-  .kb-card:hover { border-color: color-mix(in srgb, var(--color-text) 22%, var(--color-border)); }
-  .kb-card.focused { border-color: color-mix(in srgb, var(--color-primary) 70%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 45%, transparent); }
-  .kb-card.done .kb-card-body { color: var(--color-text-dim); }
+  .kb-card:hover { border-color: var(--hairline-strong); box-shadow: var(--elev-2), var(--edge-light); transform: translateY(-1px); }
+  .kb-card:active { cursor: grabbing; transform: scale(0.985); }
+  .kb-card.focused { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-soft), 0 6px 18px -10px var(--accent-glow), var(--edge-light); }
+  .kb-card.done .kb-card-body { color: var(--ink-3); }
   .kb-card.confirm { border-color: var(--color-error); }
+  /* Where the card will land: a soft, breathing slot. */
   .kb-card-ph {
-    background: var(--tint-primary);
-    border: 1.5px dashed color-mix(in srgb, var(--color-primary) 55%, transparent);
-    box-shadow: none;
+    background: var(--accent-wash);
+    border: 1.5px dashed var(--accent-line);
+    box-shadow: inset 0 0 18px -6px var(--accent-glow);
+    animation: slot-in var(--spring-glide-ms) var(--spring-glide) both;
   }
+  @keyframes slot-in { from { opacity: 0; transform: scaleY(0.6); } }
   .kb-card-new { cursor: text; padding: 4px; }
   .kb-check {
     margin: 3px 0 0;
@@ -959,8 +984,8 @@
     background: color-mix(in srgb, var(--color-error) 16%, var(--color-background));
     color: var(--color-text);
   }
-  .kb-add { margin-top: 6px; justify-content: flex-start; width: 100%; color: var(--color-text-dim); }
-  .kb-empty { color: var(--color-text-dim); padding: 24px; display: flex; gap: 10px; align-items: center; }
+  .kb-add { margin-top: 6px; justify-content: flex-start; width: 100%; color: var(--ink-3); }
+  .kb-empty { color: var(--ink-3); padding: 24px; display: flex; gap: 10px; align-items: center; }
 
   .kb-ghost {
     position: fixed;
@@ -971,14 +996,18 @@
     padding: 8px 10px;
     border-radius: var(--radius);
     background: var(--kb-card);
-    border: 1px solid color-mix(in srgb, var(--color-primary) 60%, transparent);
-    box-shadow: var(--shadow-pop);
+    border: 1px solid var(--accent-line);
+    /* Lifted: bigger, deeper shadow, an accent rim. */
+    box-shadow: 0 2px 4px rgb(var(--shadow-rgb) / 0.25), 0 26px 50px -14px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 1.3)), 0 0 0 4px var(--accent-wash), 0 14px 40px -12px var(--accent-glow), var(--edge-light);
     box-sizing: border-box;
-    opacity: 0.96;
     will-change: transform;
+    scale: 1.035;
+    animation: ghost-lift var(--spring-bouncy-ms) var(--spring-bouncy) both;
   }
+  @keyframes ghost-lift { from { scale: 1; box-shadow: var(--elev-1); } }
   .kb-ghost.lane { border-radius: var(--radius-lg); background: var(--kb-surface); padding: 12px; overflow: hidden; }
-  .kb-ghost.moving { rotate: 1.5deg; }
+  /* Swings with the pointer's velocity, settles upright when still. */
+  .kb-ghost.moving { rotate: var(--tilt, 0deg); transition: rotate var(--spring-glide-ms) var(--spring-glide); }
 
   @media (max-width: 640px) {
     .kb { --kb-lane-w: min(84vw, 300px); }

@@ -81,11 +81,12 @@ describe('springs', () => {
     expect(SPRING.bouncy.ms).toBeLessThanOrEqual(320);
     for (const t of Object.values(SPRING)) expect(t.easing.startsWith('linear(')).toBe(true);
   });
-  it('the CSS spring variables match the solver', async () => {
+  it('the CSS spring variables (styles/tokens.css, the one token source) match the solver', async () => {
     const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as { readFileSync(p: string, enc: string): string };
     const proc = (globalThis as unknown as { process: { cwd(): string } }).process;
-    const css = fs.readFileSync(`${proc.cwd()}/src/app.css`, 'utf8');
-    for (const k of ['snappy', 'gentle', 'bouncy'] as const) {
+    const css = fs.readFileSync(`${proc.cwd()}/src/styles/tokens.css`, 'utf8');
+    expect(fs.readFileSync(`${proc.cwd()}/src/app.css`, 'utf8')).toContain("@import './styles/tokens.css';");
+    for (const k of ['snappy', 'glide', 'gentle', 'bouncy', 'soft'] as const) {
       expect(css).toContain(`--spring-${k}: ${SPRING[k].easing};`);
       expect(css).toContain(`--spring-${k}-ms: ${SPRING[k].ms}ms;`);
     }
@@ -200,6 +201,9 @@ describe('motion helpers + reduced-motion gating', () => {
     expect(css).toMatch(/html \{ scroll-behavior: smooth; \}/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*html \{ scroll-behavior: auto; \}/);
     expect(css).toMatch(/:root\[data-motion='reduce'\] \{ scroll-behavior: auto !important; \}/);
-    expect(css).toMatch(/@supports not \(animation-timing-function: linear\(0, 1\)\)/);
+    const tokens = fs.readFileSync(`${proc.cwd()}/src/styles/tokens.css`, 'utf8');
+    expect(tokens).toMatch(/@supports not \(animation-timing-function: linear\(0, 1\)\)/);
+    // Ambient motion pauses while the tab is hidden (lib/ambient.ts).
+    expect(css).toMatch(/:root\[data-hidden\] \*[^{]*\{ animation-play-state: paused !important; \}/);
   });
 });

@@ -102,11 +102,46 @@
   let easing = $state(false);
   let easeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Inertia (docs/DESIGN-LANGUAGE.md §6.5): a released pan keeps the
+  // pointer's velocity and coasts to rest (exponential friction, time
+  // based so it is frame-rate independent). Any new gesture, wheel or
+  // key stops it at once. Transform-only: the world layer moves on the
+  // compositor.
+  let panTrail: { x: number; y: number; t: number }[] = [];
+  let coastRaf = 0;
+  function stopCoast(): void {
+    if (coastRaf) cancelAnimationFrame(coastRaf);
+    coastRaf = 0;
+  }
+  function coast(): void {
+    stopCoast();
+    if (!motionAllowed() || panTrail.length < 2) return;
+    const a = panTrail[0];
+    const b = panTrail[panTrail.length - 1];
+    const dt = b.t - a.t;
+    if (dt <= 0 || performance.now() - b.t > 60) return;
+    let vx = (b.x - a.x) / dt;
+    let vy = (b.y - a.y) / dt;
+    if (Math.hypot(vx, vy) < 0.15) return;
+    let last = performance.now();
+    const step = (now: number) => {
+      const ms = Math.min(48, now - last);
+      last = now;
+      view = { ...view, x: view.x + vx * ms, y: view.y + vy * ms };
+      const k = Math.exp(-ms / 260);
+      vx *= k;
+      vy *= k;
+      coastRaf = Math.hypot(vx, vy) > 0.02 ? requestAnimationFrame(step) : 0;
+    };
+    coastRaf = requestAnimationFrame(step);
+  }
+
   function setView(v: Viewport, ease = false): void {
+    if (coastRaf && !ease) stopCoast();
     if (ease && motionAllowed()) {
       easing = true;
       if (easeTimer) clearTimeout(easeTimer);
-      easeTimer = setTimeout(() => (easing = false), 200);
+      easeTimer = setTimeout(() => (easing = false), 320);
     }
     view = v;
   }
@@ -151,7 +186,7 @@
       setView(wheelView(view, e, screenPoint(e)));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
+    return () => { el.removeEventListener('wheel', onWheel); stopCoast(); };
   });
 
   // ---- selection / editing ------------------------------------------------------------
@@ -380,6 +415,8 @@
 
   function onpointerdown(e: PointerEvent): void {
     if (!root) return;
+    stopCoast();
+    panTrail = [];
     const t = e.target as HTMLElement;
     if (isTyping(t) || t.closest('.cv-ui')) return;
     root.focus({ preventScroll: true });
@@ -452,6 +489,9 @@
     }
     if (g.kind === 'pan') {
       setView({ ...view, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy });
+      const t = performance.now();
+      panTrail.push({ x: e.clientX, y: e.clientY, t });
+      while (panTrail.length > 2 && t - panTrail[0].t > 80) panTrail.shift();
       return;
     }
     const p = worldPoint(e);
@@ -479,6 +519,10 @@
     }
     gesture = null;
     if (!g) return;
+    if (g.kind === 'pan') {
+      coast();
+      return;
+    }
     const d = draft;
     if (g.kind === 'move' || g.kind === 'resize') {
       // Commit once, on drop (no per-frame CRDT traffic).
@@ -720,7 +764,7 @@
       {#each edgeVMs as ev (ev.edge.id)}
         <g class="cv-edge" class:sel={selectedEdge === ev.edge.id} data-edge-id={ev.edge.id} style={ev.color ? `--c: ${ev.color}` : ''}>
           <path class="cv-edge-hit" d={ev.d} />
-          <path class="cv-edge-line" d={ev.d} />
+          <path class="cv-edge-line" d={ev.d} pathLength="1" />
           {#if ev.head}<polygon class="cv-edge-head" points={ev.head} />{/if}
           {#if ev.tail}<polygon class="cv-edge-head" points={ev.tail} />{/if}
         </g>
@@ -892,20 +936,25 @@
   }
   .cv.panning { cursor: grabbing; }
   .cv-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
-  .cv-world.ease { transition: transform 180ms var(--ease); }
+  .cv-world.ease { transition: transform var(--spring-gentle-ms) var(--spring-gentle); }
 
   .cv-node {
     position: absolute;
     box-sizing: border-box;
     border-radius: var(--radius-lg);
     background: var(--cv-node);
-    border: 1.5px solid color-mix(in srgb, var(--c, var(--color-border)) 80%, transparent);
-    box-shadow: 0 1px 3px color-mix(in srgb, #000 12%, transparent);
+    border: 1.5px solid color-mix(in oklch, var(--c, var(--color-border)) 70%, transparent);
+    box-shadow: var(--elev-2), var(--edge-light);
     display: flex;
     flex-direction: column;
     overflow: visible;
     cursor: grab;
+    /* Spawn: a node pops into being (also the canvas's opening reveal). */
+    animation: node-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+    transition: box-shadow var(--dur-fade) var(--ease), border-color var(--dur-fade) var(--ease);
   }
+  .cv-node:hover { box-shadow: var(--elev-3), var(--edge-light); }
+  @keyframes node-in { from { opacity: 0; scale: 0.92; } }
   .cv-node.colored { background: color-mix(in srgb, var(--c) 9%, var(--cv-node)); }
   .cv-node.sel { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--ring), 0 6px 18px color-mix(in srgb, #000 16%, transparent); }
   .cv-group {
@@ -987,6 +1036,13 @@
   .cv-edge { color: var(--c, var(--cv-line)); }
   .cv-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
   .cv-edge-line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  /* Edges draw themselves from their source (new edges, and the reveal
+     when the canvas opens); arrow heads fade in as the line arrives. */
+  .cv-edge:not(.connecting) .cv-edge-line { stroke-dasharray: 1; animation: edge-draw var(--spring-soft-ms) var(--spring-soft) 120ms both; }
+  .cv-edge:not(.connecting) .cv-edge-head { animation: ui-fade var(--dur-fade) var(--ease) 380ms both; }
+  @keyframes edge-draw { from { stroke-dashoffset: 1; } }
+  .cv-edge.connecting .cv-edge-line { animation: edge-march 0.6s linear infinite; }
+  @keyframes edge-march { to { stroke-dashoffset: -11; } }
   .cv-edge-head { fill: currentColor; }
   .cv-edge.sel { color: var(--color-primary); }
   .cv-edge.sel .cv-edge-line { stroke-width: 3; }

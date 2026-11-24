@@ -106,14 +106,39 @@ export function springEase(points: readonly number[], t: number): number {
 }
 
 /**
+ * The named springs of the motion language (docs/DESIGN-LANGUAGE.md §6).
+ * The same numbers drive the Mac (SwiftUI .spring) and the TUI (frame
+ * stepping), and app.css carries the sampled `linear()` strings.
  * - snappy: the typing path and small UI (≤ 220 ms, barely overshoots);
+ * - glide: things that travel — the list cursor, the mode pill, the
+ *   kanban card under the pointer (a 1 % overshoot: it arrives, then
+ *   settles, which is what makes it feel physical);
  * - gentle: panes, views, list entry (critically-ish damped);
- * - bouncy: overlays settling (a visible but small overshoot).
+ * - bouncy: overlays settling (a visible but small overshoot);
+ * - soft: ambient and large surfaces (slow, never overshoots).
  */
 export const SPRING = {
   snappy: token({ stiffness: 820, damping: 50 }, 220),
+  glide: token({ stiffness: 600, damping: 40 }, 260),
   gentle: token({ stiffness: 420, damping: 36 }, 300),
   bouncy: token({ stiffness: 620, damping: 30 }, 320),
+  soft: token({ stiffness: 220, damping: 28 }, 420),
+} as const;
+
+/** Non-spring durations (ms) of the motion language. */
+export const DURATION = {
+  /** Press feedback, hover tints. */
+  tap: 90,
+  /** Fades and colour changes. */
+  fade: 140,
+  /** Exits: always faster than the matching entrance. */
+  exit: 120,
+  /** One remote-change flash / ping. */
+  flash: 700,
+  /** Breathing (sync dot, live presence) period. */
+  breath: 2400,
+  /** Ambient background drift period (home). */
+  ambient: 48000,
 } as const;
 
 export type SpringName = keyof typeof SPRING;

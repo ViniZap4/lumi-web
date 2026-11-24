@@ -86,6 +86,7 @@
     {#each node.children as c, i (c.id)}
       <div class="pane-cell" class:zoom-hide={zoomed != null && !containsLeaf(c, zoomed)} style="flex: {node.sizes[i]} 1 0px">
         <PaneTree node={c} {leaf} {onresize} {onequalize} {onresized} {zoomed} />
+        {#if c.kind === 'leaf'}<span class="pane-light" aria-hidden="true"></span>{/if}
       </div>
       {#if i < node.children.length - 1 && zoomed == null}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -129,8 +130,56 @@
     min-height: 0;
     display: flex;
   }
-  .pane-cell > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+  .pane-cell > :global(*:not(.pane-light)) { flex: 1; min-width: 0; min-height: 0; }
   .pane-cell.zoom-hide { display: none; }
+
+  /* Focus, alive (docs/DESIGN-LANGUAGE.md §6.3): the focused pane is
+     lit — a hairline ring in the accent, a top edge of light that
+     breathes very slowly, and a faint wash of the accent from the top.
+     The other panes rest under a thin veil. Arriving focus blooms in
+     (opacity only); everything is pointer-transparent. */
+  .pane-cell::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    background: var(--surface-0);
+    opacity: 0;
+    transition: opacity var(--spring-soft-ms) var(--spring-soft);
+  }
+  .pane-cell:has(> :global([data-leaf]:not(.active)))::before { opacity: 0.18; }
+  .pane-light {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0;
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+    background: linear-gradient(to bottom, var(--accent-wash), transparent 90px);
+    transition: opacity var(--dur-exit) var(--ease-exit);
+  }
+  .pane-light::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent) 20%, var(--accent) 80%, transparent);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .pane-cell:has(> :global([data-leaf].active)) > .pane-light {
+    opacity: 1;
+    transition: none;
+    animation: pane-focus-in var(--spring-gentle-ms) var(--spring-gentle) both;
+  }
+  .pane-cell:has(> :global([data-leaf].active)) > .pane-light::after { animation: pane-breathe 5.2s var(--ease-breath) 0.4s infinite; }
+  @keyframes pane-focus-in { from { opacity: 0; } }
+  @keyframes pane-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  /* Zoomed: no veil, no ring — the one pane is the whole stage. */
+  .pane-split:has(> .zoom-hide) .pane-light { display: none; }
+
   .pane-divider {
     flex: none;
     position: relative;
@@ -138,9 +187,9 @@
     background: var(--hairline);
     cursor: col-resize;
     outline: none;
-    z-index: 2;
+    z-index: 6;
     touch-action: none;
-    transition: background 120ms var(--ease);
+    transition: background var(--dur-fade) var(--ease), box-shadow var(--dur-fade) var(--ease);
   }
   .col > .pane-divider { width: auto; height: 1px; cursor: row-resize; }
   /* A generous invisible hit area around the hairline. */
@@ -151,15 +200,16 @@
     top: 50%;
     left: 50%;
     width: 4px;
-    height: 28px;
-    border-radius: 4px;
-    transform: translate(-50%, -50%);
-    background: var(--color-text-dim);
+    height: 32px;
+    border-radius: var(--radius-pill);
+    transform: translate(-50%, -50%) scaleY(0.4);
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
     opacity: 0;
-    transition: opacity 120ms var(--ease);
+    transition: opacity var(--dur-fade) var(--ease), transform var(--spring-bouncy-ms) var(--spring-bouncy);
   }
-  .col > .pane-divider .grip { width: 28px; height: 4px; }
-  .pane-divider:hover, .pane-divider:focus-visible, .dragging > .pane-divider { background: color-mix(in srgb, var(--color-primary) 60%, transparent); }
-  .pane-divider:hover .grip, .pane-divider:focus-visible .grip { opacity: 0.55; }
+  .col > .pane-divider .grip { width: 32px; height: 4px; transform: translate(-50%, -50%) scaleX(0.4); }
+  .pane-divider:hover, .pane-divider:focus-visible, .dragging > .pane-divider { background: var(--accent-line); box-shadow: 0 0 8px var(--accent-glow); }
+  .pane-divider:hover .grip, .pane-divider:focus-visible .grip, .dragging > .pane-divider .grip { opacity: 1; transform: translate(-50%, -50%); }
   .pane-divider:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
 </style>

@@ -1,83 +1,9 @@
-/* ── Design tokens ─────────────────────────────────────────────────
-   Colours come from the active theme (lib/theme.svelte.ts sets the
-   --color-* custom properties on :root; tokyo-night is the fallback
-   below). Everything else — type, spacing, radii, derived tints — is
-   defined here once and used by every view. */
+/* Global styles. Every token lives in styles/tokens.css (one source);
+   this file holds the base, the `ui-` primitives, the motion language's
+   shared keyframes, the prose system and the editor's live preview. */
+@import './styles/tokens.css';
+
 :root {
-  --color-primary: #7aa2f7;
-  --color-secondary: #bb9af7;
-  --color-accent: #7dcfff;
-  --color-muted: #565f89;
-  --color-background: #1a1b26;
-  --color-selected-bg: #292e42;
-  --color-overlay-bg: #16161e;
-  --color-text: #c0caf5;
-  --color-text-dim: #565f89;
-  --color-border: #3b4261;
-  --color-separator: #292e42;
-  --color-error: #f7768e;
-  --color-warning: #e0af68;
-  --color-info: #7dcfff;
-  --color-logo-0: #7aa2f7;
-  --color-logo-1: #7dcfff;
-  --color-logo-2: #bb9af7;
-  --color-logo-3: #7aa2f7;
-  --color-logo-4: #7dcfff;
-  --color-logo-5: #bb9af7;
-
-  /* Type. System stacks only (CSP: no font CDNs). */
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, Roboto, 'Helvetica Neue', sans-serif;
-  --font-serif: 'Iowan Old Style', 'Charter', 'Source Serif Pro', Georgia, ui-serif, serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
-  --font-ui: var(--font-sans);
-  --text-2xs: 11px;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-xl: 20px;
-
-  /* Space + shape. */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
-  --sp-7: 48px;
-  --radius-sm: 5px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --bar-h: 26px;
-
-  /* Derived tints (restrained: the theme colour at low alpha). */
-  --tint-hover: color-mix(in srgb, var(--color-text) 6%, transparent);
-  --tint-active: color-mix(in srgb, var(--color-primary) 14%, transparent);
-  --tint-primary: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  --ring: color-mix(in srgb, var(--color-primary) 55%, transparent);
-  --hairline: color-mix(in srgb, var(--color-border) 70%, transparent);
-  --shadow-pop: 0 18px 50px -8px rgba(0, 0, 0, 0.34), 0 4px 12px -2px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--color-text) 5%, transparent);
-  /* Low elevation (cards, floating bars) and raised surfaces. */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 1px color-mix(in srgb, var(--color-text) 4%, transparent);
-  --surface-raised: color-mix(in srgb, var(--color-overlay-bg) 30%, var(--color-background));
-  --surface-sunken: color-mix(in srgb, var(--color-overlay-bg) 45%, var(--color-background));
-  /* Crisp keyboard focus: a background gap, then the ring. */
-  --focus-ring: 0 0 0 2px var(--color-background), 0 0 0 4px var(--ring);
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  /* Motion: 120–220 ms on transform / opacity only (SPEC-PARTE2 §1). */
-  --dur-1: 120ms;
-  --dur-2: 160ms;
-  --dur-3: 220ms;
-  /* Springs (lib/motion.ts SPRING, sampled by springLinear): pair each
-     with its duration. snappy ≤ 220 ms is the typing-path budget. */
-  --spring-snappy: linear(0, 0.039, 0.135, 0.245, 0.371, 0.481, 0.59, 0.676, 0.749, 0.814, 0.861, 0.902, 0.93, 0.953, 0.969, 0.98, 0.989, 0.994, 0.998, 1, 1.002, 1);
-  --spring-gentle: linear(0, 0.038, 0.13, 0.239, 0.362, 0.472, 0.579, 0.666, 0.745, 0.805, 0.857, 0.895, 0.926, 0.949, 0.966, 0.978, 0.987, 0.993, 0.997, 1, 1.001, 1);
-  --spring-bouncy: linear(0, 0.106, 0.329, 0.586, 0.795, 0.947, 1.039, 1.083, 1.09, 1.077, 1.056, 1.033, 1.015, 1.003, 0.995, 0.992, 0.992, 0.993, 0.995, 0.997, 0.999, 1);
-  --spring-snappy-ms: 220ms;
-  --spring-gentle-ms: 300ms;
-  --spring-bouncy-ms: 320ms;
-
   font-family: var(--font-ui);
   font-size: var(--text-md);
   line-height: 1.5;
@@ -116,13 +42,14 @@ body {
 
 button, input, select, textarea { font: inherit; color: inherit; }
 
-::selection { background: color-mix(in srgb, var(--color-primary) 30%, transparent); }
+::selection { background: color-mix(in oklch, var(--color-primary) 32%, transparent); }
 
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 
 /* ── UI primitives (global, `ui-` prefixed) ─────────────────────────── */
 
 .ui-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -135,30 +62,42 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: var(--color-text);
   font-size: var(--text-sm);
   font-weight: 500;
+  letter-spacing: var(--tracking-ui);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy), box-shadow 160ms var(--ease);
+  isolation: isolate;
+  transition:
+    background var(--dur-tap) var(--ease),
+    border-color var(--dur-fade) var(--ease),
+    color var(--dur-fade) var(--ease),
+    transform var(--spring-snappy-ms) var(--spring-snappy),
+    box-shadow var(--dur-fade) var(--ease);
 }
-.ui-btn:hover { background: var(--tint-hover); }
-/* Alive: a hair of lift on hover, a press that gives. */
-.ui-btn:hover:not(:disabled) { transform: translateY(-1px); }
-.ui-btn:active:not(:disabled) { background: var(--tint-active); transform: scale(0.96); transition-duration: 80ms; }
+.ui-btn:hover { background: var(--tint-hover); border-color: var(--hairline-strong); }
+/* Alive: a hair of lift on hover, a press that gives (and springs back). */
+.ui-btn:hover:not(:disabled) { transform: translateY(-0.5px); }
+.ui-btn:active:not(:disabled) { background: var(--tint-active); transform: scale(0.96); transition-duration: var(--dur-tap); }
 .ui-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .ui-btn svg { flex: none; }
 .ui-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .ui-btn.primary {
-  background: var(--color-primary);
-  border-color: transparent;
+  background:
+    linear-gradient(to bottom, color-mix(in oklch, white 14%, transparent), transparent 60%),
+    var(--color-primary);
+  border-color: color-mix(in oklch, var(--color-primary) 70%, black);
   color: var(--color-background);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 0.25), 0 4px 14px -6px var(--accent-glow), inset 0 1px 0 color-mix(in oklch, white 25%, transparent);
 }
-.ui-btn.primary:hover { background: color-mix(in srgb, var(--color-primary) 88%, var(--color-text)); }
-.ui-btn.danger { color: var(--color-error); border-color: color-mix(in srgb, var(--color-error) 40%, transparent); }
+.ui-btn.primary:hover { background-color: color-mix(in oklch, var(--color-primary) 90%, white); box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 0.25), 0 6px 20px -6px var(--accent-glow), inset 0 1px 0 color-mix(in oklch, white 30%, transparent); }
+.ui-btn.danger { color: var(--color-error); border-color: color-mix(in oklch, var(--color-error) 40%, transparent); }
 .ui-btn.danger.solid { background: var(--color-error); color: var(--color-background); border-color: transparent; }
-.ui-btn.ghost { border-color: transparent; color: var(--color-text-dim); }
-.ui-btn.ghost:hover { color: var(--color-text); }
-.ui-btn.sm { height: 24px; padding: 0 var(--sp-2); font-size: var(--text-xs); }
+.ui-btn.ghost { border-color: transparent; color: var(--ink-2); }
+.ui-btn.ghost:hover { color: var(--color-text); border-color: transparent; }
+.ui-btn.sm { height: 26px; padding: 0 var(--sp-2); font-size: var(--text-xs); }
 .ui-btn.icon { width: 30px; padding: 0; }
-.ui-btn.sm.icon { width: 24px; }
+.ui-btn.sm.icon { width: 26px; }
+.ui-btn.on, .ui-btn[aria-pressed='true'] { color: var(--accent-ink); background: var(--accent-soft); }
 
 .ui-input {
   height: 34px;
@@ -166,21 +105,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 0 var(--sp-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--color-overlay-bg) 60%, var(--color-background));
+  background: var(--surface-sunk);
   color: var(--color-text);
   font-size: var(--text-md);
   outline: none;
-  transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
+  box-shadow: inset 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.25));
+  transition: border-color var(--dur-fade) var(--ease), box-shadow var(--spring-snappy-ms) var(--spring-snappy), background var(--dur-fade) var(--ease);
 }
-.ui-input::placeholder { color: var(--color-text-dim); }
-.ui-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--tint-primary); }
+.ui-input::placeholder { color: var(--ink-4); }
+.ui-input:hover { border-color: var(--hairline-strong); }
+.ui-input:focus { border-color: var(--accent-line); background: var(--surface-0); box-shadow: 0 0 0 3px var(--accent-soft), 0 0 18px -4px var(--accent-glow); }
 .ui-input:disabled { opacity: 0.6; }
 
 .ui-link {
   background: none;
   border: none;
   padding: 0;
-  color: var(--color-primary);
+  color: var(--accent-ink);
   font-size: inherit;
   cursor: pointer;
 }
@@ -193,13 +134,15 @@ kbd, .ui-kbd {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--hairline);
-  border-bottom-width: 2px;
-  background: color-mix(in srgb, var(--color-overlay-bg) 70%, var(--color-background));
-  color: var(--color-text);
+  border-bottom-color: var(--hairline-strong);
+  background: linear-gradient(to bottom, var(--surface-2), var(--surface-1));
+  box-shadow: 0 1px 0 rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.35)), var(--edge-light);
+  color: var(--ink-1);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
@@ -207,7 +150,7 @@ kbd, .ui-kbd {
 .ui-label {
   font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--color-text-dim);
+  color: var(--ink-3);
   letter-spacing: 0.01em;
 }
 
@@ -215,22 +158,24 @@ kbd, .ui-kbd {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-dim);
+  letter-spacing: var(--tracking-caps);
+  color: var(--ink-3);
 }
 
-/* iOS-style switch on a checkbox: <input type="checkbox" class="ui-switch"> */
+/* iOS-style switch on a checkbox: <input type="checkbox" class="ui-switch">.
+   The thumb travels on the glide spring and squashes while pressed. */
 .ui-switch {
   appearance: none;
   -webkit-appearance: none;
   flex: none;
   width: 32px;
   height: 18px;
-  border-radius: 999px;
-  background: var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--hairline), inset 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.4));
   position: relative;
   cursor: pointer;
-  transition: background 140ms var(--ease);
+  transition: background var(--dur-fade) var(--ease), box-shadow var(--dur-fade) var(--ease);
 }
 .ui-switch::after {
   content: '';
@@ -240,11 +185,14 @@ kbd, .ui-kbd {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--color-background);
-  transition: transform 140ms var(--ease);
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  transition: transform var(--spring-glide-ms) var(--spring-glide), width var(--dur-tap) var(--ease);
 }
-.ui-switch:checked { background: var(--color-primary); }
+.ui-switch:active::after { width: 17px; }
+.ui-switch:checked { background: var(--color-primary); box-shadow: inset 0 0 0 1px transparent, 0 0 12px -3px var(--accent-glow); }
 .ui-switch:checked::after { transform: translateX(14px); }
+.ui-switch:checked:active::after { transform: translateX(11px); }
 .ui-switch:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .ui-seg {
@@ -252,101 +200,144 @@ kbd, .ui-kbd {
   padding: 2px;
   gap: 2px;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-overlay-bg) 70%, var(--color-background));
-  border: 1px solid var(--hairline);
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline-soft);
+  box-shadow: inset 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.25));
 }
 .ui-seg button {
   border: none;
   background: transparent;
-  color: var(--color-text-dim);
+  color: var(--ink-3);
   height: 24px;
   padding: 0 var(--sp-3);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
+  transition: color var(--dur-fade) var(--ease), background var(--dur-fade) var(--ease), box-shadow var(--dur-fade) var(--ease), transform var(--spring-snappy-ms) var(--spring-snappy);
 }
 .ui-seg button:hover { color: var(--color-text); }
+.ui-seg button:active { transform: scale(0.95); transition-duration: var(--dur-tap); }
 .ui-seg button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 .ui-seg button.active,
 .ui-seg button[aria-pressed='true'] {
-  background: var(--color-background);
+  background: var(--surface-2);
   color: var(--color-text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-a) * 0.5)), 0 0 0 1px var(--hairline-soft), var(--edge-light);
 }
 
 .ui-scrim {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
-  backdrop-filter: blur(3px) saturate(1.1);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 12vh var(--sp-4) var(--sp-4);
   z-index: 300;
-  animation: ui-fade 120ms var(--ease);
+  animation: ui-fade var(--dur-fade) var(--ease);
 }
 .ui-sheet {
   width: min(560px, 100%);
   max-height: 76vh;
   display: flex;
   flex-direction: column;
-  background: var(--color-background);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--elev-4), var(--edge-light);
   overflow: hidden;
   outline: none;
-  animation: ui-rise var(--dur-2) var(--ease-out);
+  animation: settle-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
 }
 @keyframes ui-fade { from { opacity: 0; } }
 @keyframes ui-rise { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
 @keyframes ui-pop { from { opacity: 0; transform: scale(0.965); } }
-@supports not (animation-timing-function: linear(0, 1)) {
-  :root {
-    --spring-snappy: cubic-bezier(0.22, 0.9, 0.3, 1);
-    --spring-gentle: cubic-bezier(0.2, 0.8, 0.25, 1);
-    --spring-bouncy: cubic-bezier(0.3, 1.35, 0.5, 1);
-  }
-}
 
-/* ── Alive motion (SPEC-PARTE2 §1) ───────────────────────────────────
+/* ── Motion language (docs/DESIGN-LANGUAGE.md §6) ─────────────────────
    Everything below is switched off by the kill-switch that follows. */
 html { scroll-behavior: smooth; }
 /* Hover lift + press scale for any interactive surface (cards, rows). */
-.lift { transition: transform var(--spring-snappy-ms) var(--spring-snappy), box-shadow 160ms var(--ease); }
-.lift:hover { transform: translateY(-1px); box-shadow: var(--shadow-1); }
-.lift:active { transform: scale(0.97); transition-duration: 80ms; }
+.lift { transition: transform var(--spring-snappy-ms) var(--spring-snappy), box-shadow var(--dur-fade) var(--ease); }
+.lift:hover { transform: translateY(-1px); box-shadow: var(--elev-2); }
+.lift:active { transform: scale(0.97); transition-duration: var(--dur-tap); }
 .press { transition: transform var(--spring-snappy-ms) var(--spring-snappy); }
-.press:active { transform: scale(0.97); transition-duration: 80ms; }
-/* Skeleton shimmer while notes / books load. */
+.press:active { transform: scale(0.97); transition-duration: var(--dur-tap); }
+/* Cursor-proximity light (lib/ambient.ts writes --mx/--my on the
+   hovered .glow element only): a soft accent light under the pointer.
+   Opacity-only fade; the gradient never animates. */
+.glow { position: relative; isolation: isolate; }
+.glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(160px circle at var(--mx, 50%) var(--my, 50%), var(--accent-soft), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fade) var(--ease);
+}
+.glow:hover::before { opacity: 1; }
+@media (hover: none) { .glow::before { display: none; } }
+/* Skeleton shimmer while notes / books load (one GPU-friendly sweep). */
 .skeleton {
   display: block;
-  border-radius: 6px;
-  background:
-    linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--color-text) 7%, transparent) 50%, transparent 70%) 0 0 / 220% 100% no-repeat,
-    var(--tint-hover);
-  animation: skeleton-sweep 1.3s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--tint-hover);
 }
-@keyframes skeleton-sweep { from { background-position: 130% 0, 0 0; } to { background-position: -130% 0, 0 0; } }
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, color-mix(in oklch, var(--color-text) 8%, transparent) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.4s var(--ease-breath) infinite;
+}
+@keyframes skeleton-sweep { to { transform: translateX(100%); } }
+/* Loading → content: the real thing resolves out of the skeleton. */
+.resolve-in { animation: resolve-in var(--spring-gentle-ms) var(--spring-gentle) both; }
+@keyframes resolve-in { from { opacity: 0; transform: translateY(3px); filter: blur(2px); } }
 /* Overlays settle with a slight spring (scale .96 → 1, overshoot). */
 .settle { animation: settle-in var(--spring-bouncy-ms) var(--spring-bouncy) both; }
-@keyframes settle-in { from { opacity: 0; transform: scale(0.96) translateY(4px); } 40% { opacity: 1; } }
+@keyframes settle-in { from { opacity: 0; transform: scale(0.96) translateY(6px); } 35% { opacity: 1; } }
 /* Panes appearing (splits) settle a touch less. */
 .settle-soft { animation: settle-soft var(--spring-gentle-ms) var(--spring-gentle) both; }
 @keyframes settle-soft { from { opacity: 0; transform: scale(0.985); } }
+/* Error: a short damped shake (never on the typing path). */
+.shake { animation: shake 360ms var(--ease) both; }
+@keyframes shake { 15% { transform: translateX(-5px); } 35% { transform: translateX(4px); } 55% { transform: translateX(-2.5px); } 75% { transform: translateX(1px); } }
+/* Success: a check that pops once. */
+@keyframes pop-in { from { opacity: 0; transform: scale(0.6); } 60% { opacity: 1; } }
 /* Toasts slide in from below; the stack shifts with FLIP (lib/motion.ts). */
-@keyframes toast-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } }
-@keyframes toast-out { to { opacity: 0; transform: translateY(8px) scale(0.97); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(16px) scale(0.96); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
 /* Sync dot: breathing while syncing, a ring on remote changes. */
 @keyframes sync-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.72); opacity: 0.55; } }
 @keyframes sync-ping { from { transform: scale(1); opacity: 0.7; } to { transform: scale(2.8); opacity: 0; } }
+/* Presence: a live collaborator's dot breathes (slow, out of phase). */
+@keyframes presence-breathe { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.9); opacity: 0; } }
 /* Remotely edited ranges in the editor (lib/remote-flash.ts). */
 @keyframes remote-flash-del { to { opacity: 0; } }
-/* Smooth caret: the cursor glides between positions (≤ 100 ms, typing path). */
-.cm-editor .cm-cursorLayer .cm-cursor { transition: left 80ms cubic-bezier(0.2, 0.7, 0.2, 1), top 80ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-@keyframes remote-flash { from { background-color: color-mix(in srgb, var(--color-primary) 26%, transparent); } to { background-color: transparent; } }
+@keyframes remote-flash { from { background-color: color-mix(in oklch, var(--color-primary) 26%, transparent); } to { background-color: transparent; } }
+/* Remote cursors (y-codemirror): the name shows while the peer moves,
+   then fades; an idle caret dims. Each move re-creates the caret DOM,
+   which restarts both animations. */
+@keyframes peer-label { 0%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(2px); } }
+@keyframes peer-label-in { from { opacity: 0; transform: translateY(3px) scale(0.92); } }
+@keyframes peer-caret-idle { 0%, 80% { opacity: 1; } 100% { opacity: 0.45; } }
+/* Smooth caret: the cursor glides between positions (≤ 100 ms, typing
+   path) and its blink breathes instead of blinking hard. */
+.cm-editor .cm-cursorLayer .cm-cursor { transition: left 80ms var(--ease), top 80ms var(--ease); }
+.cm-editor.cm-focused .cm-cursorLayer { animation-timing-function: var(--ease-breath) !important; }
+/* Ambient home light (lib/ambient.ts pauses it while the tab is hidden). */
+@keyframes ambient-drift-a { from { transform: translate3d(-6%, -4%, 0) rotate(0deg) scale(1); } to { transform: translate3d(5%, 3%, 0) rotate(24deg) scale(1.12); } }
+@keyframes ambient-drift-b { from { transform: translate3d(4%, 5%, 0) rotate(0deg) scale(1.08); } to { transform: translate3d(-5%, -3%, 0) rotate(-18deg) scale(0.96); } }
+:root[data-hidden] *, :root[data-hidden] *::before, :root[data-hidden] *::after { animation-play-state: paused !important; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -366,18 +357,23 @@ html { scroll-behavior: smooth; }
 
 /* View transitions (explorer ⇄ reader ⇄ editor): a short cross-fade
    with a slight lift on the main pane; the chrome stays put. */
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--dur-2); animation-timing-function: var(--ease); }
+/* The old page stays opaque underneath; the new one fades in over it
+   (never both half-transparent: the canvas would show through). */
+::view-transition-old(root) { animation: none; }
+::view-transition-new(root) { animation: var(--dur-fade) var(--ease) both vt-fade-in; }
 /* Pane layout changes (close / only / equalise) slide into place. */
-::view-transition-group(*) { animation-duration: var(--dur-3); animation-timing-function: var(--spring-gentle); }
-::view-transition-old(lumi-pane) { animation: 120ms var(--ease) both vt-out; }
-::view-transition-new(lumi-pane) { animation: var(--spring-snappy-ms) var(--spring-gentle) both vt-in; }
+::view-transition-group(*) { animation-duration: var(--spring-gentle-ms); animation-timing-function: var(--spring-gentle); }
+::view-transition-old(lumi-pane) { animation: var(--dur-exit) var(--ease-exit) both vt-out; }
+::view-transition-new(lumi-pane) { animation: var(--spring-gentle-ms) var(--spring-gentle) both vt-in; }
 /* Shared elements (motion.ts sharedTransition): an explorer row grows
    into the opened note's title; a link morphs into its hover card. */
 ::view-transition-group(note-title),
-::view-transition-group(hover-card) { animation-duration: var(--spring-gentle-ms); animation-timing-function: var(--spring-gentle); }
-::view-transition-old(note-title), ::view-transition-new(note-title) { animation-duration: var(--spring-gentle-ms); height: 100%; object-fit: none; object-position: left center; }
+::view-transition-group(hover-card) { animation-duration: var(--spring-glide-ms); animation-timing-function: var(--spring-glide); }
+::view-transition-old(note-title), ::view-transition-new(note-title) { animation-duration: var(--spring-glide-ms); height: 100%; object-fit: none; object-position: left center; }
 @keyframes vt-out { to { opacity: 0; } }
-@keyframes vt-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(8px) scale(0.995); } }
+@keyframes vt-fade-in { from { opacity: 0; } }
+
 
 /* Keyboard focus only: pointer clicks do not draw rings. */
 :focus:not(:focus-visible) { outline: none; }
@@ -408,9 +404,14 @@ html { scroll-behavior: smooth; }
   width: 14px;
   height: 14px;
   border-radius: 4px;
-  background: conic-gradient(from 210deg, var(--color-logo-0), var(--color-logo-1), var(--color-logo-2), var(--color-logo-0));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-background) 30%, transparent);
+  background: conic-gradient(from var(--mark-angle, 210deg), var(--color-logo-0), var(--color-logo-1), var(--color-logo-2), var(--color-logo-0));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, white 18%, transparent), 0 0 10px -2px color-mix(in oklch, var(--color-logo-0) 55%, transparent);
 }
+/* The mark is lumi's heartbeat: its light turns slowly (one turn a
+   minute — felt, not seen). @property makes the angle animatable. */
+@property --mark-angle { syntax: '<angle>'; inherits: false; initial-value: 210deg; }
+.ui-wordmark.alive .mark { animation: mark-turn 60s linear infinite; }
+@keyframes mark-turn { to { --mark-angle: 570deg; } }
 
 /* ── Prose: one typographic system ──────────────────────────────────
    The reader, the split preview, the read-only previews AND the Live
@@ -496,7 +497,7 @@ html { scroll-behavior: smooth; }
   text-wrap: balance;
   scroll-margin-top: var(--sp-5);
 }
-.md-body h1 { font-size: 1.875em; font-weight: 700; line-height: 1.18; letter-spacing: -0.022em; margin: 1.5em 0 0.55em; }
+.md-body h1 { font-size: 1.95em; font-weight: 720; line-height: 1.14; letter-spacing: -0.026em; margin: 1.5em 0 0.55em; }
 .md-body h2 { font-size: 1.45em; line-height: 1.22; letter-spacing: -0.016em; margin: 1.75em 0 0.6em; }
 .md-body h3 { font-size: 1.2em; line-height: 1.3; margin: 1.65em 0 0.45em; }
 .md-body h4 { font-size: 1.02em; margin: 1.55em 0 0.4em; }
@@ -506,8 +507,8 @@ html { scroll-behavior: smooth; }
   content: '';
   display: block;
   height: 1px;
-  margin-top: 0.4em;
-  background: linear-gradient(to right, var(--md-rule) 55%, transparent);
+  margin-top: 0.45em;
+  background: linear-gradient(to right, color-mix(in oklch, var(--color-primary) 30%, var(--md-rule)), var(--md-rule) 30%, transparent);
 }
 .md-anchor {
   margin-left: 0.3em;
@@ -541,10 +542,11 @@ html { scroll-behavior: smooth; }
   text-decoration-color: var(--md-link-line);
   text-underline-offset: 0.22em;
   text-decoration-skip-ink: auto;
-  border-radius: 2px;
-  transition: text-decoration-color 120ms var(--ease), color 120ms var(--ease);
+  border-radius: 3px;
+  transition: text-decoration-color var(--dur-fade) var(--ease), color var(--dur-fade) var(--ease), background-color var(--dur-fade) var(--ease), text-underline-offset var(--spring-snappy-ms) var(--spring-snappy);
 }
-.md-body a:hover { text-decoration-color: currentColor; }
+/* Hover: the underline lifts to the text and a faint wash appears. */
+.md-body a:hover { text-decoration-color: currentColor; text-underline-offset: 0.16em; background-color: var(--accent-wash); }
 .md-body a:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); text-decoration-color: currentColor; }
 .md-body a:not([href*=':']):not([href^='#']) { text-decoration-style: dotted; }
 /* External links say so (a small arrow; never on image links). */
@@ -595,6 +597,7 @@ html { scroll-behavior: smooth; }
   vertical-align: -0.15em;
   transition: background 140ms var(--ease), border-color 140ms var(--ease);
 }
+.md-body input.md-task:checked, .cm-lp-checkbox:checked { box-shadow: 0 0 10px -2px var(--accent-glow); }
 .md-body input.md-task::before, .cm-lp-checkbox::before {
   content: '';
   width: 0.55em;
@@ -602,7 +605,7 @@ html { scroll-behavior: smooth; }
   border-left: 2px solid var(--color-background);
   border-bottom: 2px solid var(--color-background);
   transform: translateY(-0.06em) rotate(-45deg) scale(0);
-  transition: transform 140ms var(--ease);
+  transition: transform var(--spring-bouncy-ms) var(--spring-bouncy);
 }
 .md-body input.md-task:checked, .cm-lp-checkbox:checked { background: var(--color-primary); border-color: var(--color-primary); }
 .md-body input.md-task:checked::before, .cm-lp-checkbox:checked::before { transform: translateY(-0.06em) rotate(-45deg) scale(1); }
@@ -619,7 +622,9 @@ html { scroll-behavior: smooth; }
 .md-body blockquote {
   padding: 0.05em 0 0.05em 1.1em;
   border-left: 3px solid var(--md-quote-bar);
+  border-radius: 1px;
   color: var(--md-dim);
+  font-style: italic;
 }
 .md-body blockquote blockquote { margin: 0.5em 0; }
 .md-body blockquote > p:last-child:has(> em:only-child) { font-size: 0.92em; }

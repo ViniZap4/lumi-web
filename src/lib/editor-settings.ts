@@ -65,6 +65,9 @@ export interface EditorSettings {
   /** Leaving the split preview by keyboard moves the editor cursor to
    *  the source line at the top of the preview. */
   previewCursorSync: boolean;
+  /** Hovering a note link for ~350 ms shows a preview card (`K` always
+   *  works from the keyboard). */
+  hoverPreview: boolean;
 }
 
 export const STORAGE_KEY = 'lumi.v2.editor';
@@ -99,6 +102,7 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
   reduceMotion: false,
   paneNav: true,
   previewCursorSync: false,
+  hoverPreview: true,
 });
 
 export const PREVIEW_RATIO_MIN = 0.25;
@@ -202,6 +206,7 @@ export function sanitizeSettings(input: unknown): EditorSettings {
     reduceMotion: bool(o.reduceMotion, d.reduceMotion),
     paneNav: bool(o.paneNav, d.paneNav),
     previewCursorSync: bool(o.previewCursorSync, d.previewCursorSync),
+    hoverPreview: bool(o.hoverPreview, d.hoverPreview),
   };
 }
 

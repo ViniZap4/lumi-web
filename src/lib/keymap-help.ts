@@ -47,7 +47,28 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['j k  d u  f b', 'scroll'],
       ['gg  G', 'top / bottom'],
       ['y', 'copy note text'],
-      ['⌘-click link', 'open linked note'],
+      ['-', 'floating explorer here'],
+    ],
+  },
+  {
+    title: 'Links',
+    rows: [
+      ['gf  ⏎  click', 'follow in this pane'],
+      ['⌃w f  ⌃w ⏎  ⌘-click', 'follow in a split (right)'],
+      ['⌃w F  ⇧⌘-click', 'follow in a split (below)'],
+      ['K  hover', 'preview card'],
+      ['j k  ⏎  Esc', 'card: scroll, open, close'],
+    ],
+  },
+  {
+    title: 'Floating explorer',
+    rows: [
+      ['-  ⟨leader⟩e  :explore', 'open at this note'],
+      ['j k h l  /', 'move, folders, filter'],
+      ['⏎', 'open in this pane'],
+      ['⌃v  ⌃s', 'open in a split right / below'],
+      ['a r d y p', 'file operations'],
+      ['Esc  q  click outside', 'close'],
     ],
   },
   {
@@ -64,10 +85,15 @@ export const KEYMAP: readonly KeymapSection[] = [
   {
     title: 'Panes',
     rows: [
-      ['⌃h ⌃l', 'left / right pane'],
-      ['⌃j ⌃k', 'lower / upper pane (tabs)'],
+      ['⌃h ⌃j ⌃k ⌃l', 'pane left / below / above / right'],
       ['⌃w h j k l', 'same, vim window keys'],
       ['⌃w w  ⌃w p', 'next / previous pane'],
+      ['⌃w v  :vsplit [note]', 'split right'],
+      ['⌃w s  :split [note]', 'split below'],
+      ['⌃w q  :q  :close', 'close pane'],
+      ['⌃w o  :only', 'keep only this pane'],
+      ['⌃w =', 'equal sizes'],
+      ['⌃w < > + -', 'resize (or drag a divider)'],
       ['click', 'focus a pane'],
     ],
   },

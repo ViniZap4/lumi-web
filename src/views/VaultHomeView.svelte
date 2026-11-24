@@ -7,7 +7,7 @@
   import { ApiError } from '../lib/types.ts';
   import * as api from '../lib/api.ts';
   import { offline, bundleMarkdown, downloadText, exportFilename } from '../lib/offline.svelte.ts';
-  import { planSession, startSession, loadEditorSession, flushPending, toggleTaskHeadless } from '../lib/editor-boot.ts';
+  import { flushPending, toggleTaskHeadless, acquireEditorSession, editorPool } from '../lib/editor-boot.ts';
   import type { ConflictCopy } from '../lib/offline-store.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
@@ -20,7 +20,18 @@
   import { planCreate, planRename, planFolderRename, movedPath, copyTitle, type CreatePlan, type RenamePlan, type FolderRenamePlan } from '../lib/fileops.ts';
   import { findNoteByHref, markdownLink } from '../lib/links.ts';
   import { legendFor, contextForVimMode, type LegendContext, type LegendItem } from '../lib/legend.ts';
-  import { PaneKeys, paneLayout, paneTarget, fallsThroughWithoutTarget, PANE_CHORD_MS, type PaneId, type PaneDir } from '../lib/pane-nav.ts';
+  import { PaneKeys, paneLayout, paneTarget, fallsThroughWithoutTarget, PANE_CHORD_MS, type PaneId, type PaneDir, type WinCmd } from '../lib/pane-nav.ts';
+  import {
+    single, splitPane, closePane, onlyPane, equalize, setNote, setView, focus as focusLeafState, resizeSplit, nudgePane,
+    neighbor, cycle, leaves, findLeaf, paneCount, parsePaneState, pruneNotes, newPaneId,
+    type PaneState, type PaneLeaf, type SplitDir,
+  } from '../lib/pane-tree.ts';
+  import { classifyLink, whereFromClick, type OpenWhere, type LinkAt } from '../lib/link-open.ts';
+  import { HoverIntent, type HoverTarget } from '../lib/hover-preview.ts';
+  import { formatDeepLink } from '../lib/deeplink.ts';
+  import { resolveView, viewsFor, MARKDOWN_VIEW } from '../lib/note-views.ts';
+  import { MAC } from '../lib/platform.ts';
+  import { linkCandidates } from '../lib/links.ts';
   import { PreviewKeymap, type PreviewAction } from '../lib/preview-keys.ts';
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
   import { withViewTransition, animate } from '../lib/motion.ts';
@@ -39,6 +50,11 @@
   import SourceSplit from '../components/SourceSplit.svelte';
   import ContextMenu from '../components/ContextMenu.svelte';
   import HintOverlay from '../components/HintOverlay.svelte';
+  import PaneTree from '../components/PaneTree.svelte';
+  import NotePane from '../components/NotePane.svelte';
+  import NoteViewHost from '../components/NoteViewHost.svelte';
+  import HoverCard from '../components/HoverCard.svelte';
+  import FloatingExplorer, { type FxOps, type FxPrompt, type FxPlan } from '../components/FloatingExplorer.svelte';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { countWords, readingTime, type EditorStats } from '../lib/textstats.ts';
 
@@ -326,6 +342,8 @@
 
   /** Which pane holds keyboard focus (click focuses panes too). */
   function onFocusIn(e: FocusEvent): void {
+    const leafEl = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-leaf]') : null;
+    if (leafEl?.dataset.leaf && panes && panes.active !== leafEl.dataset.leaf) panes = focusLeafState(panes, leafEl.dataset.leaf);
     const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-pane]') : null;
     const p = (el?.dataset.pane as PaneId | undefined) ?? null;
     if (!p || p === focusedPane) return;
@@ -348,15 +366,19 @@
   /** The focused pane when it is on screen; else the pane the current
    *  mode implies. */
   const activePane: PaneId = $derived.by(() => {
+    if (focusedPane === 'leaf' && activeIsSecondary) return 'leaf';
     const all = [...layout.order, ...(layout.stack ?? [])];
     if (focusedPane && all.includes(focusedPane)) return focusedPane;
     if (editMode && editSession) return 'editor';
     return pane === 'note' ? 'main' : 'explorer';
   });
-  const multiPane = $derived(layout.order.length + (layout.stack ? 1 : 0) > 1);
 
-  /** Move focus `dir`; false when no pane lies that way. */
+  /** Move focus `dir`; false when no pane lies that way. With several
+   *  note panes, h/j/k/l follow the pane tree's geometry; the explorer
+   *  is left of everything, the editor | preview pair of the primary
+   *  pane moves inside first. */
   function navigatePane(dir: PaneDir): boolean {
+    if (multi && panes) return navigateTree(dir);
     const from = activePane;
     const to = paneTarget(layout, from, dir, prevPane);
     if (!to || to === from) return false;
@@ -364,13 +386,50 @@
     return true;
   }
 
+  function navigateTree(dir: PaneDir): boolean {
+    const t = panes!;
+    const cur = activeLeafId;
+    const inExplorer = activePane === 'explorer' && !activeIsSecondary;
+    if (dir === 'w' || dir === 'p') {
+      const to = dir === 'w' ? cycle(t, cur, 1) : (prevLeaf && findLeaf(t.root, prevLeaf) ? prevLeaf : null);
+      if (!to || to === cur) return false;
+      prevLeaf = cur;
+      focusLeaf(to);
+      return true;
+    }
+    if (inExplorer) {
+      if (dir !== 'l') return false;
+      focusLeaf(cur);
+      return true;
+    }
+    // Inside the primary pane: editor ⇄ split preview first.
+    if (!activeIsSecondary && editMode && editSession && (dir === 'h' || dir === 'l')) {
+      const inner = activePane;
+      if (dir === 'l' && inner === 'editor' && layout.order.includes('split')) return void focusPaneEl('split', 'editor'), true;
+      if (dir === 'h' && inner === 'split') return void focusPaneEl('editor', 'split'), true;
+    }
+    const to = neighbor(t, cur, dir);
+    if (to) {
+      prevLeaf = cur;
+      focusLeaf(to, dir);
+      return true;
+    }
+    if (dir === 'h' && !narrowView) {
+      prevLeaf = cur;
+      void focusPaneEl('explorer');
+      return true;
+    }
+    return false;
+  }
+  let prevLeaf: string | null = null;
+
   async function focusPaneEl(to: PaneId, from: PaneId | null = activePane): Promise<void> {
     switch (to) {
       case 'explorer':
         await focusColumn(true);
         return;
       case 'main':
-        previewEl?.focus({ preventScroll: true });
+        readerEl()?.focus({ preventScroll: true });
         return;
       case 'split':
         await splitRef?.focusPreview();
@@ -393,12 +452,13 @@
     if (hintTimer) clearTimeout(hintTimer);
     if (toastTimer) clearTimeout(toastTimer);
     if (pendingTimer) clearTimeout(pendingTimer);
+    hoverIntent.cancel();
     void offline.watchConflicts(null);
     // Tear the editor session down (socket + Y.Doc) — e.g. on logout
     // App.svelte unmounts this view while an editor is open.
     if (editSession) {
-      editSession.destroy();
       sync.setEditor(editSession.vaultID, null);
+      editorPool.release(editSession);
       editSession = null;
     }
     // Drop the per-vault cache so the next vault load starts clean.
@@ -410,7 +470,7 @@
   }
 
   function overlayOpen(): boolean {
-    return !!(uiState.accountModal || uiState.createBookOpen || showSettings || uiState.settings || uiState.helpOpen || uiState.themePickerOpen || paletteMode || hintsOpen || menu);
+    return !!(uiState.accountModal || uiState.createBookOpen || showSettings || uiState.settings || uiState.helpOpen || uiState.themePickerOpen || paletteMode || hintsOpen || menu || fx || hover?.keyboard);
   }
 
   function syncPending(): void {
@@ -426,6 +486,13 @@
     if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
       void saveEdit();
+      return;
+    }
+
+    // A hover card shown by the pointer: Esc dismisses it.
+    if (hover && !hover.keyboard && e.key === 'Escape') {
+      e.preventDefault();
+      closeHover();
       return;
     }
 
@@ -451,6 +518,11 @@
     const pk = paneKeys.feed(e, { ctrlHjkl: editorSettings.value.paneNav });
     panePending = paneKeys.pending;
     if (pk) {
+      if (pk.kind === 'win') {
+        e.preventDefault();
+        runWin(pk.cmd);
+        return;
+      }
       if (pk.kind !== 'nav' || navigatePane(pk.dir) || !fallsThroughWithoutTarget(pk)) {
         e.preventDefault();
         return;
@@ -498,7 +570,7 @@
     // In edit mode, leaving is an explicit command only (Done button,
     // Mod-Enter, Mod-E, vim :q) — never a stray Esc. The explorer
     // column keeps its keys while the editor is open.
-    if (editMode && activePane !== 'explorer') return;
+    if (editMode && activePane !== 'explorer' && activePane !== 'leaf') return;
 
     const action = keymap.feed(e, shellContext());
     syncPending();
@@ -511,7 +583,7 @@
   /** Explorer keys or reader keys, by the focused pane. */
   function shellContext(): 'explorer' | 'reader' {
     if (activePane === 'explorer') return 'explorer';
-    if (activePane === 'main') return 'reader';
+    if (activePane === 'main' || activePane === 'leaf') return 'reader';
     return pane === 'note' ? 'reader' : 'explorer';
   }
 
@@ -543,6 +615,17 @@
       case 'command':
         paletteMode = 'command';
         return;
+      case 'floatExplorer':
+        openFloating();
+        return;
+      case 'hover':
+        hoverKey(readerLinkTarget(), null, leafPath(primaryLeaf));
+        return;
+      case 'follow': {
+        const l = readerLinkTarget();
+        if (l) followLink(l.href, 'current', leafPath(primaryLeaf));
+        return;
+      }
       default:
         splitRef?.run(a);
     }
@@ -568,7 +651,32 @@
     return cur?.kind === 'note' ? cur.note.id : null;
   }
 
+  /** Reader keys in a secondary pane; false = not pane-specific. */
+  function runLeafAction(a: ShellAction): boolean {
+    const h = paneRefs[activeLeafId];
+    if (!h) return false;
+    switch (a.kind) {
+      case 'edit': void h.enterEdit(); return true;
+      case 'close':
+      case 'parent':
+      case 'clearOrBack': closeLeaf(activeLeafId); return true;
+      case 'yank': {
+        const el = h.element()?.querySelector('.md-body');
+        const sel = window.getSelection?.()?.toString();
+        void navigator.clipboard?.writeText(sel || el?.textContent || '').then(() => flash(sel ? 'copied selection' : 'copied note text'), () => flash('clipboard unavailable', 'warn'));
+        return true;
+      }
+      case 'rename':
+      case 'delete':
+      case 'open':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   function runAction(a: ShellAction): void {
+    if (activePane === 'leaf' && runLeafAction(a)) return;
     const reader = shellContext() === 'reader';
     const page = currentCol?.pageRows() ?? 10;
     switch (a.kind) {
@@ -692,6 +800,18 @@
       case 'menu':
         openMenuAtCursor();
         return;
+      case 'floatExplorer':
+        openFloating();
+        return;
+      case 'hover':
+        hoverKey(readerLinkTarget(), null, leafPath());
+        return;
+      case 'follow': {
+        const l = readerLinkTarget();
+        if (!l) return flash('no link to follow — Tab to one, or f for hints', 'warn');
+        followLink(l.href, 'current', leafPath());
+        return;
+      }
     }
   }
 
@@ -719,7 +839,7 @@
       pane = 'note';
       await tick();
     });
-    previewEl?.focus();
+    readerEl()?.focus();
   }
 
   function leaveNote(): void {
@@ -770,7 +890,8 @@
   }
 
   function scrollNote(by: number | 'top' | 'bottom' | 'half' | '-half' | 'page' | '-page'): void {
-    const el = previewEl;
+    if (activeIsSecondary) return paneRefs[activeLeafId]?.scroll(by);
+    const el = readerEl();
     if (!el) return;
     const h = el.clientHeight;
     const smooth = (top: number) => {
@@ -905,30 +1026,8 @@
     busy = true;
     promptErr = null;
     try {
-      if (plan.kind === 'folder' && 'path' in plan) {
-        // `a dir/`: folders exist on the server only through notes, so
-        // keep it client-side until a note lands in it.
-        nav.addFolder(plan.path);
-        nav.goTo(plan.path);
-        prompt = null;
-        flash(`folder ${plan.path}/ — create a note in it to keep it (a)`);
-      } else if (plan.kind === 'folder') {
-        await moveFolder(plan.from, plan.to);
-        prompt = null;
-      } else if (plan.kind === 'note' && 'folder' in plan) {
-        await createNote(plan.title, plan.folder);
-        prompt = null;
-      } else if (plan.kind === 'note' && p.kind === 'rename' && p.entry.kind === 'note') {
-        const input: { title?: string; path?: string } = {};
-        if (plan.title) input.title = plan.title;
-        if (plan.path) input.path = plan.path;
-        const updated = await notes.patch(p.entry.note.id, input);
-        prompt = null;
-        if (updated && plan.path) {
-          nav.reveal(updated.id);
-          flash(`moved to ${updated.path}`);
-        }
-      }
+      await runPlan(p, plan, nav);
+      prompt = null;
       void focusColumn(true);
     } catch (e) {
       promptErr = errText(e);
@@ -939,6 +1038,10 @@
 
   /** POST (always at the book root), then PATCH the path into `folder`. */
   async function createNote(title: string, folder: string, body = ''): Promise<void> {
+    return createNoteIn(nav, title, folder, body);
+  }
+
+  async function createNoteIn(n: MillerNav, title: string, folder: string, body = ''): Promise<void> {
     creating = true;
     try {
       const created = await notes.create({ title, body });
@@ -948,18 +1051,20 @@
         const file = normalizePath(created.path || created.id + '.md').split('/').pop()!;
         final = (await notes.patch(created.id, { path: `${folder}/${file}` })) ?? created;
         nav.removeFolder(folder); // real now
+        if (n !== nav) n.removeFolder(folder);
       }
-      nav.reveal(final.id);
+      n.reveal(final.id);
+      if (n !== nav) nav.reveal(final.id);
     } finally {
       creating = false;
     }
   }
 
-  async function moveFolder(from: string, to: string): Promise<void> {
-    if (nav.extraDirs.has(from) && !notes.list.some((n) => movedPath(n.path, from, to))) {
-      nav.removeFolder(from);
-      nav.addFolder(to);
-      nav.goTo(dirOf(to), 'd:' + to);
+  async function moveFolder(from: string, to: string, ex: MillerNav = nav): Promise<void> {
+    if (ex.extraDirs.has(from) && !notes.list.some((n) => movedPath(n.path, from, to))) {
+      ex.removeFolder(from);
+      ex.addFolder(to);
+      ex.goTo(dirOf(to), 'd:' + to);
       return;
     }
     const moves = notes.list
@@ -970,7 +1075,7 @@
       flash(`moving ${++done}/${moves.length}…`);
       await notes.patch(m.n.id, { path: m.path });
     }
-    nav.goTo(dirOf(to), 'd:' + to);
+    ex.goTo(dirOf(to), 'd:' + to);
     flash(`moved ${moves.length} ${moves.length === 1 ? 'note' : 'notes'} to ${to}/`);
   }
 
@@ -1024,31 +1129,16 @@
 
   // ---- links -----------------------------------------------------------------
 
-  /** Open a relative note link from the open note (reader click or
-   *  Live Preview Mod-click). */
+  /** Open a relative note link from the open note (Live Preview
+   *  Mod-click without a pane router). */
   function openLinkedNote(href: string): void {
-    const from = notes.selected?.path ?? notes.content?.path ?? '';
-    const target = findNoteByHref(notes.list, from, href);
-    if (!target) return flash(`no note at ${href}`, 'warn');
-    if (editMode) exitEdit();
-    void notes.select(target.id).then(() => {
-      nav.reveal(target.id);
-      pane = 'note';
-    });
+    followLink(href, 'current', leafPath(primaryLeaf), false, primaryLeaf);
   }
 
-  /** Link clicks inside rendered markdown (in-note `#` anchors are
-   *  handled by MarkdownView). */
+  /** Link clicks inside the primary pane's rendered markdown (reader,
+   *  split preview). In-note `#` anchors are handled by MarkdownView. */
   function onMdLink(href: string, e: MouseEvent): void {
-    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) {
-      // External: never navigate the app away.
-      e.preventDefault();
-      if (/^(https?|mailto):/i.test(href)) window.open(href, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    if (href.startsWith('#')) return;
-    e.preventDefault();
-    openLinkedNote(href);
+    routeClick(href, e, leafPath(primaryLeaf), primaryLeaf);
   }
 
   // ---- tasks ---------------------------------------------------------------------
@@ -1121,7 +1211,7 @@
   function openMenuAtCursor(): void {
     if (pane === 'note') {
       const entry = entryForOpenNote();
-      const r = previewEl?.getBoundingClientRect();
+      const r = readerEl()?.getBoundingClientRect();
       if (entry) openMenu((r?.left ?? 0) + 48, (r?.top ?? 0) + 48, entry, true);
       return;
     }
@@ -1182,6 +1272,526 @@
     });
   });
 
+  // ---- panes: splits of notes (SPEC-PARTE2 §3) ------------------------------
+  //
+  // The note area is a tree of panes (lib/pane-tree.ts). `panes` is null
+  // while there is a single pane (the classic reader/editor). The
+  // *primary* leaf renders the note the explorer previews (notes.selected
+  // + this view's editor session); every other leaf is a NotePane with
+  // its own note, reader and editor. Live sessions are shared through
+  // editorPool, so two panes on one note edit one Y.Doc. A pane renders
+  // the note view its kind picks (lib/note-views.ts): markdown today,
+  // kanban / canvas when registered.
+
+  type NotePaneHandle = {
+    focus(): void;
+    scroll(by: number | 'top' | 'bottom' | 'half' | '-half' | 'page' | '-page'): void;
+    enterEdit(): Promise<void>;
+    exitEdit(): void;
+    isEditing(): boolean;
+    element(): HTMLElement | null;
+    notePath(): string;
+  };
+
+  const PANES_KEY = 'lumi.panes.v1:';
+  let panes = $state.raw<PaneState | null>(null);
+  let primaryLeaf = $state(newPaneId());
+  const paneRefs: Record<string, NotePaneHandle | null> = $state({});
+  let paneInfo = $state<Record<string, { editing: boolean; title: string }>>({});
+  let primaryWrapEl = $state<HTMLElement | null>(null);
+
+  const multi = $derived(!!panes && paneCount(panes) > 1 && pane === 'note');
+  const activeLeafId = $derived(panes?.active ?? primaryLeaf);
+  const activeIsSecondary = $derived(multi && activeLeafId !== primaryLeaf);
+  const leafList = $derived(panes ? leaves(panes.root) : []);
+  const multiPane = $derived(multi || layout.order.length + (layout.stack ? 1 : 0) > 1);
+
+  /** The scrollable reader of the primary pane. */
+  function readerEl(): HTMLElement | null {
+    return multi ? primaryWrapEl : previewEl;
+  }
+
+  /** Book-relative path of the note in leaf `id`. */
+  function leafPath(id: string = activeLeafId): string {
+    if (id === primaryLeaf) return notes.selected?.path ?? notes.content?.path ?? '';
+    const l = panes ? findLeaf(panes.root, id) : null;
+    return (l && notes.list.find((n) => n.id === l.note)?.path) ?? paneRefs[id]?.notePath() ?? '';
+  }
+
+  function ensureTree(): PaneState | null {
+    if (panes) return panes;
+    const id = notes.selectedID;
+    if (!id) return null;
+    panes = single(id, primaryLeaf);
+    return panes;
+  }
+
+  /** Open `note` in a new pane beside (`row`) or below (`col`) leaf `at`. */
+  async function splitWith(dir: SplitDir, note: string | null, at: string = activeLeafId): Promise<void> {
+    const base = ensureTree();
+    if (!base) return flash('open a note first', 'warn');
+    const target = note ?? findLeaf(base.root, at)?.note ?? notes.selectedID;
+    if (!target) return;
+    const next = splitPane(base, findLeaf(base.root, at) ? at : base.active, dir, target);
+    if (!next) return flash('too many panes — close one first (⌃w q)', 'warn');
+    if (pane !== 'note') pane = 'note';
+    panes = next;
+    await tick();
+    const el = homeEl?.querySelector<HTMLElement>(`[data-leaf="${next.active}"]`);
+    animate(el, [{ opacity: 0, transform: dir === 'row' ? 'translateX(14px)' : 'translateY(12px)' }, { opacity: 1, transform: 'none' }], 200);
+    focusedPane = 'leaf';
+    paneRefs[next.active]?.focus();
+    requestAnimationFrame(() => {
+      if (panes?.active === next.active) paneRefs[next.active]?.focus();
+    });
+  }
+
+  /** Make leaf `id` the primary one (it shows the explorer's note). */
+  function promote(id: string): void {
+    if (!panes || id === primaryLeaf) return;
+    const l = findLeaf(panes.root, id);
+    if (!l) return;
+    const wasEditing = paneRefs[id]?.isEditing() ?? false;
+    if (editSession) exitEdit();
+    primaryLeaf = id;
+    void notes.select(l.note).then(() => {
+      nav.reveal(l.note);
+      // The secondary pane released its session with a grace period:
+      // the primary picks the same live doc up.
+      if (wasEditing) void enterEdit();
+    });
+  }
+
+  function closeLeaf(id: string = activeLeafId): void {
+    if (!panes || paneCount(panes) < 2) {
+      if (editMode) exitEditAnimated();
+      else leaveNote();
+      return;
+    }
+    const next = closePane(panes, id);
+    if (!next) return;
+    void withViewTransition(async () => {
+      if (id === primaryLeaf) promote(next.active === id ? leaves(next.root)[0].id : next.active);
+      panes = paneCount(next) > 1 ? next : null;
+      if (!panes) primaryLeaf = leaves(next.root)[0].id;
+      delete paneRefs[id];
+      await tick();
+    });
+    void tick().then(() => focusLeaf(next.active));
+  }
+
+  function onlyLeaf(id: string = activeLeafId): void {
+    if (!panes) return;
+    if (id !== primaryLeaf) promote(id);
+    void withViewTransition(async () => {
+      panes = null;
+      await tick();
+    });
+    void tick().then(() => focusLeaf(primaryLeaf));
+  }
+
+  function focusLeaf(id: string, from?: PaneDir): void {
+    if (panes) panes = focusLeafState(panes, id);
+    if (id === primaryLeaf || !multi) {
+      if (editMode && editSession) {
+        const split = editorSettings.value.editMode === 'source' && editorSettings.value.previewSplit && !splitNarrow;
+        void focusPaneEl(from === 'h' && split ? 'split' : 'editor');
+      } else void focusPaneEl('main');
+      return;
+    }
+    paneRefs[id]?.focus();
+  }
+
+  function setPrimaryView(view: string | null): void {
+    const base = ensureTree();
+    if (base) panes = setView(base, primaryLeaf, view);
+  }
+
+  /** Window commands: Ctrl-w v/s/q/o/=/f/F/</>/+/- and :vsplit etc. */
+  function runWin(cmd: WinCmd, o: { link?: LinkAt | null; arg?: string } = {}): void {
+    switch (cmd) {
+      case 'vsplit':
+      case 'split': {
+        let note: string | null = null;
+        if (o.arg) {
+          const hit = linkCandidates(notes.list, o.arg, { limit: 1 })[0];
+          if (!hit) return flash(`no note matches “${o.arg}”`, 'warn');
+          note = hit.id;
+        } else if (pane === 'browse' && nav.current?.kind === 'note') {
+          note = nav.current.note.id;
+        }
+        void splitWith(cmd === 'vsplit' ? 'row' : 'col', note);
+        return;
+      }
+      case 'close': closeLeaf(); return;
+      case 'only': onlyLeaf(); return;
+      case 'equal': if (panes) panes = equalize(panes); return;
+      case 'linkV':
+      case 'linkH': {
+        const l = o.link ?? readerLinkTarget();
+        if (!l) return flash('no link under the cursor', 'warn');
+        followLink(l.href, cmd === 'linkV' ? 'vsplit' : 'hsplit', leafPath(), l.wiki);
+        return;
+      }
+      case 'wider':
+      case 'narrower':
+      case 'taller':
+      case 'shorter':
+        if (!panes) return;
+        panes = nudgePane(panes, activeLeafId, cmd === 'wider' || cmd === 'narrower' ? 'row' : 'col', cmd === 'wider' || cmd === 'taller' ? 0.05 : -0.05);
+        return;
+    }
+  }
+
+  // The primary leaf follows the note the explorer previews / opens.
+  $effect(() => {
+    const id = notes.selectedID;
+    untrack(() => {
+      if (!panes) return;
+      const l = findLeaf(panes.root, primaryLeaf);
+      if (!l) return;
+      if (id && l.note !== id) panes = setNote(panes, primaryLeaf, id);
+      else if (!id && !notes.loadingContent && paneCount(panes) > 1 && pane === 'note') {
+        // The primary note is gone (deleted): its pane closes.
+        closeLeaf(primaryLeaf);
+      }
+    });
+  });
+
+  // Notes deleted elsewhere close their panes.
+  $effect(() => {
+    const list = notes.list;
+    untrack(() => {
+      if (!panes || notes.loadingList || notes.stale) return;
+      const ids = new Set(list.map((n) => n.id));
+      const pruned = pruneNotes(panes, (n) => ids.has(n));
+      if (pruned === panes) return;
+      if (!pruned || paneCount(pruned) < 2) panes = null;
+      else {
+        if (!findLeaf(pruned.root, primaryLeaf)) promote(pruned.active);
+        panes = pruned;
+      }
+    });
+  });
+
+  // Layout per book, per device (only multi-pane layouts are kept).
+  $effect(() => {
+    const vid = vaults.selectedID;
+    const s = panes;
+    const prim = primaryLeaf;
+    untrack(() => {
+      if (!vid || !restoredFor.has(vid)) return;
+      try {
+        if (s && paneCount(s) > 1) localStorage.setItem(PANES_KEY + vid, JSON.stringify({ v: 1, state: s, primary: prim }));
+        else localStorage.removeItem(PANES_KEY + vid);
+      } catch {
+        /* storage unavailable */
+      }
+    });
+  });
+
+  const restoredFor = new Set<string>();
+  /** Restore the book's last layout once its notes are known. */
+  function restoreLayout(vid: string): void {
+    if (restoredFor.has(vid)) return;
+    restoredFor.add(vid);
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(localStorage.getItem(PANES_KEY + vid) ?? 'null');
+    } catch {
+      raw = null;
+    }
+    const o = raw as { state?: unknown; primary?: unknown } | null;
+    const parsed = o ? parsePaneState(o.state) : null;
+    if (!parsed) return;
+    const ids = new Set(notes.list.map((n) => n.id));
+    const pruned = pruneNotes(parsed, (n) => ids.has(n));
+    if (!pruned || paneCount(pruned) < 2) return;
+    const prim = typeof o?.primary === 'string' && findLeaf(pruned.root, o.primary) ? o.primary : pruned.active;
+    primaryLeaf = prim;
+    panes = pruned;
+    const note = findLeaf(pruned.root, prim)!.note;
+    void notes.select(note).then(() => {
+      nav.reveal(note);
+      pane = 'note';
+    });
+  }
+
+  // ---- links: one routing table (SPEC-PARTE2 §3) -----------------------------
+
+  /** Open note `id` in the current pane, or in a new split. */
+  function openIn(id: string, where: OpenWhere, leaf: string = activeLeafId): void {
+    // The layout moves under a still pointer: no card for a moment.
+    hoverQuietUntil = Date.now() + 700;
+    hoverIntent.hide();
+    if (where !== 'current') {
+      void splitWith(where === 'vsplit' ? 'row' : 'col', id, leaf);
+      return;
+    }
+    if (multi && leaf !== primaryLeaf && panes) {
+      panes = setNote(panes, leaf, id);
+      return;
+    }
+    if (editMode) exitEdit();
+    void withViewTransition(async () => {
+      await notes.select(id);
+      nav.reveal(id);
+      pane = 'note';
+      await tick();
+    }).then(() => readerEl()?.focus({ preventScroll: true }));
+  }
+
+  /** Follow an href found in the note at `fromPath`. */
+  function followLink(href: string, where: OpenWhere, fromPath: string, wiki = false, leaf: string = activeLeafId): void {
+    const t = classifyLink(notes.list, fromPath, href, wiki);
+    switch (t.kind) {
+      case 'note': openIn(t.note.id, where, leaf); return;
+      case 'external': window.open(t.url, '_blank', 'noopener,noreferrer'); return;
+      case 'missing': flash(`no note at ${t.path}`, 'warn'); return;
+      case 'unsafe': flash('link not followed (unsupported scheme)', 'warn'); return;
+      case 'anchor': return;
+    }
+  }
+
+  /** Link clicks in rendered markdown: plain click = this pane,
+   *  Cmd/Ctrl-click = vertical split, Shift-Cmd/Ctrl-click = horizontal. */
+  function routeClick(href: string, e: MouseEvent, fromPath: string, leaf: string): void {
+    if (href.startsWith('#')) return;
+    const where = whereFromClick(e, MAC);
+    if (!where) return; // middle / Alt-click: the browser's
+    e.preventDefault();
+    hoverIntent.hide();
+    followLink(href, where, fromPath, false, leaf);
+  }
+
+  /** The reader's link target for gf / K / Ctrl-w f: the focused link,
+   *  else the hovered one, else the first link in view. */
+  function readerLinkTarget(root: HTMLElement | null = activeReaderRoot()): LinkAt | null {
+    if (!root) return null;
+    const a = document.activeElement;
+    let el: Element | null = a instanceof HTMLAnchorElement && root.contains(a) ? a : null;
+    if (!el && lastHoverEl && root.contains(lastHoverEl)) el = lastHoverEl;
+    if (!el) {
+      const r = root.getBoundingClientRect();
+      el = Array.from(root.querySelectorAll('.md-body a[href]')).find((x) => {
+        const b = x.getBoundingClientRect();
+        return b.bottom > r.top && b.top < r.bottom && !(x.getAttribute('href') ?? '').startsWith('#');
+      }) ?? null;
+    }
+    const href = el?.getAttribute('href');
+    return href ? { href, wiki: false, from: 0, to: 0 } : null;
+  }
+
+  function activeReaderRoot(): HTMLElement | null {
+    if (activeIsSecondary) return paneRefs[activeLeafId]?.element() ?? null;
+    if (editMode && activePane === 'split') return splitRef?.previewElement() ?? null;
+    return readerEl();
+  }
+
+  function linkElFor(root: HTMLElement | null, href: string): HTMLElement | null {
+    if (!root) return null;
+    return Array.from(root.querySelectorAll<HTMLElement>('a[href]')).find((x) => x.getAttribute('href') === href) ?? null;
+  }
+
+  // ---- hover link preview (SPEC-PARTE2 §4) -----------------------------------
+
+  type HoverState = { target: HoverTarget; anchor: { left: number; top: number; bottom: number }; keyboard: boolean; leaf: string; returnTo: HTMLElement | null };
+  let hover = $state<HoverState | null>(null);
+  let lastHoverEl: Element | null = null;
+  let hoverQuietUntil = 0;
+  type HoverReq = { href: string; fromPath: string; leaf: string; el: HTMLElement; wiki: boolean };
+  const hoverIntent = new HoverIntent<HoverReq>((r) => showHover(r, false), () => (hover = null));
+
+  function hoverTargetFor(href: string, fromPath: string, wiki: boolean): HoverTarget | null {
+    const t = classifyLink(notes.list, fromPath, href, wiki);
+    if (t.kind === 'note') return { kind: 'note', note: t.note };
+    if (t.kind === 'external') return { kind: 'external', url: t.url };
+    if (t.kind === 'missing') return { kind: 'missing', path: t.path };
+    return null;
+  }
+
+  function showHover(r: HoverReq, keyboard: boolean): void {
+    const target = hoverTargetFor(r.href, r.fromPath, r.wiki);
+    if (!target || !r.el.isConnected) {
+      hoverIntent.hide();
+      return;
+    }
+    const b = r.el.getBoundingClientRect();
+    hover = { target, anchor: { left: b.left, top: b.top, bottom: b.bottom }, keyboard, leaf: r.leaf, returnTo: keyboard ? (document.activeElement as HTMLElement | null) : null };
+  }
+
+  /** `K`: the card for a link, without the hover delay. */
+  function hoverKey(l: LinkAt | null, rect: { left: number; top: number; bottom: number } | null, fromPath: string, leaf = activeLeafId): void {
+    if (!l) return flash('no link under the cursor', 'warn');
+    const target = hoverTargetFor(l.href, fromPath, l.wiki);
+    if (!target) return;
+    const el = rect ? null : linkElFor(activeReaderRoot(), l.href);
+    const b = rect ?? el?.getBoundingClientRect() ?? { left: 80, top: 80, bottom: 96 };
+    hoverIntent.showNow({ href: l.href, fromPath, leaf, el: el ?? homeEl!, wiki: l.wiki }, 'k:' + l.href);
+    hover = { target, anchor: { left: b.left, top: b.top, bottom: b.bottom }, keyboard: true, leaf, returnTo: document.activeElement as HTMLElement | null };
+  }
+
+  function closeHover(): void {
+    const ret = hover?.returnTo;
+    hoverIntent.hide();
+    hover = null;
+    ret?.focus?.({ preventScroll: true });
+  }
+
+  function openFromHover(where: OpenWhere): void {
+    const h = hover;
+    if (!h) return;
+    closeHover();
+    if (h.target.kind === 'note') openIn(h.target.note.id, where, h.leaf);
+    else if (h.target.kind === 'external') window.open(h.target.url, '_blank', 'noopener,noreferrer');
+  }
+
+  function hoverLinkEl(t: EventTarget | null): HTMLElement | null {
+    const el = t instanceof Element ? t.closest<HTMLElement>('a[href], [data-lp-note], [data-lp-href]') : null;
+    if (!el || !el.closest('.md-body, .cm-editor') || el.closest('.hover-card, .fx')) return null;
+    return el;
+  }
+
+  function onHoverOver(e: PointerEvent): void {
+    if (e.pointerType === 'touch' || !editorSettings.value.hoverPreview || Date.now() < hoverQuietUntil) return;
+    const el = hoverLinkEl(e.target);
+    if (!el) return;
+    const href = el.getAttribute('data-lp-note') ?? el.getAttribute('href') ?? el.getAttribute('data-lp-href') ?? '';
+    if (!href || href.startsWith('#')) return;
+    lastHoverEl = el;
+    const host = el.closest<HTMLElement>('[data-leaf]');
+    const leaf = host?.dataset.leaf ?? primaryLeaf;
+    const fromPath = el.closest<HTMLElement>('[data-note-path]')?.dataset.notePath ?? leafPath(leaf);
+    hoverIntent.enter({ href, fromPath, leaf, el, wiki: false }, `${leaf}|${fromPath}|${href}`);
+  }
+
+  function onHoverOut(e: PointerEvent): void {
+    const el = hoverLinkEl(e.target);
+    if (!el) return;
+    if (e.relatedTarget instanceof Node && el.contains(e.relatedTarget)) return;
+    if (lastHoverEl === el) lastHoverEl = null;
+    if (!hover?.keyboard) hoverIntent.leave();
+  }
+
+  // ---- floating explorer (SPEC-PARTE2 §2) -------------------------------------
+
+  let fx = $state<{ startNote: string | null; startDir: string } | null>(null);
+  let fxLeaf: string | null = null;
+
+  function openFloating(): void {
+    hoverIntent.hide();
+    fxLeaf = activeLeafId;
+    const l = panes ? findLeaf(panes.root, activeLeafId) : null;
+    const note = l?.note ?? notes.selectedID;
+    fx = { startNote: note, startDir: nav.dir };
+  }
+
+  function fxOpen(id: string, where: OpenWhere): void {
+    const leaf = fxLeaf ?? activeLeafId;
+    fx = null;
+    openIn(id, where, leaf);
+  }
+
+  const fxOps: FxOps = {
+    offline: () => structuralOffline,
+    run: (p, plan, n) => runPlan(p, plan, n),
+    remove: async (entry) => {
+      if (entry.kind !== 'note') return;
+      const wasSelected = notes.selectedID === entry.note.id;
+      if (!wasSelected) await notes.select(entry.note.id);
+      await notes.deleteSelected();
+      if (pane === 'note' && wasSelected && !multi) leaveNote();
+    },
+    paste: async (src, n) => {
+      if (src.kind !== 'note') return;
+      if (structuralOffline) throw new Error(OFFLINE_HINT);
+      const vid = vaults.selectedID;
+      if (!vid) return;
+      const body = (await api.getNoteContent(vid, src.note.id)).body ?? '';
+      const taken = new Set(notes.list.map((x) => x.title));
+      await createNoteIn(n, copyTitle(src.note.title ?? src.name, taken), n.dir, body);
+    },
+  };
+
+  /** Run a create / rename / move plan against explorer state `n`
+   *  (the main explorer or the floating one). */
+  async function runPlan(p: Prompt | FxPrompt, plan: FxPlan, n: MillerNav): Promise<void> {
+    if (plan.kind === 'error') throw new Error(plan.message);
+    if (plan.kind === 'none') return;
+    if (plan.kind === 'folder' && 'path' in plan) {
+      n.addFolder(plan.path);
+      if (n !== nav) nav.addFolder(plan.path);
+      n.goTo(plan.path);
+      flash(`folder ${plan.path}/ — create a note in it to keep it (a)`);
+    } else if (plan.kind === 'folder') {
+      await moveFolder(plan.from, plan.to, n);
+    } else if (plan.kind === 'note' && 'folder' in plan) {
+      await createNoteIn(n, plan.title, plan.folder);
+    } else if (plan.kind === 'note' && p.kind === 'rename' && p.entry.kind === 'note') {
+      const input: { title?: string; path?: string } = {};
+      if (plan.title) input.title = plan.title;
+      if (plan.path) input.path = plan.path;
+      const updated = await notes.patch(p.entry.note.id, input);
+      if (updated && plan.path) {
+        n.reveal(updated.id);
+        flash(`moved to ${updated.path}`);
+      }
+    }
+  }
+
+  // ---- deep links (SPEC-PARTE2 §8) --------------------------------------------
+
+  // A pending #/b/<vault>/n/<note> opens once the book's notes are in.
+  $effect(() => {
+    const want = uiState.pendingNote;
+    const vid = vaults.selectedID;
+    const ready = notes.vaultID === vid && !notes.loadingList && notes.list.length > 0;
+    if (!want || !vid || want.vault !== vid || !ready) return;
+    untrack(() => {
+      uiState.pendingNote = null;
+      restoredFor.add(vid);
+      const n = want.note
+        ? notes.list.find((x) => x.id === want.note)
+        : notes.list.find((x) => normalizePath(x.path) === normalizePath(want.path ?? ''));
+      if (!n) return flash('that note is not in this book (deleted or moved?)', 'warn');
+      panes = null;
+      void openNote(n.id);
+      nav.reveal(n.id);
+    });
+  });
+
+  // First list of a book: restore its pane layout.
+  $effect(() => {
+    const vid = vaults.selectedID;
+    const ready = !!vid && notes.vaultID === vid && !notes.loadingList && notes.list.length > 0;
+    if (!ready) return;
+    untrack(() => {
+      if (uiState.pendingNote?.vault === vid) return;
+      restoreLayout(vid!);
+    });
+  });
+
+  // The URL follows the book / note (so it can be copied or targeted by
+  // `lumi open`); replaceState, so Back is not flooded.
+  $effect(() => {
+    const vid = vaults.selectedID;
+    const id = pane === 'note' ? notes.selectedID : null;
+    if (!vid || uiState.pendingNote) return;
+    const want = formatDeepLink({ vault: vid, note: id ?? undefined });
+    try {
+      if (window.location.hash !== want) history.replaceState(history.state, '', want);
+    } catch {
+      /* sandboxed */
+    }
+  });
+
+  function copyDeepLink(): void {
+    const vid = vaults.selectedID;
+    if (!vid) return;
+    const url = window.location.origin + window.location.pathname + formatDeepLink({ vault: vid, note: notes.selectedID ?? undefined });
+    void navigator.clipboard?.writeText(url).then(() => flash('copied link'), () => flash('clipboard unavailable', 'warn'));
+  }
+
   // ---- legend actions ------------------------------------------------------------
 
   const PREVIEW_ALIASES: Record<string, PreviewAction> = {
@@ -1227,6 +1837,12 @@
         hintsOpen = true;
         return;
       case 'panes': navigatePane('w'); return;
+      case 'vsplit': runWin('vsplit'); return;
+      case 'hsplit': runWin('split'); return;
+      case 'closePane': runWin('close'); return;
+      case 'onlyPane': runWin('only'); return;
+      case 'equalPanes': runWin('equal'); return;
+      case 'explorer': openFloating(); return;
       case 'readPreview': void focusPaneEl('split'); return;
       case 'menu': openMenuAtCursor(); return;
       case 'reading': exitEditAnimated(); return;
@@ -1278,32 +1894,31 @@
     editError = null;
     try {
       // First edit per session pulls the CM6 + vim + y-codemirror.next
-      // + yjs + y-websocket chunks, in parallel.
-      const [editorMod, Ctor] = await Promise.all([
+      // + yjs + y-websocket chunks, in parallel. The session uses the
+      // ACTIVE BOOK's account (server, token, identity) and this note's
+      // offline replica; another pane on the same note shares it
+      // (lib/editor-boot.ts editorPool).
+      //
+      // Join rule (CRDT client protocol §2): the session starts from an
+      // EMPTY doc and the server's SyncStep2 delivers the text — never a
+      // seed from the REST body (that duplicated the note). Until the
+      // session is `editable` the template shows a read-only preview.
+      const [editorMod, sess] = await Promise.all([
         NoteEditor ? Promise.resolve(null) : import('../components/NoteEditor.svelte'),
-        loadEditorSession(),
+        acquireEditorSession(vaultID, noteID),
       ]);
       if (editorMod) NoteEditor = editorMod.default;
-      // The editor uses the ACTIVE BOOK's account: its server, token and
-      // identity — never another account's. It also loads this note's
-      // offline replica, when one exists for that account.
-      const plan = await planSession(vaultID, noteID);
-      // The user may have moved on while the chunks loaded.
-      if (notes.selectedID !== noteID || vaults.selectedID !== vaultID || editSession) return;
-      if (typeof plan === 'string') {
-        editError = plan;
+      if (typeof sess === 'string') {
+        editError = sess;
         return;
       }
-
-      // Join rule (CRDT client protocol §2): start from an EMPTY doc
-      // and let the server's SyncStep2 deliver the text. Seeding the
-      // Y.Text with the REST body here duplicated the whole note,
-      // because the server's doc already holds that text under a
-      // different clientID. Until the session is `editable` (first
-      // SyncStep2, or a replica of THIS note persisted after an earlier
-      // SyncStep2 was restored) the template shows a read-only preview.
-      editSession = startSession(Ctor, plan);
-      sync.setEditor(vaultID, editSession);
+      // The user may have moved on while the chunks loaded.
+      if (notes.selectedID !== noteID || vaults.selectedID !== vaultID || editSession) {
+        editorPool.release(sess);
+        return;
+      }
+      editSession = sess;
+      sync.setEditor(vaultID, sess);
       editMode = true;
       vimState = { mode: 'normal', pending: null };
       pane = 'note'; // the editor gets the wide pane
@@ -1323,9 +1938,10 @@
       if (sess.editable && !sess.isDestroyed && !sess.lineageConflict) {
         notes.applyLocalBody(sess.noteID, sess.ytext.toString());
       }
-      sess.destroy();
       sync.setEditor(sess.vaultID, null);
       editSession = null;
+      // Shared with other panes on this note: the last one closes it.
+      editorPool.release(sess);
     }
     editMode = false;
     editError = null;
@@ -1370,6 +1986,9 @@
   // marked is fast enough that we don't bother debouncing here; large
   // notes (10k+ lines) are the slice 4.4 / 4.6 perf concern.
   const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
+  const primaryMatch = $derived({ path: notes.selected?.path ?? notes.content?.path ?? '', frontmatter: notes.content?.frontmatter ?? null, body: notes.content?.body ?? '' });
+  const primaryViews = $derived(viewsFor(primaryMatch));
+  const primaryView = $derived(resolveView(primaryMatch, panes ? (findLeaf(panes.root, primaryLeaf)?.view ?? null) : null));
   const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
   const readingMinutes = $derived(readingTime(readingWords));
   /** The body opens with `# <title>`: don't print the title twice. */
@@ -1393,6 +2012,9 @@
     if (pendingDelete) return 'confirm';
     if (prompt) return 'prompt';
     if (filterFocused) return 'filter';
+    if (fx) return 'float';
+    if (hover?.keyboard) return 'hover';
+    if (activePane === 'leaf') return paneInfo[activeLeafId]?.editing ? (eff.vim ? contextForVimMode(vimState.mode) : 'insert') : 'reader';
     if (editMode && editSession && activePane === 'split') return 'preview';
     if (editMode && editSession && activePane !== 'explorer') return eff.vim ? contextForVimMode(vimState.mode) : 'insert';
     return shellContextFor(activePane);
@@ -1409,6 +2031,7 @@
     return pane === 'note' ? 'reader' : 'explorer';
   }
   const legendPending = $derived.by(() => {
+    if (legendCtx === 'float' || legendCtx === 'hover') return null;
     if (panePending) return '⌃w';
     if (legendCtx === 'preview') return previewPending;
     if (editMode && legendCtx !== 'explorer' && legendCtx !== 'filter') return vimState.pending === eff.leader ? eff.leader : vimState.pending;
@@ -1429,7 +2052,7 @@
     }),
   );
   const legendMode = $derived(
-    legendCtx === 'explorer' ? 'files' : legendCtx === 'filter' ? 'filter' : legendCtx === 'prompt' ? (prompt?.kind === 'rename' ? 'rename' : 'new') : legendCtx,
+    legendCtx === 'explorer' ? 'files' : legendCtx === 'float' ? 'explorer' : legendCtx === 'hover' ? 'preview' : legendCtx === 'filter' ? 'filter' : legendCtx === 'prompt' ? (prompt?.kind === 'rename' ? 'rename' : 'new') : legendCtx,
   );
 
   // ---- palette ------------------------------------------------------------------
@@ -1444,6 +2067,18 @@
     { id: 'edit', title: editMode ? 'Reading view' : 'Edit note', keys: '⌘E', group: 'editor', run: () => { if (editMode) exitEdit(); else { const t = noteUnderFocus(); if (t) void editNote(t); } } },
     { id: 'live', title: editorSettings.value.editMode === 'live' ? 'Switch to Source mode' : 'Switch to Live Preview', keys: '⌘⇧E', group: 'editor', run: () => editorSettings.toggleEditMode() },
     { id: 'split', title: splitOn ? 'Hide preview beside source' : 'Show preview beside source', keys: '\\p ⌘⌥P', group: 'editor split side by side render', run: toggleSplit },
+    { id: 'explorer', title: 'Floating explorer', keys: '-', group: 'files browse yazi overlay open', run: openFloating },
+    { id: 'vsplit', title: 'Split vertically (:vsplit)', keys: '⌃w v', group: 'pane window side by side', run: () => runWin('vsplit') },
+    { id: 'hsplit', title: 'Split horizontally (:split)', keys: '⌃w s', group: 'pane window stacked below', run: () => runWin('split') },
+    ...(multi
+      ? [
+          { id: 'close-pane', title: 'Close pane', keys: '⌃w q', group: 'pane window', run: () => runWin('close') },
+          { id: 'only-pane', title: 'Keep only this pane', keys: '⌃w o', group: 'pane window only', run: () => runWin('only') },
+          { id: 'equal-panes', title: 'Equalize panes', keys: '⌃w =', group: 'pane window resize', run: () => runWin('equal') },
+        ]
+      : []),
+    { id: 'hover', title: editorSettings.value.hoverPreview ? 'Turn off hover link previews' : 'Turn on hover link previews', keys: 'K', group: 'preview link card', run: () => editorSettings.update({ hoverPreview: !editorSettings.value.hoverPreview }) },
+    { id: 'deeplink', title: 'Copy link to this note', group: 'share url deep link lumi open', run: copyDeepLink },
     { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (hintsOpen = true) },
     { id: 'motion', title: editorSettings.value.reduceMotion ? 'Allow motion' : 'Reduce motion', group: 'view animation accessibility', run: () => editorSettings.update({ reduceMotion: !editorSettings.value.reduceMotion }) },
     { id: 'filter', title: 'Filter this folder', keys: '/', group: 'search', run: () => void openFilter() },
@@ -1463,6 +2098,21 @@
     { id: 'new-book', title: 'New book…', group: 'create vault', run: () => (uiState.createBookOpen = true) },
   ]);
 
+  /** `:` lines typed in the palette (reader / explorer): the pane ex
+   *  commands. true = handled. */
+  function runExLine(line: string): boolean {
+    const m = /^\s*(vs|vsp|vspl|vspli|vsplit|sp|spl|spli|split|on|onl|only|clo|clos|close|q|quit|exp|expl|explo|explor|explore|Ex)\b\s*(.*)$/.exec(line);
+    if (!m) return false;
+    const cmd = m[1];
+    const arg = m[2].trim();
+    if (cmd.startsWith('vs')) runWin('vsplit', { arg });
+    else if (cmd.startsWith('sp')) runWin('split', { arg });
+    else if (cmd.startsWith('on')) runWin('only');
+    else if (cmd.startsWith('clo') || cmd === 'q' || cmd === 'quit') runWin('close');
+    else openFloating();
+    return true;
+  }
+
   function openFromPalette(id: string): void {
     pane = 'browse';
     nav.reveal(id);
@@ -1475,7 +2125,9 @@
   }
 </script>
 
-<div class="vault-home" bind:this={homeEl}>
+<!-- Hover previews are delegated: any rendered note link (reader,
+     split preview, Live Preview, secondary panes) under this root. -->
+<div class="vault-home" bind:this={homeEl} onpointerover={onHoverOver} onpointerout={onHoverOut} role="presentation">
   <header class="topbar">
     <div class="top-left">
       <button class="home-mark" type="button" onclick={back} title="All books (gb)" aria-label="All books">
@@ -1635,7 +2287,223 @@
 
     <!-- Right-click on the open note: the same menu as its row. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <main class="col col-preview preview" class:split-host={editMode && splitOn} class:pane-focus={multiPane && activePane === 'main'} data-pane="main" bind:this={previewEl} tabindex="-1" aria-label="Preview" oncontextmenu={onReaderContext}>
+    <main
+      class="col col-preview preview"
+      class:split-host={editMode && splitOn && !multi}
+      class:multi
+      class:pane-focus={multiPane && activePane === 'main' && !multi}
+      data-pane={multi ? undefined : 'main'}
+      data-leaf={multi ? undefined : primaryLeaf}
+      data-note-path={multi ? undefined : leafPath(primaryLeaf)}
+      bind:this={previewEl}
+      tabindex="-1"
+      aria-label="Preview"
+      oncontextmenu={multi ? undefined : onReaderContext}
+    >
+      {#if multi && panes}
+        {#if narrowView}
+          <div class="pane-tabs" role="tablist" aria-label="Panes">
+            {#each leafList as l (l.id)}
+              <button type="button" role="tab" class="pane-tab" class:active={l.id === activeLeafId} aria-selected={l.id === activeLeafId}
+                onclick={() => focusLeaf(l.id)}>{notes.list.find((n) => n.id === l.note)?.title ?? l.note}</button>
+            {/each}
+          </div>
+          <div class="pane-stack">
+            {#each leafList as l (l.id)}
+              <div class="pane-slot" class:hidden={l.id !== activeLeafId}>{@render paneLeaf(l)}</div>
+            {/each}
+          </div>
+        {:else}
+          <div class="pane-host" data-testid="pane-host">
+            <PaneTree
+              node={panes.root}
+              leaf={paneLeaf}
+              onresize={(id, i, at) => { if (panes) panes = resizeSplit(panes, id, i, at); }}
+              onequalize={() => { if (panes) panes = equalize(panes); }}
+            />
+          </div>
+        {/if}
+      {:else}
+        {@render mainContent()}
+      {/if}
+    </main>
+  </div>
+  {/if}
+
+  {#if prompt}
+    <form class="prompt-form" onsubmit={(e) => { e.preventDefault(); void submitPrompt(); }} data-testid="prompt">
+      <span class="prompt-label">{prompt.kind === 'create' ? 'new' : 'rename'}</span>
+      <span class="prompt-dir mono">{prompt.kind === 'create' ? (nav.dir ? nav.dir + '/' : '/') : ''}</span>
+      <input
+        class="prompt-input mono"
+        bind:this={promptInput}
+        bind:value={prompt.text}
+        onkeydown={onPromptKey}
+        onblur={() => { if (!busy) setTimeout(() => { if (prompt && document.activeElement !== promptInput) cancelPrompt(); }, 120); }}
+        aria-label={prompt.kind === 'create' ? 'New note or folder (end with / for a folder)' : 'New name or path'}
+        autocomplete="off"
+        spellcheck="false"
+        disabled={busy}
+      />
+      <span class="prompt-preview" class:err={promptPlan?.kind === 'error' || !!promptErr}>{promptErr ?? promptPreview}</span>
+    </form>
+  {/if}
+
+  {#if pendingDelete}
+    <div class="confirm-bar" role="alertdialog" aria-label="Confirm delete" data-testid="delete-confirm">
+      <span>Delete <strong>{pendingDelete.name}</strong>? The markdown file is removed from the book.</span>
+      <span class="confirm-actions">
+        <button class="ui-btn sm ghost" type="button" onclick={() => (pendingDelete = null)}>Cancel <kbd>n</kbd></button>
+        <button class="ui-btn sm danger solid" type="button" onclick={() => void confirmDelete()}>Delete <kbd>y</kbd></button>
+      </span>
+    </div>
+  {/if}
+
+  {#if editorSettings.value.legend}
+    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
+  {/if}
+
+  <footer class="statusbar" data-testid="editor-status">
+    {#if editMode && editSession && eff.vim}
+      <span class="sb-mode" data-mode={vimState.mode} data-testid="vim-mode">{vimModeLabel(vimState.mode, vimState.sub)}</span>
+      {#if vimState.pending && !editorSettings.value.legend}<span class="sb-pending">{vimState.pending}</span>{/if}
+    {/if}
+    <span class="sb-path mono" title={fmtPath()}>{fmtPath()}</span>
+    {#if !editMode}
+      <span class="sb-item" aria-live="off">
+        {notes.list.length} notes{notes.loadingMore ? '…' : ''}{nav.filter ? ` · ${nav.entries.length} match` : ''}
+      </span>
+      {#if notes.stale}<span class="sb-item stale" data-testid="list-stale" title="Última lista conhecida; atualiza quando a conexão voltar.">lista offline{notes.staleAt ? ` de ${new Date(notes.staleAt).toLocaleString()}` : ''}</span>{/if}
+      {#if nav.showHidden}<span class="sb-item">hidden shown</span>{/if}
+      {#if yanked}<span class="sb-item">yanked {yanked.name}</span>{/if}
+    {/if}
+    {#if editMode && editSession}
+      {#if editorStats}
+        <span class="sb-item">{editorStats.words} {editorStats.words === 1 ? 'word' : 'words'}</span>
+        <span class="sb-item">Ln {editorStats.line}, Col {editorStats.col}</span>
+      {/if}
+      <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}</span>
+    {/if}
+    <span class="sb-spacer"></span>
+    {#if toast}<span class="sb-toast {toast.tone}" role="status">{toast.text}</span>{/if}
+    {#if editMode && editSession}
+      <span class="sb-item sync" class:pending={editSession.pending} class:offline={!editSession.pending && !editSession.liveSynced} data-testid="editor-sync-state" title={editSession.persistence
+        ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
+        : 'Edits sync live; the file on disk follows within ~500 ms.'}>
+        {editSession.pending
+          ? 'Pending sync…'
+          : editSession.liveSynced
+            ? 'Saved live'
+            : editSession.persistence
+              ? 'Offline — kept on this device'
+              : 'Offline — kept in this tab'}
+      </span>
+    {/if}
+    <button class="sb-help" type="button" onclick={() => (uiState.helpOpen = true)} title="Keyboard shortcuts (?)">?</button>
+  </footer>
+
+  {#if paletteMode}
+    <CommandPalette
+      commands={paletteCommands}
+      notes={notes.list}
+      commandMode={paletteMode === 'command'}
+      onex={runExLine}
+      onnote={openFromPalette}
+      onclose={() => { paletteMode = null; void focusColumn(true); }}
+    />
+  {/if}
+
+  {#if menu}
+    <ContextMenu x={menu.x} y={menu.y} items={menu.items} title={menu.title} onrun={runMenu} onclose={() => (menu = null)} />
+  {/if}
+
+  {#if fx && vaults.selectedID}
+    <FloatingExplorer
+      vaultID={vaults.selectedID}
+      bookName={vaults.selected?.name ?? 'Book'}
+      startNote={fx.startNote}
+      startDir={fx.startDir}
+      ops={fxOps}
+      onopen={fxOpen}
+      onclose={() => { fx = null; }}
+    />
+  {/if}
+
+  {#if hover && vaults.selectedID}
+    <HoverCard
+      target={hover.target}
+      vaultID={vaults.selectedID}
+      anchor={hover.anchor}
+      keyboard={hover.keyboard}
+      onopen={openFromHover}
+      onclose={closeHover}
+      onhold={() => hoverIntent.hold()}
+      onleave={() => { if (!hover?.keyboard) hoverIntent.leave(); }}
+    />
+  {/if}
+
+  {#if hintsOpen}
+    <HintOverlay root={hintRoot ?? (() => homeEl)} onclose={() => { hintsOpen = false; hintRoot = null; }} />
+  {/if}
+
+  {#if uiState.helpOpen}
+    <HelpOverlay leader={eff.leader} onclose={() => (uiState.helpOpen = false)} />
+  {/if}
+
+  {#if showSettings}
+    <VaultSettingsModal onclose={() => (showSettings = false)} />
+  {/if}
+
+  {#if uiState.createBookOpen}
+    <VaultCreateModal onclose={() => (uiState.createBookOpen = false)} onCreated={(id) => vaults.select(id)} />
+  {/if}
+</div>
+
+
+{#snippet paneLeaf(l: PaneLeaf)}
+  {#if l.id === primaryLeaf}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="preview primary-pane"
+      class:split-host={editMode && splitOn}
+      class:active={activeLeafId === l.id}
+      class:pane-focus={activePane === 'main'}
+      data-pane="main"
+      data-leaf={l.id}
+      data-note-path={leafPath(primaryLeaf)}
+      data-testid="primary-pane"
+      tabindex="-1"
+      role="region"
+      aria-label="Pane: {notes.selected?.title ?? 'note'}"
+      bind:this={primaryWrapEl}
+      oncontextmenu={onReaderContext}
+      onpointerdown={() => { if (panes) panes = focusLeafState(panes, l.id); }}
+    >
+      {@render mainContent()}
+    </div>
+  {:else if vaults.selectedID}
+    <NotePane
+      bind:this={paneRefs[l.id]}
+      leaf={l}
+      vaultID={vaults.selectedID}
+      active={activeLeafId === l.id}
+      onfocus={() => { if (panes && panes.active !== l.id) panes = focusLeafState(panes, l.id); focusedPane = 'leaf'; }}
+      onclose={() => closeLeaf(l.id)}
+      onfollow={(href, where, from, wiki) => followLink(href, where, from, wiki, l.id)}
+      onlink={(href, e, from) => routeClick(href, e, from, l.id)}
+      onhover={(link, rect, from) => hoverKey(link, rect, from, l.id)}
+      onexplore={openFloating}
+      onwin={(cmd, o) => runWin(cmd, o)}
+      onpane={navigatePane}
+      onpanepending={(p) => (panePending = p)}
+      onvimstate={(st) => (vimState = st)}
+      onstate={(st) => (paneInfo = { ...paneInfo, [l.id]: st })}
+      onview={(v) => { if (panes) panes = setView(panes, l.id, v); }}
+    />
+  {/if}
+{/snippet}
+
+{#snippet mainContent()}
       {#if pane === 'browse' && nav.current?.kind === 'folder' && nav.previewEntries}
         <MillerColumn
           entries={nav.previewEntries}
@@ -1675,7 +2543,31 @@
             </span>
           </div>
         {/each}
-        {#if editMode && editSession && NoteEditor}
+        {#if primaryView !== MARKDOWN_VIEW && vaults.selectedID && notes.selectedID}
+          <div class="view-frame">
+            <header class="note-bar view-bar">
+              <div class="nb-lead"><span class="nb-title static">{notes.selected?.title}</span></div>
+              <div class="nb-actions">
+                <div class="ui-seg nb-seg" role="group" aria-label="View">
+                  {#each primaryViews as v (v.id)}
+                    <button type="button" class:active={primaryView === v.id} aria-pressed={primaryView === v.id} onclick={() => setPrimaryView(v.id === primaryViews[0].id ? null : v.id)}>{v.label}</button>
+                  {/each}
+                </div>
+              </div>
+            </header>
+            <NoteViewHost
+              view={primaryView}
+              vaultID={vaults.selectedID}
+              noteID={notes.selectedID}
+              notePath={leafPath(primaryLeaf)}
+              body={notes.content.body ?? ''}
+              active={activeLeafId === primaryLeaf}
+              openLink={(href, where) => followLink(href, where, leafPath(primaryLeaf), false, primaryLeaf)}
+              acquireSession={() => acquireEditorSession(vaults.selectedID!, notes.selectedID!)}
+              releaseSession={(x) => editorPool.release(x)}
+            />
+          </div>
+        {:else if editMode && editSession && NoteEditor}
           <div class="editor-frame" class:split={splitOn}>
             <header class="note-bar" data-testid="note-bar">
               <div class="nb-lead">
@@ -1771,6 +2663,12 @@
                   onvimstate={(st) => (vimState = st)}
                   onpane={navigatePane}
                   onpanepending={(p) => (panePending = p)}
+                  onquit={() => (multi ? closeLeaf(primaryLeaf) : exitEditAnimated())}
+                  onwin={(cmd, o) => runWin(cmd, o)}
+                  onfollow={(l, where) => followLink(l.href, where, leafPath(primaryLeaf), l.wiki, primaryLeaf)}
+                  onhover={(l, r) => hoverKey(l, r, leafPath(primaryLeaf), primaryLeaf)}
+                  onexplore={openFloating}
+                  onfocus={() => { if (panes) panes = focusLeafState(panes, primaryLeaf); }}
                 />
               </SourceSplit>
             {/if}
@@ -1786,8 +2684,18 @@
                 </nav>
               {/if}
               <div class="rendered-actions">
+                {#if primaryViews.length > 1}
+                  <div class="ui-seg nb-seg" role="group" aria-label="View">
+                    {#each primaryViews as v (v.id)}
+                      <button type="button" class:active={primaryView === v.id} aria-pressed={primaryView === v.id} onclick={() => setPrimaryView(v.id === primaryViews[0].id ? null : v.id)}>{v.label}</button>
+                    {/each}
+                  </div>
+                {/if}
                 {#if notes.contentStale}<span class="stale" data-testid="content-stale">cópia local (offline)</span>{/if}
                 <span class="reading-meta">{readingWords} {readingWords === 1 ? 'word' : 'words'} · {readingMinutes} min</span>
+                <button class="ui-btn ghost sm icon" type="button" onclick={() => void splitWith('row', null, primaryLeaf)} aria-label="Split right" title="Split right (⌃w v · :vsplit)">
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>
                 <button class="ui-btn sm nb-edit" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title="Edit (e · {keyLabel('⌘E')})">{editorLoading ? 'Loading…' : 'Edit'}</button>
                 <button class="ui-btn ghost sm icon danger-hover" onclick={beginDelete} type="button" aria-label="Delete note"
                   disabled={structuralOffline} title={structuralOffline ? OFFLINE_HINT : 'Delete (d)'}>
@@ -1801,112 +2709,7 @@
           </article>
         {/if}
       {/if}
-    </main>
-  </div>
-  {/if}
-
-  {#if prompt}
-    <form class="prompt-form" onsubmit={(e) => { e.preventDefault(); void submitPrompt(); }} data-testid="prompt">
-      <span class="prompt-label">{prompt.kind === 'create' ? 'new' : 'rename'}</span>
-      <span class="prompt-dir mono">{prompt.kind === 'create' ? (nav.dir ? nav.dir + '/' : '/') : ''}</span>
-      <input
-        class="prompt-input mono"
-        bind:this={promptInput}
-        bind:value={prompt.text}
-        onkeydown={onPromptKey}
-        onblur={() => { if (!busy) setTimeout(() => { if (prompt && document.activeElement !== promptInput) cancelPrompt(); }, 120); }}
-        aria-label={prompt.kind === 'create' ? 'New note or folder (end with / for a folder)' : 'New name or path'}
-        autocomplete="off"
-        spellcheck="false"
-        disabled={busy}
-      />
-      <span class="prompt-preview" class:err={promptPlan?.kind === 'error' || !!promptErr}>{promptErr ?? promptPreview}</span>
-    </form>
-  {/if}
-
-  {#if pendingDelete}
-    <div class="confirm-bar" role="alertdialog" aria-label="Confirm delete" data-testid="delete-confirm">
-      <span>Delete <strong>{pendingDelete.name}</strong>? The markdown file is removed from the book.</span>
-      <span class="confirm-actions">
-        <button class="ui-btn sm ghost" type="button" onclick={() => (pendingDelete = null)}>Cancel <kbd>n</kbd></button>
-        <button class="ui-btn sm danger solid" type="button" onclick={() => void confirmDelete()}>Delete <kbd>y</kbd></button>
-      </span>
-    </div>
-  {/if}
-
-  {#if editorSettings.value.legend}
-    <CommandLegend items={legendItems} pending={legendPending} mode={editMode && editSession && eff.vim ? null : legendMode} onaction={onLegendAction} onmore={() => (uiState.helpOpen = true)} />
-  {/if}
-
-  <footer class="statusbar" data-testid="editor-status">
-    {#if editMode && editSession && eff.vim}
-      <span class="sb-mode" data-mode={vimState.mode} data-testid="vim-mode">{vimModeLabel(vimState.mode, vimState.sub)}</span>
-      {#if vimState.pending && !editorSettings.value.legend}<span class="sb-pending">{vimState.pending}</span>{/if}
-    {/if}
-    <span class="sb-path mono" title={fmtPath()}>{fmtPath()}</span>
-    {#if !editMode}
-      <span class="sb-item" aria-live="off">
-        {notes.list.length} notes{notes.loadingMore ? '…' : ''}{nav.filter ? ` · ${nav.entries.length} match` : ''}
-      </span>
-      {#if notes.stale}<span class="sb-item stale" data-testid="list-stale" title="Última lista conhecida; atualiza quando a conexão voltar.">lista offline{notes.staleAt ? ` de ${new Date(notes.staleAt).toLocaleString()}` : ''}</span>{/if}
-      {#if nav.showHidden}<span class="sb-item">hidden shown</span>{/if}
-      {#if yanked}<span class="sb-item">yanked {yanked.name}</span>{/if}
-    {/if}
-    {#if editMode && editSession}
-      {#if editorStats}
-        <span class="sb-item">{editorStats.words} {editorStats.words === 1 ? 'word' : 'words'}</span>
-        <span class="sb-item">Ln {editorStats.line}, Col {editorStats.col}</span>
-      {/if}
-      <span class="sb-item">{editorSettings.value.editMode === 'live' ? 'Live Preview' : 'Source'}</span>
-    {/if}
-    <span class="sb-spacer"></span>
-    {#if toast}<span class="sb-toast {toast.tone}" role="status">{toast.text}</span>{/if}
-    {#if editMode && editSession}
-      <span class="sb-item sync" class:pending={editSession.pending} class:offline={!editSession.pending && !editSession.liveSynced} data-testid="editor-sync-state" title={editSession.persistence
-        ? 'Edits sync live; offline they are kept in this browser and sent when the connection returns.'
-        : 'Edits sync live; the file on disk follows within ~500 ms.'}>
-        {editSession.pending
-          ? 'Pending sync…'
-          : editSession.liveSynced
-            ? 'Saved live'
-            : editSession.persistence
-              ? 'Offline — kept on this device'
-              : 'Offline — kept in this tab'}
-      </span>
-    {/if}
-    <button class="sb-help" type="button" onclick={() => (uiState.helpOpen = true)} title="Keyboard shortcuts (?)">?</button>
-  </footer>
-
-  {#if paletteMode}
-    <CommandPalette
-      commands={paletteCommands}
-      notes={notes.list}
-      commandMode={paletteMode === 'command'}
-      onnote={openFromPalette}
-      onclose={() => { paletteMode = null; void focusColumn(true); }}
-    />
-  {/if}
-
-  {#if menu}
-    <ContextMenu x={menu.x} y={menu.y} items={menu.items} title={menu.title} onrun={runMenu} onclose={() => (menu = null)} />
-  {/if}
-
-  {#if hintsOpen}
-    <HintOverlay root={hintRoot ?? (() => homeEl)} onclose={() => { hintsOpen = false; hintRoot = null; }} />
-  {/if}
-
-  {#if uiState.helpOpen}
-    <HelpOverlay leader={eff.leader} onclose={() => (uiState.helpOpen = false)} />
-  {/if}
-
-  {#if showSettings}
-    <VaultSettingsModal onclose={() => (showSettings = false)} />
-  {/if}
-
-  {#if uiState.createBookOpen}
-    <VaultCreateModal onclose={() => (uiState.createBookOpen = false)} onCreated={(id) => vaults.select(id)} />
-  {/if}
-</div>
+{/snippet}
 
 <style>
   .vault-home {
@@ -2062,6 +2865,64 @@
     outline: none;
   }
   .miller:not(.note-mode) .col-preview:has(> :global(.miller-col)) { padding: 0; }
+
+  /* ── split note panes (SPEC-PARTE2 §3) ─────────────────── */
+  .preview.multi { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .pane-host { flex: 1; min-height: 0; display: flex; }
+  .pane-host > :global(*) { flex: 1; min-width: 0; }
+  .primary-pane {
+    position: relative;
+    height: 100%;
+    min-width: 0;
+    overflow-y: auto;
+    outline: none;
+    padding: var(--sp-6) clamp(16px, 4%, 40px) var(--sp-7);
+  }
+  .primary-pane.active::before {
+    content: '';
+    position: sticky;
+    display: block;
+    top: calc(-1 * var(--sp-6));
+    height: 2px;
+    margin: calc(-1 * var(--sp-6)) calc(-1 * clamp(16px, 4%, 40px)) calc(var(--sp-6) - 2px);
+    background: color-mix(in srgb, var(--color-primary) 55%, transparent);
+    z-index: 3;
+  }
+  .primary-pane.active:has(> .editor-frame)::before, .primary-pane.active:has(> .view-frame)::before { display: none; }
+  .primary-pane.active > .editor-frame > .note-bar, .primary-pane.active > .view-frame > .note-bar { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 55%, transparent); }
+  .primary-pane:has(> .editor-frame), .primary-pane:has(> .view-frame) { padding: 0; overflow: hidden; }
+  .pane-tabs {
+    flex: none;
+    display: flex;
+    gap: 2px;
+    padding: 4px var(--sp-2) 0;
+    border-bottom: 1px solid var(--hairline);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .pane-tab {
+    flex: none;
+    max-width: 46vw;
+    padding: 6px 10px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .pane-tab.active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
+  .pane-stack { flex: 1; min-height: 0; display: flex; }
+  .pane-slot { flex: 1; min-width: 0; min-height: 0; display: flex; }
+  .pane-slot > :global(*) { flex: 1; min-width: 0; }
+  .pane-slot.hidden { display: none; }
+  .view-frame { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .view-frame > :global(:last-child) { flex: 1; min-height: 0; }
+  .nb-title.static { cursor: default; }
+  .nb-title.static:hover { background: transparent; }
 
   /* ── reading view ──────────────────────────────────────── */
   /* Typeface, size and leading come from .lumi-prose (app.css), shared

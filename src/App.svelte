@@ -21,6 +21,8 @@
   import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
   import { editorSettings } from './lib/editor-settings.svelte.ts';
   import { setReduceMotion } from './lib/motion.ts';
+  import { parseDeepLink, resolveBook } from './lib/deeplink.ts';
+  import { vaults } from './lib/vaults.svelte.ts';
 
   // Settings → Reduce motion (on top of prefers-reduced-motion).
   $effect(() => setReduceMotion(editorSettings.value.reduceMotion));
@@ -28,11 +30,33 @@
   onMount(async () => {
     theme.init();
     await boot();
+    followDeepLink();
+    window.addEventListener('hashchange', followDeepLink);
   });
 
   onDestroy(() => {
     theme.destroy();
+    window.removeEventListener('hashchange', followDeepLink);
   });
+
+  // Deep links (SPEC-PARTE2 §8): #/b/<vault>[/n/<note-id> | /p/<path>].
+  // Only books already on this device open; nothing is ever added.
+  let lastHash = '';
+  function followDeepLink(): void {
+    const hash = window.location.hash;
+    if (hash === lastHash) return;
+    lastHash = hash;
+    const link = parseDeepLink(hash);
+    if (!link || !auth.authenticated) return;
+    const book = resolveBook(link, books.list, (b) => vaults.list.find((v) => v.id === b.vault_id)?.slug);
+    if (!book) {
+      uiState.notice = 'That link points to a book that is not on this device.';
+      setTimeout(() => (uiState.notice = null), 6000);
+      return;
+    }
+    if (link.note || link.path) uiState.pendingNote = { vault: book.vault_id, note: link.note, path: link.path };
+    books.setActive(book.id);
+  }
 
   // Routes (SPEC-LIVROS §5):
   //   - no account on this device → LoginView (with the server field)
@@ -90,6 +114,10 @@
 
 <OfflineRescueBanner />
 
+{#if uiState.notice}
+  <div class="app-notice" role="status">{uiState.notice}</div>
+{/if}
+
 <style>
   :global(body) {
     margin: 0;
@@ -116,6 +144,22 @@
     max-height: 92vh;
     overflow: auto;
     outline: none;
+  }
+
+  .app-notice {
+    position: fixed;
+    left: 50%;
+    bottom: calc(var(--bar-h) + var(--sp-4));
+    transform: translateX(-50%);
+    z-index: 400;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: var(--sp-2) var(--sp-4);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    background: var(--color-background);
+    box-shadow: var(--shadow-pop);
+    font-size: var(--text-sm);
+    animation: ui-rise 160ms var(--ease);
   }
 
   .boot {

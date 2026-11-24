@@ -23,7 +23,11 @@ export type LegendContext =
   | 'prompt'
   | 'confirm'
   | 'filter'
-  | 'books';
+  | 'books'
+  /** The floating explorer overlay (SPEC-PARTE2 §2). */
+  | 'float'
+  /** A hover preview card opened with `K` (§4). */
+  | 'hover';
 
 export interface LegendItem {
   keys: string;
@@ -51,11 +55,43 @@ export interface LegendExtras {
 
 /** Completions after `Ctrl-w` (vim window commands). */
 export const PANE_W: LegendItem[] = [
-  { keys: 'h l', label: 'left/right pane' },
-  { keys: 'j k', label: 'lower/upper pane' },
+  { keys: 'v', label: 'split right', do: 'app:vsplit' },
+  { keys: 's', label: 'split below', do: 'app:hsplit' },
+  { keys: 'h j k l', label: 'move to pane' },
+  { keys: 'q', label: 'close pane', do: 'app:closePane' },
+  { keys: 'o', label: 'only this', do: 'app:onlyPane' },
+  { keys: '=', label: 'equalize', do: 'app:equalPanes' },
+  { keys: 'f ⏎', label: 'link → split' },
+  { keys: 'F', label: 'link → below' },
   { keys: 'w', label: 'next pane', do: 'app:panes' },
   { keys: 'p', label: 'previous pane' },
+  { keys: '< > + -', label: 'resize' },
   { keys: 'Esc', label: 'cancel' },
+];
+
+/** Floating explorer keys. */
+export const FLOAT_ITEMS: LegendItem[] = [
+  { keys: 'j k', label: 'move' },
+  { keys: 'h l', label: 'folders' },
+  { keys: '⏎', label: 'open here' },
+  { keys: '⌃v', label: 'split right' },
+  { keys: '⌃s', label: 'split below' },
+  { keys: '/', label: 'filter' },
+  { keys: 'a r d', label: 'new/rename/delete' },
+  { keys: 'y p', label: 'copy' },
+  { keys: 'Esc q', label: 'close' },
+  { keys: 'gg G', label: 'top/end' },
+  { keys: 'H L', label: 'history' },
+  { keys: '.', label: 'hidden' },
+];
+
+/** Hover card keys (opened with `K`). */
+export const HOVER_ITEMS: LegendItem[] = [
+  { keys: 'j k', label: 'scroll' },
+  { keys: '⏎', label: 'open' },
+  { keys: '⌃w f', label: 'open in split' },
+  { keys: '⌃w F', label: 'split below' },
+  { keys: 'Esc', label: 'close' },
 ];
 
 const PANES_ITEM: LegendItem = { keys: '⌃h ⌃l', label: 'panes', do: 'app:panes', tip: 'Ctrl-h/j/k/l move between panes · Ctrl-w w next · Ctrl-w p previous' };
@@ -70,7 +106,9 @@ const PREVIEW_ITEMS: LegendItem[] = [
   { keys: 'y', label: 'copy', do: 'preview:yank', tip: 'Copy the selection / current match, else the note' },
   { keys: 'gg G', label: 'top/end', do: 'preview:top' },
   { keys: 'n N', label: 'next match', do: 'preview:findNext' },
-  { keys: '⏎', label: 'open link', tip: 'Tab to a link, then Enter' },
+  { keys: '⏎ gf', label: 'open link', tip: 'Tab to a link, then Enter or gf; ⌃w f opens it in a split' },
+  { keys: 'K', label: 'preview link', tip: 'Preview the focused link in a card' },
+  { keys: '-', label: 'explorer', do: 'app:explorer', tip: 'Floating explorer at this note' },
   { keys: 'space b', label: 'page' },
   { keys: '⌃w w', label: 'next pane', do: 'app:panes' },
 ];
@@ -117,6 +155,12 @@ export function describeRhs(rhs: string): string {
     const name = ex[1];
     const known: Record<string, string> = {
       link: 'insert link',
+      explore: 'explorer',
+      vsplit: 'split right',
+      split: 'split below',
+      only: 'only pane',
+      follow: 'follow link',
+      hover: 'preview link',
       w: 'save',
       write: 'save',
       q: 'close',
@@ -166,6 +210,8 @@ export function fitLegend(widths: readonly number[], available: number, gap: num
 export function legendFor(ctx: LegendContext, pending: string | null = null, x: LegendExtras = {}): LegendItem[] {
   const leader = x.leader ?? '\\';
   const pend = pending ?? '';
+  if (ctx === 'float') return FLOAT_ITEMS;
+  if (ctx === 'hover') return HOVER_ITEMS;
   if (pend === '⌃w') return PANE_W;
 
   if (ctx === 'preview') {
@@ -180,7 +226,7 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
   if (ctx === 'explorer' || ctx === 'reader') {
     const count = /^(\d+)/.exec(pend)?.[1];
     const chord = pend.replace(/^\d+/, '');
-    if (chord === 'g') return SHELL_G;
+    if (chord === 'g') return ctx === 'reader' ? [...SHELL_G.slice(0, 4), { keys: 'gf', label: 'follow link', do: 'shell:follow' }, ...SHELL_G.slice(4)] : SHELL_G;
     if (chord === 'z') return SHELL_Z;
     if (count) {
       return ctx === 'explorer'
@@ -221,6 +267,10 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
       { keys: 'gg G', label: 'top/end', do: 'shell:top' },
       { keys: 'e i', label: 'edit', do: 'shell:edit' },
       { keys: 'q h', label: 'back', do: 'shell:parent' },
+      { keys: '-', label: 'explorer', do: 'shell:floatExplorer', tip: 'Floating explorer at this note (yazi)' },
+      { keys: '⌃w v', label: 'split', do: 'app:vsplit', tip: 'Ctrl-w v / s split · q close · o only · = equalize' },
+      { keys: 'K', label: 'preview link', do: 'shell:hover', tip: 'Preview the focused (or first visible) link' },
+      { keys: 'gf', label: 'follow link', do: 'shell:follow', tip: 'gf / Enter: this pane · Ctrl-w f: split · ⌘-click: split' },
       { keys: 'y', label: 'copy', do: 'shell:yank' },
       { keys: 'F', label: 'hints', do: 'app:hints', tip: 'Label links, tasks and buttons; type a label to click it' },
       ...(x.panes ? [PANES_ITEM] : []),
@@ -260,12 +310,15 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
         { keys: 'u ⌃r', label: 'undo/redo', do: 'vim:u', tip: 'u undo · Ctrl-r redo' },
         { keys: '/ n', label: 'search', do: 'vim:/' },
         { keys: `${leader}l`, label: 'link', do: 'ex:link' },
+        { keys: '- ' + `${leader}e`, label: 'explorer', do: 'ex:explore', tip: 'Floating explorer at this note' },
       ];
       if (x.source) items.push({ keys: `${leader}p`, label: x.split ? 'hide preview' : 'preview', do: 'ex:preview split', tip: 'Rendered preview beside the source (⌘⌥P, :preview split)' });
       if (x.split && x.panes) items.push({ keys: '⌃l', label: 'read preview', do: 'app:readPreview', tip: 'Ctrl-l focuses the preview: j/k, { }, /, f; q or Ctrl-h comes back' });
       else if (x.panes) items.push(PANES_ITEM);
       items.push(
         { keys: ':q', label: 'close', do: 'ex:q' },
+        { keys: 'gf K', label: 'follow/preview link', do: 'ex:hover', tip: 'gf or Enter on a link follows it · K previews it · Ctrl-w f opens it in a split' },
+        { keys: '⌃w v', label: 'split', do: 'ex:vsplit', tip: ':vsplit / :split [note] · Ctrl-w q close · o only · = equalize' },
         { keys: '⌘E', label: 'reading', do: 'app:reading' },
         { keys: 'ciw', label: 'change word', do: 'vim:ciw' },
         { keys: '.', label: 'repeat', do: 'vim:.' },

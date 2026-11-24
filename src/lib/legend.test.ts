@@ -51,7 +51,7 @@ describe('legendFor — panes and the split preview reader', () => {
   });
   it('Ctrl-w pending lists the window commands in any context', () => {
     for (const ctx of ['explorer', 'reader', 'normal', 'visual', 'preview'] as const) {
-      expect(keys(legendFor(ctx, '⌃w'))).toEqual(['h l', 'j k', 'w', 'p', 'Esc']);
+      expect(keys(legendFor(ctx, '⌃w'))).toEqual(['v', 's', 'h j k l', 'q', 'o', '=', 'f ⏎', 'F', 'w', 'p', '< > + -', 'Esc']);
     }
   });
   it('a panes hint only when there is more than one pane', () => {
@@ -101,7 +101,7 @@ describe('fitLegend', () => {
     const items = legendFor('normal', null, { source: true, split: true });
     // ~6.6px per mono char at 11px + the 6px key/label gap.
     const widths = items.map((i) => (i.keys.length + i.label.length) * 6.6 + 6);
-    const wide = fitLegend(widths, 1880, 16);
+    const wide = fitLegend(widths, 2400, 16);
     expect(wide.overflow).toBe(false);
     expect(items.map((i) => i.keys)).toEqual(expect.arrayContaining(['za', '"a', '\\p']));
     const narrow = fitLegend(widths, 600, 16, 24);

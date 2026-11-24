@@ -15,9 +15,12 @@
     /** `:` mode: commands only. */
     commandMode?: boolean;
     onnote?: (id: string) => void;
+    /** `:` mode: run the typed line as an ex command (`vsplit plan`).
+     *  true = handled (the palette closes). */
+    onex?: (line: string) => boolean;
     onclose: () => void;
   }
-  const { commands, notes = [], commandMode = false, onnote, onclose }: Props = $props();
+  const { commands, notes = [], commandMode = false, onnote, onex, onclose }: Props = $props();
 
   type Item =
     | { kind: 'cmd'; key: string; title: string; detail?: string; cmd: PaletteCommand }
@@ -98,6 +101,11 @@
       if (n) cursor = Math.max(0, Math.min(n - 1, cursor + (e.key === 'PageDown' ? 8 : -8)));
     } else if (e.key === 'Enter') {
       e.preventDefault();
+      if (commandMode && onex && query.trim()) {
+        const line = query;
+        onclose();
+        if (onex(line)) return;
+      }
       run(cursor);
     } else if (e.key === 'Backspace' && commandMode && query === '') {
       e.preventDefault();

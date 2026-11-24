@@ -54,7 +54,7 @@ export function noteHref(raw: string): string | null {
 }
 
 /** In-app handler for note links (Ctrl/Cmd+click in Live Preview). */
-export const noteLinkHandler = Facet.define<(href: string) => void>();
+export const noteLinkHandler = Facet.define<(href: string, e?: MouseEvent) => void>();
 
 /** Image source safe for an <img> (CSP img-src: self data: blob: https:). */
 export function safeImageSrc(raw: string): string | null {
@@ -456,7 +456,7 @@ const linkClicks = EditorView.domEventHandlers({
       const handlers = view.state.facet(noteLinkHandler);
       if (handlers.length === 0) return false;
       e.preventDefault();
-      handlers[0](note);
+      handlers[0](note, e);
       return true;
     }
     const el = (e.target as HTMLElement | null)?.closest?.('[data-lp-href]');

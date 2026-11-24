@@ -54,7 +54,10 @@
   import { renderBlocks } from '../lib/markdown.ts';
   import { captureFocus } from '../lib/list-keys.ts';
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
-  import { accountGroups, cursorAt, booksStep, bookAt, type BooksCursor, type BooksKey } from '../lib/books-nav.ts';
+  import { accountGroups, cursorAt, booksStep, bookAt, hasAccountsLayer, flatIndex, plural, type BooksCursor, type BooksKey } from '../lib/books-nav.ts';
+  import { accounts } from '../lib/accounts.svelte.ts';
+  import { noteCountOf } from '../lib/book-counts.ts';
+  import { motionAllowed } from '../lib/motion.ts';
   import { selectorOrder } from '../lib/books-model.ts';
   import { STATE_LABEL } from '../lib/bookstatus.ts';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
@@ -169,7 +172,7 @@
   const curNote = $derived(cur?.kind === 'note' ? cur.note : null);
   const liveMsg = $derived(
     level === 'books'
-      ? `Books, ${books.list.length} books`
+      ? `Livros, ${plural(books.list.length, 'livro', 'livros')}`
       : `${nav.dir === '' ? bookName + ' root' : nav.dir}, ${nav.entries.length} items` + (nav.filter ? `, filtered by “${nav.filter}”` : ''),
   );
 
@@ -179,6 +182,23 @@
   let bc = $state<BooksCursor>(untrack(() => cursorAt(accountGroups(books.list), books.activeID)));
   const bookUnder = $derived(bookAt(groups, bc));
   const accountUnder = $derived(groups[bc.account] ?? null);
+  /** "Contas e servidores" exists only with many accounts. */
+  const accountsLayer = $derived(hasAccountsLayer(groups));
+  const atAccounts = $derived(level === 'books' && bc.level === 'accounts');
+  const curFlat = $derived(flatIndex(groups, bc));
+  /** Notes in a book: live for the open one, last known for the rest. */
+  function noteCount(b: { id: string; vault_id: string }): number | null {
+    return b.id === books.activeID && notes.list.length ? notes.list.length : noteCountOf(b.vault_id);
+  }
+  function accountOf(key: string) {
+    return accounts.list.find((a) => a.key === key) ?? null;
+  }
+  /** A stable hue slot per account (avatar tint). */
+  function avatarSlot(key: string): number {
+    let h = 0;
+    for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h % 4;
+  }
 
   // Note preview (excerpt, shared renderer).
   let previewBody = $state<string | null>(null);
@@ -268,7 +288,7 @@
   /** Rows stagger in when the overlay opens (and on a level change). */
   function entrance(): void {
     const host = level === 'books' ? booksEl : colEl;
-    if (host) stagger(Array.from(host.querySelectorAll<HTMLElement>('[role="option"]')).slice(0, 14));
+    if (host) stagger(Array.from(host.querySelectorAll<HTMLElement>('[role="option"], .fx-acct')).slice(0, 14), level === 'books' ? { step: 22, y: 10 } : {});
   }
 
   // Folder travel (l / h): the columns shift like a camera moving one
@@ -348,7 +368,28 @@
     filterOpen = false;
     if (l === 'books') bc = cursorAt(groups, books.activeID);
     await focusCol();
+    scopeChange(l === 'books' ? 'out' : 'in');
     entrance();
+  }
+
+  /** Books ⇄ files is a change of SCOPE, not a folder step: the camera
+   *  pulls back to the shelf (content arrives from 1.04 → 1, the panel
+   *  dips to .96 and settles) or dives into a book (0.96 → 1). The DOM
+   *  is already final; this only decorates it. */
+  function scopeChange(dir: 'out' | 'in'): void {
+    if (!motionAllowed() || !rootEl) return;
+    const cols = rootEl.querySelector<HTMLElement>('.fx-cols');
+    const g = SPRING.gentle;
+    const from = dir === 'out' ? 1.04 : 0.96;
+    animate(cols, [{ opacity: 0, transform: `scale(${from})`, filter: 'blur(3px)' }, { opacity: 1, transform: 'none', filter: 'none' }], g.ms, g.easing);
+    if (!sheet) animate(rootEl, [{ transform: 'scale(1)' }, { transform: `scale(${dir === 'out' ? 0.96 : 1.015})`, offset: 0.35 }, { transform: 'none' }], SPRING.bouncy.ms + 60, 'cubic-bezier(.3,.7,.3,1)');
+  }
+
+  /** Account level (only with many accounts) ⇄ Livros: same zoom, smaller. */
+  function layerChange(dir: 'out' | 'in'): void {
+    if (!motionAllowed() || !booksEl) return;
+    const g = SPRING.gentle;
+    animate(booksEl, [{ opacity: 0, transform: `scale(${dir === 'out' ? 1.03 : 0.97})` }, { opacity: 1, transform: 'none' }], g.ms, g.easing);
   }
 
   function onKey(e: KeyboardEvent): void {
@@ -504,7 +545,10 @@
 
   function booksKey(k: BooksKey): void {
     const step = booksStep(groups, bc, k);
+    const was = bc.level;
+    if (k.kind === 'parent' && was === 'books' && !accountsLayer) flash('Livros é o topo — sem camada de contas');
     bc = step.cursor;
+    if (bc.level !== was) void tick().then(() => { layerChange(bc.level === 'accounts' ? 'out' : 'in'); entrance(); });
     if (!step.open) return;
     if (step.open.id === books.activeID) void setLevel('files');
     else onbook?.(step.open.id);
@@ -535,7 +579,7 @@
       case 'hints': hintsOpen = true; return;
       case 'refresh':
         void books.refreshAll();
-        flash('refreshing books…');
+        flash('atualizando livros…');
         return;
     }
   }
@@ -547,7 +591,7 @@
 
   function pickAccount(i: number): void {
     bc = { level: 'books', account: i, book: 0 };
-    void focusCol();
+    void focusCol().then(() => { layerChange('in'); entrance(); });
   }
 
   function newBook(): void {
@@ -706,7 +750,7 @@
   const legendState = $derived(
     level === 'books' ? 'books' : pendingDelete ? 'confirm' : prompt ? 'prompt' : filterFocused ? 'filter' : 'files',
   );
-  const legendItems = $derived(explorerLegend(legendState));
+  const legendItems = $derived(level === 'books' && !accountsLayer ? explorerLegend(legendState).filter((it) => it.keys !== 'h') : explorerLegend(legendState));
 
   /** A legend item was clicked: the same action its keys run. */
   function legendAction(it: LegendItem): void {
@@ -775,7 +819,7 @@
     class:no-preview={!showPreview}
     role="dialog"
     aria-modal="true"
-    aria-label={level === 'books' ? 'Books' : 'Explorer'}
+    aria-label={level === 'books' ? 'Livros' : 'Explorer'}
     tabindex="-1"
     bind:this={rootEl}
     onclick={(e) => e.stopPropagation()}
@@ -784,30 +828,45 @@
     data-level={level}
   >
     {#if sheet}<div class="fx-grab" aria-hidden="true"></div>{/if}
-    <header class="fx-head">
-      {#if sheet && !(level === 'books' && bc.level === 'accounts')}
-        <button type="button" class="fx-up" onclick={up} aria-label={level === 'books' ? 'Accounts' : nav.dir ? 'Up a folder' : 'Books'}>
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-      {/if}
-      <svg class="fx-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        {#if level === 'books'}
+    {#snippet lvIcon(kind: 'server' | 'account' | 'shelf' | 'book' | 'folder', px?: number)}
+      <svg class="lv-ic lv-{kind}" viewBox="0 0 16 16" width={px ?? 13} height={px ?? 13} aria-hidden="true">
+        {#if kind === 'server'}
+          <rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2.5" y="9" width="11" height="4.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="5" cy="4.75" r=".8" fill="currentColor"/><circle cx="5" cy="11.25" r=".8" fill="currentColor"/>
+        {:else if kind === 'account'}
+          <circle cx="8" cy="5.6" r="2.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.5c.6-2.6 2.6-3.9 5-3.9s4.4 1.3 5 3.9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        {:else if kind === 'shelf'}
+          <path d="M2.5 13.5h11M4 13.5V4h2.2v9.5M6.2 13.5V3h2.2v10.5M9.2 13.4l1.9-9 2.1.45-1.9 9" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round"/>
+        {:else if kind === 'book'}
           <path d="M3 2.75h7.5a1.5 1.5 0 0 1 1.5 1.5v9H4.5A1.5 1.5 0 0 1 3 11.75z M3 11.75a1.5 1.5 0 0 1 1.5-1.5H12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
         {:else}
           <path d="M1.75 4.25a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.75h5a1.5 1.5 0 0 1 1.5 1.5v6.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
         {/if}
       </svg>
-      <nav class="fx-crumbs" aria-label={level === 'books' ? 'Books path' : 'Folder path'}>
-        <button type="button" class="fx-crumb" aria-current={level === 'books' && bc.level === 'accounts' ? 'location' : undefined} onclick={() => { void setLevel('books').then(() => booksKey({ kind: 'parent' })); }}>Books</button>
+    {/snippet}
+    <header class="fx-head">
+      {#if sheet && !(level === 'books' && (atAccounts || !accountsLayer))}
+        <button type="button" class="fx-up" onclick={up} aria-label={level === 'books' ? 'Contas e servidores' : nav.dir ? 'Up a folder' : 'Livros'}>
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      {/if}
+      <nav class="fx-crumbs" aria-label={level === 'books' ? 'Onde você está' : 'Folder path'} data-testid="fx-crumbs">
         {#if level === 'books'}
-          {#if bc.level === 'books' && accountUnder}
-            <span class="fx-sep" aria-hidden="true">/</span>
-            <span class="fx-crumb static" aria-current="location">{accountUnder.account}@{serverLabel(accountUnder.server_url)}</span>
+          {#if accountsLayer}
+            <button type="button" class="fx-crumb" data-level="accounts" aria-current={atAccounts ? 'location' : undefined} onclick={() => { if (!atAccounts) booksKey({ kind: 'parent' }); }}>{@render lvIcon('server')}{atAccounts ? 'Contas e servidores' : 'Contas'}</button>
+            {#if !atAccounts && accountUnder}
+              <span class="fx-sep" aria-hidden="true">›</span>
+              <span class="fx-crumb static" data-level="account">{@render lvIcon('account')}{accountUnder.account}@{serverLabel(accountUnder.server_url)}</span>
+            {/if}
+          {/if}
+          {#if !atAccounts}
+            {#if accountsLayer}<span class="fx-sep" aria-hidden="true">›</span>{/if}
+            <span class="fx-crumb static" data-level="shelf" aria-current="location">{@render lvIcon('shelf')}Livros</span>
           {/if}
         {:else}
+          <button type="button" class="fx-crumb" data-level="shelf" onclick={() => void setLevel('books')}>{@render lvIcon('shelf')}Livros</button>
           {#each crumbs as c, i (c.path)}
-            <span class="fx-sep" aria-hidden="true">/</span>
-            <button type="button" class="fx-crumb" aria-current={i === crumbs.length - 1 ? 'location' : undefined} onclick={() => { nav.goTo(c.path); void focusCol(); }}>{i === 0 ? bookName : c.name}</button>
+            <span class="fx-sep" aria-hidden="true">›</span>
+            <button type="button" class="fx-crumb" data-level={i === 0 ? 'book' : 'folder'} aria-current={i === crumbs.length - 1 ? 'location' : undefined} onclick={() => { nav.goTo(c.path); void focusCol(); }}>{@render lvIcon(i === 0 ? 'book' : 'folder')}{i === 0 ? bookName : c.name}</button>
           {/each}
         {/if}
       </nav>
@@ -818,82 +877,113 @@
     </header>
 
     {#if level === 'books'}
-      <div class="fx-cols" data-testid="fx-books">
-        <section class="fx-col fx-parent" aria-label="Accounts">
-          {#if bc.level === 'books'}
-            <div class="fx-list" role="listbox" aria-label="Accounts" tabindex="-1">
-              {#each groups as g, i (g.key)}
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <div class="fx-row" class:cursor={i === bc.account} role="option" tabindex="-1" aria-selected={i === bc.account} data-hint-target style="height: {rowH}px" onclick={() => pickAccount(i)}>
-                  <span class="fx-row-name">{g.account}</span><span class="fx-row-meta">{serverLabel(g.server_url)}</span>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="fx-book"><span class="ui-eyebrow">accounts</span><span class="fx-book-name">{groups.length}</span><span class="fx-book-meta">{books.list.length} books on this device</span></div>
-          {/if}
-        </section>
-        <section class="fx-col fx-current" aria-label={bc.level === 'accounts' ? 'Accounts' : 'Books'}>
+      <div class="fx-cols shelf" data-testid="fx-books" data-layer={atAccounts ? 'accounts' : 'books'}>
+        <section class="fx-col fx-current" aria-label={atAccounts ? 'Contas e servidores' : 'Livros'}>
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
           <div
             class="fx-list active"
+            class:accounts-layer={atAccounts}
             role="listbox"
             tabindex="0"
-            aria-label={bc.level === 'accounts' ? 'Accounts' : 'Books'}
-            aria-activedescendant={bc.level === 'accounts' ? `fxa-${bc.account}` : `fxb-${bc.book}`}
+            aria-label={atAccounts ? 'Contas e servidores' : 'Livros'}
+            aria-activedescendant={atAccounts ? `fxa-${bc.account}` : `fxb-${curFlat}`}
             bind:this={booksEl}
             data-testid="fx-books-list"
           >
-            {#if bc.level === 'accounts'}
+            {#if atAccounts}
               {#each groups as g, i (g.key)}
+                {@const acct = accountOf(g.key)}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <div id="fxa-{i}" class="fx-row" class:cursor={i === bc.account} role="option" tabindex="-1" aria-selected={i === bc.account} data-hint-target style="height: {rowH}px" onclick={() => pickAccount(i)}>
-                  <span class="fx-row-name">{g.account}</span><span class="fx-row-meta">{serverLabel(g.server_url)} · {g.books.length}</span><span class="chev" aria-hidden="true">›</span>
+                <div id="fxa-{i}" class="fx-row fx-acct-row" class:cursor={i === bc.account} role="option" tabindex="-1" aria-selected={i === bc.account} data-hint-target onclick={() => pickAccount(i)}>
+                  <span class="fx-avatar" data-slot={avatarSlot(g.key)} aria-hidden="true">{g.account.slice(0, 1).toUpperCase()}</span>
+                  <span class="fx-acct-text">
+                    <span class="fx-row-name">{g.account}</span>
+                    <span class="fx-acct-host">{@render lvIcon('server', 11)}{serverLabel(g.server_url)}</span>
+                  </span>
+                  <span class="fx-acct-status" data-status={acct?.status ?? 'unknown'}>{acct?.status === 'needs_login' ? 'precisa entrar' : 'conectado'}</span>
+                  <span class="fx-row-meta">{plural(g.books.length, 'livro', 'livros')}</span>
                 </div>
               {/each}
-            {:else if accountUnder}
-              {#each accountUnder.books as b, i (b.id)}
-                {@const st = statusOf(b)}
-                {@const n = order.findIndex((x) => x.id === b.id) + 1}
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <div
-                  id="fxb-{i}"
-                  class="fx-row"
-                  class:cursor={i === bc.book}
-                  class:current={b.id === books.activeID}
-                  role="option"
-                  tabindex="-1"
-                  aria-selected={i === bc.book}
-                  aria-current={b.id === books.activeID ? 'true' : undefined}
-                  data-hint-target
-                  style="height: {rowH}px"
-                  onclick={() => (sheet ? chooseBook(bc.account, i) : (bc = { ...bc, book: i }))}
-                  ondblclick={() => chooseBook(bc.account, i)}
-                >
-                  <SyncDot state={st.state} pending={st.pending} vaultID={b.vault_id} />
-                  <span class="fx-row-name">{b.name}</span>
-                  {#if n > 0 && n <= 9}<span class="fx-row-meta mono">g{n}</span>{/if}
+            {:else}
+              {#each groups as g, gi (g.key)}
+                {@const acct = accountOf(g.key)}
+                {@const base = flatIndex(groups, { account: gi, book: 0 })}
+                <div class="fx-group" role="group" aria-label="{g.account}@{serverLabel(g.server_url)}">
+                  <div class="fx-acct" aria-hidden="true">
+                    <span class="fx-avatar sm" data-slot={avatarSlot(g.key)}>{g.account.slice(0, 1).toUpperCase()}</span>
+                    <span class="fx-acct-name">{g.account}</span>
+                    <span class="fx-acct-host">{@render lvIcon('server', 11)}{serverLabel(g.server_url)}</span>
+                    <span class="fx-acct-dot" data-status={acct?.status ?? 'unknown'} title={acct?.status === 'needs_login' ? 'precisa entrar' : 'conectado'}></span>
+                    <span class="fx-acct-count">{plural(g.books.length, 'livro', 'livros')}</span>
+                  </div>
+                  {#each g.books as b, i (b.id)}
+                    {@const st = statusOf(b)}
+                    {@const n = order.findIndex((x) => x.id === b.id) + 1}
+                    {@const cnt = noteCount(b)}
+                    {@const sel = gi === bc.account && i === bc.book}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <div
+                      id="fxb-{base + i}"
+                      class="fx-row fx-book-row"
+                      class:cursor={sel}
+                      class:current={b.id === books.activeID}
+                      role="option"
+                      tabindex="-1"
+                      aria-selected={sel}
+                      aria-current={b.id === books.activeID ? 'true' : undefined}
+                      data-hint-target
+                      style="min-height: {sheet ? 52 : 40}px"
+                      onclick={() => (sheet ? chooseBook(gi, i) : (bc = { level: 'books', account: gi, book: i }))}
+                      ondblclick={() => chooseBook(gi, i)}
+                    >
+                      <span class="fx-book-ic">{@render lvIcon('book', 15)}</span>
+                      <span class="fx-book-text">
+                        <span class="fx-row-name">{b.name}</span>
+                        <span class="fx-book-sub">
+                          <SyncDot state={st.state} pending={st.pending} vaultID={b.vault_id} />
+                          <span>{STATE_LABEL[st.state].pt}</span>
+                          {#if cnt != null}<span class="dot-sep" aria-hidden="true">·</span><span>{plural(cnt, 'nota', 'notas')}</span>{/if}
+                          {#if b.last_opened_at}<span class="dot-sep" aria-hidden="true">·</span><span>{updatedLabel(b.last_opened_at)}</span>{/if}
+                        </span>
+                      </span>
+                      {#if b.id === books.activeID}<span class="fx-open-tag">aberto</span>{/if}
+                      {#if n > 0 && n <= 9}<kbd class="fx-kbd">g{n}</kbd>{/if}
+                    </div>
+                  {/each}
                 </div>
               {/each}
             {/if}
-            {#if groups.length === 0}<div class="fx-empty">No books yet — a to create one</div>{/if}
+            {#if groups.length === 0}<div class="fx-empty">Nenhum livro ainda — a cria um</div>{/if}
           </div>
         </section>
-        <section class="fx-col fx-preview" aria-label="Book">
+        <section class="fx-col fx-preview" aria-label={atAccounts ? 'Conta' : 'Livro'}>
           {#if bookUnder}
             {@const st = statusOf(bookUnder)}
-            <div class="fx-note fx-bookcard">
-              <div class="fx-note-head">
-                <span class="fx-note-title">{bookUnder.name}</span>
-                <span class="fx-note-meta">{bookUnder.account}@{serverLabel(bookUnder.server_url)}</span>
+            {@const cnt = noteCount(bookUnder)}
+            {#key bookUnder.id}
+              <div class="fx-note fx-bookcard">
+                <div class="fx-cover" aria-hidden="true">{@render lvIcon('book', 26)}</div>
+                <div class="fx-note-head">
+                  <span class="fx-note-title">{bookUnder.name}</span>
+                  <span class="fx-note-meta">{bookUnder.account}@{serverLabel(bookUnder.server_url)}</span>
+                </div>
+                <dl class="fx-facts">
+                  <dt>Estado</dt><dd><SyncDot state={st.state} pending={st.pending} label vaultID={bookUnder.vault_id} /></dd>
+                  <dt>Notas</dt><dd>{cnt != null ? plural(cnt, 'nota', 'notas') : '—'}</dd>
+                  <dt>Aberto</dt><dd>{bookUnder.last_opened_at ? updatedLabel(bookUnder.last_opened_at) : 'nunca neste aparelho'}</dd>
+                </dl>
+                <p class="fx-bookline dim">{bookUnder.id === books.activeID ? 'Aberto agora — ⏎ ou l volta às notas' : '⏎ ou l abre este livro'}</p>
               </div>
-              <p class="fx-bookline"><SyncDot state={st.state} pending={st.pending} label vaultID={bookUnder.vault_id} /></p>
-              <p class="fx-bookline dim">{bookUnder.id === books.activeID ? 'Open now — ⏎ or l goes back to its files' : '⏎ or l opens this book'}</p>
-              <p class="fx-bookline dim">{STATE_LABEL[st.state].en}{bookUnder.last_opened_at ? ` · opened ${updatedLabel(bookUnder.last_opened_at)}` : ''}</p>
-            </div>
+            {/key}
           {:else if accountUnder}
-            <div class="fx-note"><div class="fx-note-head"><span class="fx-note-title">{accountUnder.account}</span><span class="fx-note-meta">{serverLabel(accountUnder.server_url)}</span></div>
-              <ul class="fx-mini">{#each accountUnder.books as b (b.id)}<li>{b.name}</li>{/each}</ul>
+            {@const acct = accountOf(accountUnder.key)}
+            <div class="fx-note">
+              <div class="fx-note-head">
+                <span class="fx-note-title">{accountUnder.account}</span>
+                <span class="fx-note-meta">{serverLabel(accountUnder.server_url)} · {acct?.status === 'needs_login' ? 'precisa entrar' : 'conectado'}</span>
+              </div>
+              <ul class="fx-mini">{#each accountUnder.books as b (b.id)}<li>{@render lvIcon('book', 11)} {b.name}</li>{/each}</ul>
+              <p class="fx-bookline dim">⏎ ou l mostra os livros desta conta</p>
             </div>
           {/if}
         </section>
@@ -901,9 +991,9 @@
       <footer class="fx-status" data-testid="fx-footer">
         <CommandLegend embedded items={legendItems} onaction={legendAction} onmore={() => appKey({ kind: 'help' })} />
         {#if flashMsg}<span class="fx-flash" role="status">{flashMsg}</span>{/if}
-        <button type="button" class="fx-link" onclick={newBook}>New book…</button>
-        <button type="button" class="fx-link" onclick={() => { close(); onmanage?.(); }}>Manage…</button>
-        <span class="fx-stat mono" data-testid="fx-stat">{books.list.length} books · {groups.length} {groups.length === 1 ? 'account' : 'accounts'}</span>
+        <button type="button" class="fx-link" onclick={newBook}>Novo livro…</button>
+        <button type="button" class="fx-link" onclick={() => { close(); onmanage?.(); }}>Gerenciar…</button>
+        <span class="fx-stat mono" data-testid="fx-stat">{plural(books.list.length, 'livro', 'livros')} · {plural(groups.length, 'conta', 'contas')}</span>
       </footer>
     {:else}
       <div class="fx-cols">
@@ -913,7 +1003,7 @@
           {:else}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <div class="fx-book" role="button" tabindex="-1" onclick={() => void setLevel('books')} data-hint-target>
-              <span class="ui-eyebrow">book</span><span class="fx-book-name">{bookName}</span><span class="fx-book-meta">{notes.list.length} notes · h for books</span>
+              <span class="ui-eyebrow">livro</span><span class="fx-book-name">{bookName}</span><span class="fx-book-meta">{plural(notes.list.length, 'nota', 'notas')} · h: livros</span>
             </div>
           {/if}
         </section>
@@ -1192,4 +1282,60 @@
   .fx.sheet .fx-current { border-right: none; }
   .fx.sheet .fx-row { font-size: var(--text-md); }
   .fx.sheet .fx-current :global(.row) { font-size: var(--text-md); }
+
+  /* ── Books level: a shelf (scope), never a folder ─────────────────── */
+  .lv-ic { flex: none; vertical-align: -2px; }
+  .fx-glyph { display: inline-flex; }
+  .fx-crumb { display: inline-flex; align-items: center; gap: 5px; }
+  .fx-crumb .lv-ic { color: var(--ink-4); }
+  .fx-crumb[data-level='shelf'] .lv-ic, .fx-crumb[data-level='book'] .lv-ic { color: var(--accent); }
+  .fx-crumb[data-level='folder'] .lv-ic { color: var(--color-secondary); }
+  .fx-crumb[data-level='accounts'] .lv-ic, .fx-crumb[data-level='account'] .lv-ic { color: var(--color-info); }
+  .fx-cols.shelf { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); transform-origin: 50% 40%; }
+  .fx-cols.shelf .fx-current { background: color-mix(in oklch, var(--surface-sunk) 30%, transparent); }
+  .fx-group { margin: 0 0 var(--sp-3); }
+  .fx-acct {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-2) 6px; margin-bottom: 2px;
+    font-size: var(--text-xs); color: var(--ink-3);
+    border-bottom: 1px solid var(--hairline-soft);
+    cursor: default; user-select: none;
+  }
+  .fx-group:first-child .fx-acct { padding-top: var(--sp-1); }
+  .fx-acct-name { font-weight: 650; color: var(--ink-2); letter-spacing: var(--tracking-ui); }
+  .fx-acct-host { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--ink-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-acct-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 18%, transparent); }
+  .fx-acct-dot[data-status='needs_login'] { background: var(--color-warning); box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-warning) 18%, transparent); }
+  .fx-acct-dot[data-status='unknown'] { background: var(--ink-4); box-shadow: none; }
+  .fx-acct-count { margin-left: auto; font-size: var(--text-2xs); color: var(--ink-4); font-variant-numeric: tabular-nums; }
+  .fx-avatar {
+    flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+    font-size: var(--text-xs); font-weight: 700; color: var(--color-background);
+    background: var(--av, var(--color-primary));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 0 0 2px color-mix(in oklch, var(--av, var(--color-primary)) 30%, transparent);
+  }
+  .fx-avatar.sm { width: 18px; height: 18px; font-size: 10px; }
+  .fx-avatar[data-slot='1'] { --av: var(--color-secondary); }
+  .fx-avatar[data-slot='2'] { --av: var(--color-accent); }
+  .fx-avatar[data-slot='3'] { --av: var(--color-info); }
+  .fx-book-row { gap: var(--sp-3); padding-top: 5px; padding-bottom: 5px; height: auto; }
+  .fx-book-ic { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); color: var(--ink-3); background: var(--surface-2); box-shadow: var(--edge-light); }
+  .fx-row.current .fx-book-ic, .fx-row.cursor .fx-book-ic { color: var(--accent); background: var(--accent-wash); }
+  .fx-book-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .fx-book-sub { display: flex; align-items: center; gap: 5px; font-size: var(--text-2xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; }
+  .dot-sep { color: var(--ink-4); }
+  .fx-open-tag { flex: none; padding: 1px 7px; border-radius: var(--radius-pill); font-size: var(--text-2xs); color: var(--accent-ink); background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+  .fx-kbd { flex: none; min-width: 22px; padding: 1px 5px; border: 1px solid var(--hairline); border-bottom-width: 2px; border-radius: var(--radius-xs); background: var(--surface-1); font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--ink-3); text-align: center; }
+  /* Contas e servidores: cards, not folders (no chevron, no Miller parent). */
+  .fx-list.accounts-layer { padding: var(--sp-2); display: flex; flex-direction: column; gap: 6px; }
+  .fx-acct-row { height: auto; min-height: 52px; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--hairline-soft); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--edge-light); }
+  .fx-acct-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .fx-acct-status { flex: none; font-size: var(--text-2xs); color: var(--ok); }
+  .fx-acct-status[data-status='needs_login'] { color: var(--color-warning); }
+  .fx-cover { display: grid; place-items: center; width: 52px; height: 64px; margin-bottom: var(--sp-4); border-radius: 4px 8px 8px 4px; color: var(--accent); background: linear-gradient(135deg, var(--accent-soft), var(--accent-wash)); box-shadow: inset 3px 0 0 var(--accent-line), var(--elev-2); }
+  .fx-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--sp-4); margin: 0 0 var(--sp-4); font-size: var(--text-sm); }
+  .fx-facts dt { color: var(--ink-3); font-size: var(--text-xs); }
+  .fx-facts dd { margin: 0; }
+  .fx-mini li { list-style: none; display: flex; align-items: center; gap: 6px; margin-left: -1.1em; }
+  .fx.sheet .fx-cols.shelf { grid-template-columns: minmax(0, 1fr); }
 </style>

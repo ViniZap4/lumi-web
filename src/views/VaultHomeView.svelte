@@ -17,6 +17,7 @@
   import type { ConflictCopy } from '../lib/offline-store.ts';
   import { uiState } from '../lib/uistate.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
+  import { accountGroups, hasAccountsLayer } from '../lib/books-nav.ts';
   import { sync } from '../lib/sync.svelte.ts';
   import { serverLabel } from '../lib/serverurl.ts';
   import { isEditableTarget } from '../lib/shortcuts.ts';
@@ -1917,10 +1918,11 @@
             .filter((m) => m.lhs.startsWith(LEADER_TOKEN))
             .map((m) => ({ keys: m.lhs.slice(LEADER_TOKEN.length), rhs: m.rhs }))
         : [],
-    }),
+    }).filter((it) => !(legendCtx === 'books' && it.keys === 'h' && !hasAccountsLayer(accountGroups(books.list)))),
   );
   const legendMode = $derived(
     legendCtx === 'float' ? 'explorer'
+    : legendCtx === 'books' ? 'livros'
     : legendCtx === 'hover' ? 'preview'
     : legendCtx === 'canvas' || legendCtx === 'board' ? (structuredFocus.current?.mode === 'edit' ? 'edit' : 'reading')
     : legendCtx,

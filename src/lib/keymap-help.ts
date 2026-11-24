@@ -16,7 +16,7 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['-  ⟨leader⟩e  :explore', 'open at this note'],
       ['Explorer button  space', 'open with the mouse / palette'],
       ['j k  ↓ ↑', 'move'],
-      ['h  ←  ⌫', 'up a folder (at the root: books)'],
+      ['h  ←  ⌫', 'up a folder (at the root: Livros)'],
       ['l  →', 'enter a folder / open'],
       ['⏎', 'open in this pane'],
       ['⌃v  ⌃s', 'open in a split right / below'],
@@ -45,8 +45,9 @@ export const KEYMAP: readonly KeymapSection[] = [
   {
     title: 'Books',
     rows: [
-      ['gb  book button', 'books (accounts → books)'],
-      ['h  l  ⏎', 'accounts / books, open'],
+      ['gb  book button', 'Livros: every book, grouped by account'],
+      ['⏎  l', 'open the book under the cursor'],
+      ['h', 'Contas e servidores (3+ accounts only)'],
       ['[  ]', 'previous / next book'],
       ['g1–9  ⌃⌘1–9', 'book by number'],
     ],

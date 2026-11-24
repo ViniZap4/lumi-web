@@ -8,6 +8,9 @@
   import type { NoteSummary } from '../lib/types.ts';
   import type { PaletteCommand } from '../lib/palette.ts';
   import { keyLabel } from '../lib/platform.ts';
+  import { noteIconKind, disambiguateTitles } from '../lib/note-icons.ts';
+  import type { NoteViewKind } from '../lib/note-kind.ts';
+  import NoteIcon from './NoteIcon.svelte';
 
   interface Props {
     commands: readonly PaletteCommand[];
@@ -24,7 +27,7 @@
 
   type Item =
     | { kind: 'cmd'; key: string; title: string; detail?: string; cmd: PaletteCommand }
-    | { kind: 'note'; key: string; title: string; detail: string; id: string };
+    | { kind: 'note'; key: string; title: string; detail: string; id: string; icon: NoteViewKind };
 
   let query = $state('');
   let cursor = $state(0);
@@ -39,9 +42,12 @@
       .sort((a, b) => (q ? b.s! - a.s! : 0))
       .map((x): Item => ({ kind: 'cmd', key: 'c:' + x.c.id, title: x.c.title, detail: x.c.keys, cmd: x.c }));
     if (commandMode) return cmds;
-    const ns = q
-      ? linkCandidates(notes, q, { limit: 30 }).map((c): Item => ({ kind: 'note', key: 'n:' + c.id, title: c.title, detail: c.folder || '/', id: c.id }))
-      : [];
+    const byId = new Map(notes.map((n) => [n.id, n]));
+    const found = q ? linkCandidates(notes, q, { limit: 30 }) : [];
+    const icons = found.map((c) => noteIconKind(byId.get(c.id)));
+    // "test · canvas" when a canvas and a note share the title.
+    const titles = disambiguateTitles(found.map((c, i) => ({ name: c.title, kind: icons[i] })));
+    const ns = found.map((c, i): Item => ({ kind: 'note', key: 'n:' + c.id, title: titles[i], detail: c.folder || '/', id: c.id, icon: icons[i] }));
     // Notes first when the query looks like a search, commands first otherwise.
     return ns.length && q.length > 1 ? [...ns.slice(0, 20), ...cmds.slice(0, 8)] : [...cmds, ...ns];
   });
@@ -161,7 +167,7 @@
         >
           <span class="icon" aria-hidden="true">
             {#if it.kind === 'note'}
-              <svg viewBox="0 0 16 16" width="13" height="13"><path d="M4 2h5l3 3v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+              <NoteIcon kind={it.icon} size={13} />
             {:else}
               <svg viewBox="0 0 16 16" width="13" height="13"><path d="m5 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
             {/if}

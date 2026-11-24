@@ -10,7 +10,12 @@ import { mount, unmount, flushSync, tick } from 'svelte';
 
 vi.mock('../lib/api.ts', async (orig) => ({
   ...(await orig<typeof import('../lib/api.ts')>()),
-  getNoteContent: vi.fn(async (_v: string, id: string) => ({ id, vault_id: 'v1', path: id + '.md', frontmatter: {}, body: `# ${id}\n\n<script>bad()</script>body of ${id}` })),
+  getNoteContent: vi.fn(async (_v: string, id: string) =>
+    id === 'map'
+      ? { id, vault_id: 'v1', path: 'trip/map.canvas', kind: 'canvas', frontmatter: {}, body: '{"nodes":[{"id":"a","type":"text","text":"Hello **map**","x":0,"y":0,"width":200,"height":60},{"id":"f","type":"file","file":"trip/plan.md","x":300,"y":0,"width":200,"height":100}],"edges":[{"id":"e","fromNode":"a","toNode":"f"}]}' }
+      : id === 'board'
+        ? { id, vault_id: 'v1', path: 'trip/board.md', frontmatter: { 'kanban-plugin': 'board' }, body: '## Todo\n\n- [ ] pack\n- [ ] book\n\n## Done\n\n- [x] plan\n' }
+        : { id, vault_id: 'v1', path: id + '.md', frontmatter: {}, body: `# ${id}\n\n<script>bad()</script>body of ${id}` }),
 }));
 
 import FloatingExplorer, { type FxOps } from './FloatingExplorer.svelte';
@@ -146,6 +151,36 @@ describe('floating explorer', () => {
     const md = target.querySelector('.fx-preview .md-body');
     expect(md?.textContent).toContain('body of sites');
     expect(md?.innerHTML).not.toContain('<script');
+  });
+
+  it('a canvas previews as a mini canvas (not raw JSON); kind icon + "· canvas" when titles collide', async () => {
+    notes.list = [...notes.list, { ...note('map', 'trip/map.canvas', 'Plan'), kind: 'canvas' }];
+    await open('map');
+    await new Promise((r) => setTimeout(r, 150));
+    await settle();
+    const mini = target.querySelector('.fx-preview [data-testid="canvas-mini"]');
+    expect(mini).not.toBeNull();
+    expect(target.querySelector('.fx-preview')!.textContent).not.toContain('"nodes"');
+    expect(mini!.querySelectorAll('.cm-card')).toHaveLength(2);
+    expect(mini!.textContent).toContain('plan'); // file node: titled card
+    (mini as HTMLElement).click();
+    expect(onopen).toHaveBeenCalledWith('map', 'current', expect.anything());
+    // Rows: the canvas and the note both titled "Plan" are told apart.
+    expect(rows()).toEqual(expect.arrayContaining(['Plan · canvas', 'Plan · note']));
+    const icon = (name: string) => Array.from(target.querySelectorAll('[data-testid="col-fx-cur"] [role="option"]')).find((r) => r.querySelector('.name')?.textContent === name)?.querySelector('svg')?.getAttribute('data-kind');
+    expect(icon('Plan · canvas')).toBe('canvas');
+    expect(icon('Plan · note')).toBe('markdown');
+  });
+
+  it('a kanban note previews as a mini board', async () => {
+    notes.list = [...notes.list, note('board', 'trip/board.md', 'Board')];
+    await open('board');
+    await new Promise((r) => setTimeout(r, 150));
+    await settle();
+    const mini = target.querySelector('.fx-preview [data-testid="kanban-mini"]');
+    expect(mini).not.toBeNull();
+    expect(Array.from(mini!.querySelectorAll('.km-title')).map((e) => e.textContent)).toEqual(['Todo', 'Done']);
+    expect(mini!.textContent).toContain('pack');
   });
 
   it('a / d run the file operations through the view', async () => {

@@ -10,6 +10,9 @@
   // component only renders and reports clicks.
   import { untrack } from 'svelte';
   import type { Entry } from '../lib/notetree.ts';
+  import { noteIconKind, disambiguateTitles } from '../lib/note-icons.ts';
+  import { peekNote } from '../lib/note-content.ts';
+  import NoteIcon from './NoteIcon.svelte';
 
   export const ROW_HEIGHT = 30;
   const OVERSCAN = 8;
@@ -63,6 +66,9 @@
   const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN));
   const end = $derived(Math.min(entries.length, Math.ceil((scrollTop + view) / rowHeight) + OVERSCAN));
   const visible = $derived(entries.slice(start, end));
+  // Kind glyphs + "name · canvas" when a canvas and a note share a name.
+  const kinds = $derived(entries.map((e) => (e.kind === 'note' ? noteIconKind(e.note, peekNote(e.note.vault_id, e.note.id)?.content) : null)));
+  const names = $derived(disambiguateTitles(entries.map((e, i) => ({ name: e.name, kind: kinds[i] }))));
 
   /** Rows that fit in the viewport (page size for PgUp/PgDn). */
   export function pageRows(): number {
@@ -188,13 +194,9 @@
           ondragend={() => (dropKey = null)}
         >
           <span class="icon" aria-hidden="true">
-            {#if e.kind === 'folder'}
-              <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-            {:else}
-              <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4.5 2h4.6L12 4.9v8.6a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5z M9 2v3h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-            {/if}
+            <NoteIcon kind={e.kind === 'folder' ? 'folder' : (kinds[i] ?? 'markdown')} />
           </span>
-          <span class="name">{e.name}</span>
+          <span class="name">{names[i] ?? e.name}</span>
           {#if e.kind === 'folder'}
             <span class="count" aria-hidden="true">{e.virtual ? 'new' : e.count}</span>
             <span class="chev" aria-hidden="true">›</span>

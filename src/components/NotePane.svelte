@@ -22,6 +22,8 @@
   import type { NoteContent } from '../lib/types.ts';
   import MarkdownView from './MarkdownView.svelte';
   import NoteViewHost from './NoteViewHost.svelte';
+  import NoteIcon from './NoteIcon.svelte';
+  import { noteIconKind } from '../lib/note-icons.ts';
 
   type NoteEditorComp = typeof import('./NoteEditor.svelte').default;
 
@@ -243,6 +245,7 @@
     {/if}
     <span class="pane-title" title={path}>
       {#if folder}<span class="pane-folder">{folder} /</span>{/if}
+      <span class="pane-kind"><NoteIcon kind={noteIconKind({ path, kind: meta?.kind }, content)} size={12} /></span>
       <span class="pane-name">{title}</span>
     </span>
     {#if stale}<span class="pane-stale">offline copy</span>{/if}

@@ -23,7 +23,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const DIST = path.resolve(here, '../../dist');
+const DIST = path.resolve(process.env.DIST || path.resolve(here, '../../dist'));
 const PORT = Number(process.argv[2] || process.env.PORT || 4777);
 const VAULT = 'v1';
 const NOW = '2026-11-24T10:00:00Z';
@@ -93,8 +93,8 @@ const obsidianCanvas = `{
 }`;
 
 const notes = new Map(); // id -> {path,title,kind,body}
-function addNote(id, p, body, kind) {
-  notes.set(id, { id, path: p, title: path.basename(p).replace(/\.(md|canvas)$/, ''), kind: kind ?? (p.endsWith('.canvas') ? 'canvas' : 'markdown'), body });
+function addNote(id, p, body, kind, frontmatter = {}) {
+  notes.set(id, { id, path: p, title: path.basename(p).replace(/\.(md|canvas)$/, ''), kind: kind ?? (p.endsWith('.canvas') ? 'canvas' : 'markdown'), body, frontmatter });
 }
 for (let i = 0; i < 20; i++) addNote(`note-${i}`, `notes/note-${i}.md`, `# Note ${i}\n\n${'Paragraph with *text* and `code`.\n\n'.repeat(30)}`);
 addNote('readme', 'README.md', '# Readme\n\nA markdown note beside the canvases.\n');
@@ -102,6 +102,10 @@ addNote('small', 'small.canvas', smallCanvas);
 addNote('big', 'big.canvas', bigCanvas());
 addNote('empty', 'empty.canvas', '{"nodes":[],"edges":[]}');
 addNote('obsidian', 'obsidian.canvas', obsidianCanvas);
+// Owner screenshot: a canvas and a markdown note both titled "test"; a board.
+addNote('test-canvas', 'test.canvas', smallCanvas);
+addNote('test-md', 'test.md', '# test\n\nA markdown note named like the canvas.\n');
+addNote('board', 'board.md', '## Todo\n\n- [ ] pack\n- [ ] tickets [[README]]\n- [ ] visa\n\n## Doing\n\n- [ ] route\n\n## Done\n\n- [x] plan\n', 'markdown', { 'kanban-plugin': 'board' });
 addNote('invalid', 'invalid.canvas', '{"nodes":[{"id":"x","type":"text","text":"broken",');
 
 // ---- Yjs docs ------------------------------------------------------------------------------
@@ -232,7 +236,7 @@ const server = http.createServer((req, res) => {
     const n = notes.get(id);
     if (!n) return json(res, 404, { error: 'not_found' });
     if (!m[2]) return json(res, 200, summary(n));
-    if (m[2] === 'content') return json(res, 200, { id, vault_id: VAULT, path: n.path, frontmatter: {}, body: n.body, kind: n.kind });
+    if (m[2] === 'content') return json(res, 200, { id, vault_id: VAULT, path: n.path, frontmatter: n.frontmatter ?? {}, body: n.body, kind: n.kind });
     if (m[2] === 'ws-ticket') {
       if (process.env.MOCK_LEGACY_TOKEN) return json(res, 404, { error: 'not_found' }); // legacy ?token= mode
       return json(res, 201, { ticket: 't' + Math.random().toString(36).slice(2), expires_at: new Date(Date.now() + 30000).toISOString(), crdt_epoch: 'e1' });

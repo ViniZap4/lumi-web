@@ -45,6 +45,8 @@
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
   import { focusPane } from '../lib/view-focus.ts';
   import { structuredFocus } from '../lib/structured-mode.svelte.ts';
+  import { noteIconKind } from '../lib/note-icons.ts';
+  import NoteIcon from '../components/NoteIcon.svelte';
   import { withViewTransition, sharedTransition, animate, scrollBehavior } from '../lib/motion.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
   import ToastStack from '../components/ToastStack.svelte';
@@ -1914,6 +1916,7 @@
             <button class="crumb" type="button" onclick={() => exploreCrumb(i)} title="Explore {noteCrumbs.slice(0, i + 1).join('/')}/">{c}</button>
             <span class="sep" aria-hidden="true">/</span>
           {/each}
+          <span class="crumb-kind" aria-hidden="true"><NoteIcon kind={noteIconKind(notes.selected, notes.content?.id === notes.selected.id ? notes.content : null)} size={12} /></span>
           <span class="crumb-note" aria-current="page">{notes.selected.title}</span>
         </nav>
       {/if}

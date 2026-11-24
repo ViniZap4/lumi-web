@@ -17,6 +17,11 @@
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { keyLabel } from '../lib/platform.ts';
   import MarkdownView from './MarkdownView.svelte';
+  import CanvasMini from './CanvasMini.svelte';
+  import KanbanMini from './KanbanMini.svelte';
+  import NoteIcon from './NoteIcon.svelte';
+  import { previewKindFor } from '../lib/preview/structured-preview.ts';
+  import type { NoteContent } from '../lib/types.ts';
 
   interface Props {
     target: HoverTarget;
@@ -37,13 +42,16 @@
   let card = $state<HTMLElement | null>(null);
   let scroller = $state<HTMLElement | null>(null);
   let body = $state<string | null>(null);
+  /** Full content (canvas / board previews draw it, not the excerpt). */
+  let content = $state<NoteContent | null>(null);
   let truncated = $state(false);
   let error = $state<string | null>(null);
   const keys = new PaneKeys();
 
   const note = $derived(target.kind === 'note' ? target.note : null);
   const ext = $derived(target.kind === 'external' ? urlCard(target.url) : null);
-  const blocks = $derived(body != null ? renderBlocks(body) : []);
+  const kind = $derived(note ? previewKindFor(note, content) : 'markdown');
+  const blocks = $derived(body != null && kind === 'markdown' ? renderBlocks(body) : []);
   const folder = $derived(note ? dirOf(note.path || '') : '');
   const updated = $derived(note ? updatedLabel(note.updated_at) : '');
 
@@ -66,17 +74,18 @@
     const n = note;
     if (!n) return;
     const hit = peekNote(vaultID, n.id);
-    if (hit) setBody(hit.content.body);
+    if (hit) setBody(hit.content);
     let live = true;
     loadNote(vaultID, n.id).then(
-      (r) => { if (live) setBody(r.content.body); },
+      (r) => { if (live) setBody(r.content); },
       (e) => { if (live && body == null) error = (e as Error).message; },
     );
     return () => { live = false; };
   });
 
-  function setBody(b: string): void {
-    const ex = previewExcerpt(b ?? '');
+  function setBody(c: NoteContent): void {
+    content = c;
+    const ex = previewExcerpt(c.body ?? '');
     body = ex.text;
     truncated = ex.truncated;
   }
@@ -140,7 +149,7 @@
   {#if note}
     <header class="hc-head">
       <div class="hc-title-row">
-        <svg class="hc-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 1.75h5.25L12.5 5v9.25h-8.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9 2v3.25h3.25" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span class="hc-icon"><NoteIcon {kind} size={13} /></span>
         <span class="hc-title">{note.title}</span>
       </div>
       <div class="hc-meta">
@@ -149,7 +158,11 @@
       </div>
     </header>
     <div class="hc-scroll" bind:this={scroller}>
-      {#if body != null}
+      {#if kind === 'canvas' && content}
+        <CanvasMini text={content.body ?? ''} onopen={() => onopen('current')} />
+      {:else if kind === 'kanban' && content}
+        <KanbanMini text={content.body ?? ''} onopen={() => onopen('current')} />
+      {:else if body != null}
         <div class="lumi-prose compact" data-prose={editorSettings.value.proseFont}>
           <MarkdownView {blocks} />
         </div>

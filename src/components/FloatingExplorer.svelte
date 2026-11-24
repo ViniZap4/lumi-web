@@ -62,6 +62,11 @@
   import type { OpenWhere } from '../lib/link-open.ts';
   import MillerColumn from './MillerColumn.svelte';
   import MarkdownView from './MarkdownView.svelte';
+  import CanvasMini from './CanvasMini.svelte';
+  import KanbanMini from './KanbanMini.svelte';
+  import NoteIcon from './NoteIcon.svelte';
+  import { previewKindFor } from '../lib/preview/structured-preview.ts';
+  import type { NoteContent } from '../lib/types.ts';
   import ContextMenu from './ContextMenu.svelte';
   import HintOverlay from './HintOverlay.svelte';
   import SyncDot from './SyncDot.svelte';
@@ -171,6 +176,8 @@
 
   // Note preview (excerpt, shared renderer).
   let previewBody = $state<string | null>(null);
+  /** Full content: canvases / boards preview as a mini canvas / board. */
+  let previewContent = $state<NoteContent | null>(null);
   let previewErr = $state<string | null>(null);
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
   $effect(() => {
@@ -180,20 +187,32 @@
       previewErr = null;
       if (!n) {
         previewBody = null;
+        previewContent = null;
         return;
       }
       const hit = peekNote(vaultID, n.id);
       previewBody = hit ? previewExcerpt(hit.content.body, 120).text : null;
+      previewContent = hit ? hit.content : null;
       // Holding j/k must not fire one request per row.
       previewTimer = setTimeout(() => {
         loadNote(vaultID, n.id).then(
-          (r) => { if (curNote?.id === n.id) previewBody = previewExcerpt(r.content.body, 120).text; },
+          (r) => {
+            if (curNote?.id !== n.id) return;
+            previewContent = r.content;
+            previewBody = previewExcerpt(r.content.body, 120).text;
+          },
           (e) => { if (curNote?.id === n.id) previewErr = (e as Error).message; },
         );
       }, hit ? 0 : 90);
     });
   });
-  const previewBlocks = $derived(previewBody != null ? renderBlocks(previewBody) : []);
+  const previewKind = $derived(curNote ? previewKindFor(curNote, previewContent?.id === curNote.id ? previewContent : null) : 'markdown');
+  // Only markdown previews render the excerpt as blocks.
+  const previewBlocks = $derived(previewBody != null && previewKind === 'markdown' ? renderBlocks(previewBody) : []);
+  function openPreviewed(): void {
+    const n = curNote;
+    if (n) onopen(n.id, 'current', rowNameEl());
+  }
 
   const promptPlan: FxPlan | null = $derived.by(() => {
     const p = prompt;
@@ -871,10 +890,14 @@
           {:else if curNote}
             <div class="fx-note">
               <div class="fx-note-head">
-                <span class="fx-note-title">{curNote.title}</span>
+                <span class="fx-note-title"><NoteIcon kind={previewKind} size={15} /> {curNote.title}</span>
                 <span class="fx-note-meta">{dirOf(curNote.path) || '/'} · {updatedLabel(curNote.updated_at)}</span>
               </div>
-              {#if previewBody != null}
+              {#if previewKind === 'canvas' && previewContent?.id === curNote.id}
+                <CanvasMini text={previewContent.body ?? ''} onopen={openPreviewed} />
+              {:else if previewKind === 'kanban' && previewContent?.id === curNote.id}
+                <KanbanMini text={previewContent.body ?? ''} onopen={openPreviewed} />
+              {:else if previewBody != null && previewKind === 'markdown'}
                 <div class="lumi-prose compact" data-prose={editorSettings.value.proseFont}><MarkdownView blocks={previewBlocks} /></div>
               {:else if previewErr}
                 <div class="fx-empty err">{previewErr}</div>

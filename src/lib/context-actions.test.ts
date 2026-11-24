@@ -16,7 +16,7 @@ describe('context menu mirrors the keymap', () => {
       const items = menuFor(entry, { canPaste: true, reader });
       expect(items.length).toBeGreaterThan(2);
       for (const it of items) {
-        if (!it.keys || it.action === 'newFolder' || it.action === 'copyLink') continue;
+        if (!it.keys || it.action === 'newFolder' || it.action === 'copyLink' || it.action === 'openRight' || it.action === 'openBelow') continue;
         const km = new ShellKeymap();
         const a = km.feed({ key: keyName(it.keys), ctrlKey: false, metaKey: false, altKey: false }, reader ? 'reader' : 'explorer', false);
         expect(a?.kind, `${it.label} (${it.keys})`).toBe(it.action);

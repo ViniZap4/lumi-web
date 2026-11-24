@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   single, splitPane, closePane, onlyPane, equalize, setNote, resizeSplit, nudgePane, neighbor, cycle,
-  leaves, rects, parsePaneState, pruneNotes, MAX_PANES, MIN_SIZE, type PaneState,
+  leaves, rects, parsePaneState, pruneNotes, containsLeaf, MAX_PANES, MIN_SIZE, type PaneState,
 } from './pane-tree.ts';
 
 const ids = (s: PaneState | null) => (s ? leaves(s.root).map((l) => l.note) : []);
@@ -143,5 +143,26 @@ describe('pane tree — persistence', () => {
     const s = three();
     expect(ids(pruneNotes(s, (n) => n !== 'b'))).toEqual(['a', 'c']);
     expect(pruneNotes(s, () => false)).toBeNull();
+  });
+});
+
+describe('pane tree — drop before / zoom membership', () => {
+  it('a drop on the left or top edge puts the new pane before the target', () => {
+    const l = splitPane(single('a', 'A'), 'A', 'row', 'b', 'B', true)!;
+    expect(ids(l)).toEqual(['b', 'a']);
+    expect(l.active).toBe('B');
+    let t = splitPane(single('a', 'A'), 'A', 'row', 'b', 'B')!;
+    t = splitPane(t, 'B', 'row', 'x', 'X', true)!;
+    expect(ids(t)).toEqual(['a', 'x', 'b']);
+    const top = splitPane(three(), 'C', 'col', 'y', 'Y', true)!;
+    expect(ids(top)).toEqual(['a', 'b', 'y', 'c']);
+  });
+  it('containsLeaf finds a leaf in a subtree', () => {
+    const s = three();
+    expect(containsLeaf(s.root, 'C')).toBe(true);
+    expect(containsLeaf(s.root, 'nope')).toBe(false);
+    const right = s.root.kind === 'split' ? s.root.children[1] : s.root;
+    expect(containsLeaf(right, 'A')).toBe(false);
+    expect(containsLeaf(right, 'B')).toBe(true);
   });
 });

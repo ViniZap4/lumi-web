@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { legendFor, describeRhs, contextForVimMode, fitLegend } from './legend.ts';
+import { legendFor, describeRhs, contextForVimMode, fitLegend, explorerLegend } from './legend.ts';
 
 const keys = (items: { keys: string }[]) => items.map((i) => i.keys);
 
@@ -8,8 +8,22 @@ describe('legendFor', () => {
     expect(keys(legendFor('home')).slice(0, 4)).toEqual(['-', 'a', 'j k', 'gb']);
     expect(legendFor('home')[0].do).toBe('app:explorer');
     expect(keys(legendFor('reader'))).toEqual(expect.arrayContaining(['j k', 'e i', '- h', 'q']));
-    expect(keys(legendFor('float'))).toEqual(expect.arrayContaining(['j k', 'h l', '⏎', '⌃v', '⌃s', '/', 'a r d', 'y p', 'f', 'gb']));
+    expect(keys(legendFor('float'))).toEqual(expect.arrayContaining(['j k', 'h l', '⏎', '⌃v', '⌃s', 'a', 'r', 'd', 'y p', '/', '.', 'zp', 'H L', 'gb', '?', 'Esc']));
     expect(keys(legendFor('books'))).toEqual(expect.arrayContaining(['⏎ l', 'h', 'g1–9', 'a']));
+  });
+  it('explorer footer legend: one set per state, core first, every key clickable', () => {
+    const files = explorerLegend('files');
+    expect(keys(files).slice(0, 6)).toEqual(['j k', 'h l', '⏎', '⌃v', '⌃s', 'Esc']);
+    expect(files.every((i) => !!i.do)).toBe(true);
+    expect(explorerLegend('books')).toBe(legendFor('books'));
+    expect(keys(explorerLegend('filter'))).toEqual(expect.arrayContaining(['⏎', 'Esc']));
+    expect(keys(explorerLegend('prompt'))).toEqual(expect.arrayContaining(['⏎', 'Esc']));
+    expect(keys(explorerLegend('confirm'))).toEqual(['y ⏎', 'n Esc']);
+    // Same fitting as the bottom legend: a narrow footer keeps the core.
+    const w = files.map((i) => (i.keys.length + i.label.length) * 6.6 + 6);
+    const narrow = fitLegend(w, 360, 16, 34);
+    expect(narrow.overflow).toBe(true);
+    expect(narrow.shown.slice(0, 3)).toEqual([0, 1, 2]);
   });
   it('pending chords and counts in the shell', () => {
     expect(keys(legendFor('home', 'g'))).toEqual(['gg', 'ge', 'gh', 'gb', 'g1–9']);
@@ -51,7 +65,7 @@ describe('legendFor — panes and the split preview reader', () => {
   });
   it('Ctrl-w pending lists the window commands in any context', () => {
     for (const ctx of ['home', 'reader', 'normal', 'visual', 'preview'] as const) {
-      expect(keys(legendFor(ctx, '⌃w'))).toEqual(['v', 's', 'h j k l', 'q', 'o', '=', 'f ⏎', 'F', 'w', 'p', '< > + -', 'Esc']);
+      expect(keys(legendFor(ctx, '⌃w'))).toEqual(['v', 's', 'h j k l', 'q', 'o', 'z', '=', 'f ⏎', 'F', 'w', 'p', '< > + -', 'Esc']);
     }
   });
   it('a panes hint only when there is more than one pane', () => {

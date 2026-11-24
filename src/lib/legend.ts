@@ -115,6 +115,7 @@ export const PANE_W: LegendItem[] = [
   { keys: 'h j k l', label: 'move to pane' },
   { keys: 'q', label: 'close pane', do: 'app:closePane' },
   { keys: 'o', label: 'only this', do: 'app:onlyPane' },
+  { keys: 'z', label: 'zoom pane', do: 'app:zoomPane' },
   { keys: '=', label: 'equalize', do: 'app:equalPanes' },
   { keys: 'f ⏎', label: 'link → split' },
   { keys: 'F', label: 'link → below' },
@@ -124,49 +125,100 @@ export const PANE_W: LegendItem[] = [
   { keys: 'Esc', label: 'cancel' },
 ];
 
-/** Floating explorer keys (files level) — the only navigation. */
+/** Floating explorer keys (files level) — the only navigation. Shown
+ *  in the explorer's own footer (fitted to its width, clickable) and in
+ *  the bottom legend. Priority order: the core moves and opens first,
+ *  then file operations, then the extras a wide window has room for.
+ *  `fx:` actions are explorer-only (split opens, list moves). */
 export const FLOAT_ITEMS: LegendItem[] = [
-  { keys: 'j k', label: 'move' },
-  { keys: 'h l', label: 'folders', tip: 'h at the book root climbs to the books' },
-  { keys: '⏎', label: 'open here' },
-  { keys: '⌃v', label: 'split right' },
-  { keys: '⌃s', label: 'split below' },
-  { keys: '/', label: 'filter' },
-  { keys: 'a r d', label: 'new/rename/delete' },
-  { keys: 'y p', label: 'copy' },
-  { keys: 'Esc q', label: 'close' },
-  { keys: 'f', label: 'hints' },
-  { keys: 'gb', label: 'books' },
-  { keys: 'e', label: 'edit' },
-  { keys: '⇧F10', label: 'menu' },
-  { keys: 'gg G', label: 'top/end' },
-  { keys: 'H L', label: 'history' },
-  { keys: '.', label: 'hidden' },
-  { keys: 'zp', label: 'preview' },
+  { keys: 'j k', label: 'move', do: 'fx:down', tip: 'j / k move the cursor · gg G top / end · ⌃d ⌃u half page' },
+  { keys: 'h l', label: 'folders', do: 'shell:parent', tip: 'h: up a folder (at the book root: the books) · l: into a folder' },
+  { keys: '⏎', label: 'open', do: 'shell:open' },
+  { keys: '⌃v', label: 'right', do: 'fx:vsplit', tip: 'Open in a split on the right (or drag the row to a pane edge)' },
+  { keys: '⌃s', label: 'below', do: 'fx:hsplit', tip: 'Open in a split below (or drag the row to a pane edge)' },
+  { keys: 'Esc', label: 'close', do: 'shell:close', tip: 'Esc or q closes the explorer' },
+  { keys: 'a', label: 'new', do: 'shell:create', tip: 'New note — end the name with / for a folder' },
+  { keys: 'r', label: 'rename', do: 'shell:rename', tip: 'Rename or move (type a path)' },
+  { keys: 'd', label: 'delete', do: 'shell:delete' },
+  { keys: 'y p', label: 'copy', do: 'shell:yank', tip: 'y yanks the note, p pastes a copy here' },
+  { keys: '/', label: 'filter', do: 'shell:filter', tip: '/ filters this folder · n N next / previous match' },
+  { keys: '.', label: 'hidden', do: 'shell:toggleHidden' },
+  { keys: 'zp', label: 'preview', do: 'shell:togglePreview', tip: 'Show / hide the preview column' },
+  { keys: 'H L', label: 'history', do: 'shell:historyBack', tip: 'Back / forward through visited folders' },
+  { keys: 'gb', label: 'books', do: 'shell:picker' },
+  { keys: '?', label: 'keys', do: 'shell:help' },
+  { keys: 'e', label: 'edit', do: 'shell:edit' },
+  { keys: 'f', label: 'hints', do: 'shell:hints', tip: 'Label every row and button; type a label to click it' },
+  { keys: 'gg G', label: 'top/end', do: 'shell:top' },
+  { keys: '⇧F10', label: 'menu', do: 'shell:menu', tip: 'Context menu for the row (also right-click)' },
+  { keys: 'R', label: 'refresh', do: 'shell:refresh' },
 ];
 
 /** Floating explorer, books level. */
 export const BOOKS_ITEMS: LegendItem[] = [
-  { keys: 'j k', label: 'move' },
-  { keys: '⏎ l', label: 'open book' },
-  { keys: 'h', label: 'accounts' },
+  { keys: 'j k', label: 'move', do: 'fx:down' },
+  { keys: '⏎ l', label: 'open book', do: 'shell:open' },
+  { keys: 'h', label: 'accounts', do: 'shell:parent' },
+  { keys: 'Esc', label: 'close', do: 'shell:close' },
   { keys: 'g1–9', label: 'book n' },
-  { keys: 'a', label: 'new book' },
-  { keys: 'gh', label: 'this book' },
-  { keys: 'R', label: 'refresh' },
-  { keys: 'Esc q', label: 'close' },
+  { keys: 'a', label: 'new book', do: 'shell:create' },
+  { keys: 'gh', label: 'this book', do: 'shell:home' },
+  { keys: 'f', label: 'hints', do: 'shell:hints' },
+  { keys: 'R', label: 'refresh', do: 'shell:refresh' },
+  { keys: '?', label: 'keys', do: 'shell:help' },
 ];
+
+/** The explorer's filter field is focused. */
+export const FILTER_ITEMS: LegendItem[] = [
+  { keys: 'type', label: 'filter this folder' },
+  { keys: '↑ ↓', label: 'move' },
+  { keys: '⏎', label: 'keep filter', do: 'fx:filterKeep' },
+  { keys: 'Esc', label: 'clear', do: 'fx:filterClear' },
+  { keys: 'n N', label: 'next/prev match' },
+];
+
+/** The new / rename prompt is open. */
+export const PROMPT_ITEMS: LegendItem[] = [
+  { keys: '⏎', label: 'confirm', do: 'fx:promptSubmit' },
+  { keys: 'Esc', label: 'cancel', do: 'fx:promptCancel' },
+  { keys: 'name/', label: 'folder' },
+  { keys: 'dir/name', label: 'move / create in a folder' },
+  { keys: '.canvas', label: 'canvas' },
+];
+
+/** The delete confirmation is open. */
+export const CONFIRM_ITEMS: LegendItem[] = [
+  { keys: 'y ⏎', label: 'delete', do: 'fx:confirmYes' },
+  { keys: 'n Esc', label: 'keep', do: 'fx:confirmNo' },
+];
+
+export type ExplorerLegendState = 'files' | 'books' | 'filter' | 'prompt' | 'confirm';
+
+/** Footer legend of the floating explorer for its current state. */
+export function explorerLegend(state: ExplorerLegendState): LegendItem[] {
+  switch (state) {
+    case 'books': return BOOKS_ITEMS;
+    case 'filter': return FILTER_ITEMS;
+    case 'prompt': return PROMPT_ITEMS;
+    case 'confirm': return CONFIRM_ITEMS;
+    default: return FLOAT_ITEMS;
+  }
+}
 
 /** Hover card keys (opened with `K`). */
 export const HOVER_ITEMS: LegendItem[] = [
   { keys: 'j k', label: 'scroll' },
   { keys: '⏎', label: 'open' },
-  { keys: '⌃w f', label: 'open in split' },
-  { keys: '⌃w F', label: 'split below' },
-  { keys: 'Esc', label: 'close' },
+  { keys: 'v', label: 'open right' },
+  { keys: 's', label: 'open below' },
+  { keys: 'd u', label: 'half page' },
+  { keys: 'g G', label: 'top/end' },
+  { keys: 'Esc q', label: 'close' },
 ];
 
 const PANES_ITEM: LegendItem = { keys: '⌃h ⌃l', label: 'panes', do: 'app:panes', tip: 'Ctrl-h/j/k/l move between panes · Ctrl-w w next · Ctrl-w p previous' };
+
+const ZOOM_ITEM: LegendItem = { keys: '⌃w z', label: 'zoom', do: 'app:zoomPane', tip: 'Zoom the pane to fill the note area and back (:zoom, double-click the pane header)' };
 
 const PREVIEW_ITEMS: LegendItem[] = [
   { keys: 'j k', label: 'scroll', do: 'preview:down' },
@@ -230,6 +282,7 @@ export function describeRhs(rhs: string): string {
       vsplit: 'split right',
       split: 'split below',
       only: 'only pane',
+      zoom: 'zoom pane',
       follow: 'follow link',
       hover: 'preview link',
       w: 'save',
@@ -336,7 +389,7 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
       { keys: 'H L', label: 'back/forward', do: 'shell:historyBack', tip: 'Previous / next note opened here' },
       { keys: 'y', label: 'copy', do: 'shell:yank' },
       { keys: 'F', label: 'hints', do: 'app:hints', tip: 'Label links, tasks and buttons; type a label to click it' },
-      ...(x.panes ? [PANES_ITEM] : []),
+      ...(x.panes ? [PANES_ITEM, ZOOM_ITEM] : []),
       { keys: 'space', label: 'commands', do: 'shell:palette' },
       { keys: '?', label: 'keys', do: 'shell:help' },
       { keys: 'a r', label: 'new/rename', do: 'shell:rename', tip: 'a: new note, r: rename / move — in the explorer' },

@@ -93,7 +93,7 @@ export type KeyLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKe
 /** `Ctrl-w` window commands (SPEC-PARTE2 §3): v/s split, q/c close,
  *  o only, = equalise, f/Enter follow the link under the cursor in a
  *  vertical split, F in a horizontal one, < > + - resize. */
-export type WinCmd = 'vsplit' | 'split' | 'close' | 'only' | 'equal' | 'linkV' | 'linkH' | 'wider' | 'narrower' | 'taller' | 'shorter';
+export type WinCmd = 'vsplit' | 'split' | 'close' | 'only' | 'equal' | 'linkV' | 'linkH' | 'wider' | 'narrower' | 'taller' | 'shorter' | 'zoom';
 
 export type PaneKeyResult =
   | { kind: 'nav'; dir: PaneDir; chord: boolean }
@@ -112,6 +112,7 @@ export function winCommand(e: KeyLike): WinCmd | null {
     case 'q':
     case 'c': return 'close';
     case 'o': return 'only';
+    case 'z': return 'zoom';
     case '=': return 'equal';
     case 'f': return 'linkV';
     case 'F': return 'linkH';

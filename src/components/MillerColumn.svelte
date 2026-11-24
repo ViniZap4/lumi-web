@@ -39,6 +39,12 @@
     ondropnote?: (noteKey: string, target: Entry) => void;
     /** Row height in px (touch sheets use taller rows). */
     rowHeight?: number;
+    /** Inline actions on hovered / cursor note rows: Open · Open right ·
+     *  Open below (SPEC-PARTE2 §3). Absent = no inline actions. */
+    onrowaction?: (index: number, entry: Entry, where: 'current' | 'vsplit' | 'hsplit') => void;
+    /** A note row started (true) or ended (false) a drag — the view
+     *  lets the drag reach the panes behind the overlay. */
+    ondragnote?: (on: boolean) => void;
     element?: HTMLElement | null;
   }
 
@@ -56,6 +62,8 @@
     oncontext,
     ondropnote,
     rowHeight = ROW_HEIGHT,
+    onrowaction,
+    ondragnote,
     element = $bindable(null),
   }: Props = $props();
 
@@ -118,7 +126,9 @@
   function onDragStart(ev: DragEvent, e: Entry): void {
     if (e.kind !== 'note' || !ev.dataTransfer) return;
     ev.dataTransfer.setData(DRAG_TYPE, e.key);
-    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.effectAllowed = 'copyMove';
+    // Deferred: changing the overlay inside dragstart can cancel the drag.
+    if (ondragnote) setTimeout(() => ondragnote(true), 0);
   }
   function onDragOver(ev: DragEvent, e: Entry): void {
     if (e.kind !== 'folder' || !ondropnote || !hasLumiKey(ev)) return;
@@ -183,7 +193,7 @@
           style="top: {i * rowHeight}px; height: {rowHeight}px"
           data-key={e.key}
           data-hint-target
-          draggable={e.kind === 'note' && !!ondropnote ? 'true' : undefined}
+          draggable={e.kind === 'note' && (!!ondropnote || !!ondragnote) ? 'true' : undefined}
           onclick={() => onpick?.(i, e)}
           ondblclick={() => onopen?.(i, e)}
           oncontextmenu={(ev) => { if (oncontext) { ev.preventDefault(); oncontext(i, e, ev); } }}
@@ -191,7 +201,7 @@
           ondragover={(ev) => onDragOver(ev, e)}
           ondragleave={() => { if (dropKey === e.key) dropKey = null; }}
           ondrop={(ev) => onDrop(ev, e)}
-          ondragend={() => (dropKey = null)}
+          ondragend={() => { dropKey = null; if (e.kind === 'note') ondragnote?.(false); }}
         >
           <span class="icon" aria-hidden="true">
             <NoteIcon kind={e.kind === 'folder' ? 'folder' : (kinds[i] ?? 'markdown')} />
@@ -201,6 +211,16 @@
             <span class="count" aria-hidden="true">{e.virtual ? 'new' : e.count}</span>
             <span class="chev" aria-hidden="true">›</span>
             <span class="sr-only">, folder, {e.count} items</span>
+          {:else if onrowaction}
+            <span class="row-acts" role="group" aria-label="Open {e.name}">
+              <button type="button" tabindex="-1" title="Open (⏎)" onclick={(ev) => { ev.stopPropagation(); onrowaction(i, e, 'current'); }}>Open</button>
+              <button type="button" tabindex="-1" title="Open right (⌃v)" aria-label="Open right" data-testid="row-open-right" onclick={(ev) => { ev.stopPropagation(); onrowaction(i, e, 'vsplit'); }}>
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8.5 3v10" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="3.4" width="4.6" height="9.2" rx="1" fill="currentColor" opacity=".35"/></svg>
+              </button>
+              <button type="button" tabindex="-1" title="Open below (⌃s)" aria-label="Open below" data-testid="row-open-below" onclick={(ev) => { ev.stopPropagation(); onrowaction(i, e, 'hsplit'); }}>
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2 8.5h12" stroke="currentColor" stroke-width="1.3"/><rect x="2.4" y="9" width="11.2" height="3.6" rx="1" fill="currentColor" opacity=".35"/></svg>
+              </button>
+            </span>
           {/if}
         </div>
       {/each}

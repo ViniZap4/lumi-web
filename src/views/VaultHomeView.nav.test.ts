@@ -282,7 +282,8 @@ describe('the floating explorer is the only navigation', () => {
   it('the legend follows: home, explorer, books level', async () => {
     await mountView();
     await waitFor(fx, 'explorer');
-    expect(legend()).toMatch(/split right/);
+    expect(legend()).toMatch(/right/);
+    expect(legend()).toMatch(/below/);
     await press('Escape');
     expect(legend()).toMatch(/explorer/);
     expect(legend()).toMatch(/new note/);
@@ -443,6 +444,86 @@ describe('note splits (SPEC-PARTE2 §3)', () => {
     expect(fx()).toBeNull();
     const saved = JSON.parse(localStorage.getItem('lumi.panes.v1:v1') ?? 'null');
     expect(saved?.state?.root?.dir).toBe('row');
+  });
+});
+
+describe('pane zoom, click-to-focus and mouse splits (SPEC-PARTE2 §3)', () => {
+  const panes = () => target.querySelectorAll<HTMLElement>('[data-testid="note-pane"]');
+  const cellHidden = (el: Element) => !!el.closest('.pane-cell')?.classList.contains('zoom-hide');
+  async function twoPanes(): Promise<void> {
+    await mountView();
+    await openThroughExplorer('Two');
+    await ctrl('w');
+    await press('v');
+    await waitFor(() => panes().length === 1, 'split');
+  }
+
+  it('Ctrl-w z zooms the focused pane (others hidden, not closed) and back; badges show', async () => {
+    await twoPanes();
+    await ctrl('w');
+    await press('z');
+    const primary = target.querySelector('[data-testid="primary-pane"]')!;
+    await waitFor(() => cellHidden(primary), 'primary hidden');
+    expect(panes().length).toBe(1);
+    expect(cellHidden(panes()[0])).toBe(false);
+    expect(panes()[0].querySelector('[data-testid="zoom-badge"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="status-zoom"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="pane-divider"]')).toBeNull();
+    await ctrl('w');
+    await press('z');
+    await waitFor(() => !cellHidden(primary), 'restored');
+    expect(target.querySelector('[data-testid="status-zoom"]')).toBeNull();
+    expect(target.querySelector('[data-testid="pane-divider"]')).not.toBeNull();
+  });
+
+  it('moving to another pane unzooms first; the header button and double-click toggle zoom', async () => {
+    await twoPanes();
+    (panes()[0].querySelector('[data-testid="pane-zoom"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('[data-testid="status-zoom"]')).not.toBeNull();
+    await ctrl('w');
+    await press('h');
+    expect(target.querySelector('[data-testid="status-zoom"]')).toBeNull();
+    expect(target.querySelector('[data-testid="primary-pane"]')!.contains(document.activeElement)).toBe(true);
+    panes()[0].querySelector('.pane-bar')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await settle();
+    expect(target.querySelector('[data-testid="status-zoom"]')).not.toBeNull();
+  });
+
+  it('the first click in an unfocused pane focuses it and still performs the click', async () => {
+    await twoPanes();
+    await ctrl('w');
+    await press('h');
+    const pane = panes()[0];
+    expect(pane.classList.contains('active')).toBe(false);
+    const edit = pane.querySelector<HTMLButtonElement>('.pane-btn')!;
+    edit.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    await settle();
+    expect(panes()[0].classList.contains('active')).toBe(true);
+    const onclick = vi.fn();
+    edit.addEventListener('click', onclick);
+    edit.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+    edit.click();
+    expect(onclick).toHaveBeenCalledTimes(1);
+  });
+
+  it('explorer rows: inline Open right / Open below, the same items in the menu, a clickable footer legend', async () => {
+    await mountView();
+    await openThroughExplorer('Two');
+    await press('-');
+    await waitFor(fx, 'explorer');
+    const footer = target.querySelector('[data-testid="fx-footer"]')!;
+    expect(footer.textContent).toMatch(/open/);
+    expect(target.querySelector('[data-testid="fx-stat"]')?.textContent).toMatch(/items?/);
+    const right = target.querySelector<HTMLButtonElement>('[data-testid="col-fx-cur"] [data-testid="row-open-right"]')!;
+    right.click();
+    await waitFor(() => panes().length === 1, 'opened right');
+    expect(fx()).toBeNull();
+    await press('-');
+    await waitFor(fx, 'explorer');
+    const below = target.querySelector<HTMLButtonElement>('[data-testid="col-fx-cur"] [data-testid="row-open-below"]')!;
+    below.click();
+    await waitFor(() => panes().length === 2, 'opened below');
   });
 });
 

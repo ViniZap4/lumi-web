@@ -71,6 +71,11 @@ export function leaves(n: PaneNode): PaneLeaf[] {
   return n.children.flatMap(leaves);
 }
 
+/** Whether leaf `id` is `n` or lies inside it (zoom: which cells stay). */
+export function containsLeaf(n: PaneNode, id: string): boolean {
+  return n.kind === 'leaf' ? n.id === id : n.children.some((c) => containsLeaf(c, id));
+}
+
 export function findLeaf(n: PaneNode, id: string): PaneLeaf | null {
   return leaves(n).find((l) => l.id === id) ?? null;
 }
@@ -171,11 +176,12 @@ function normalize(sizes: number[]): number[] {
 
 /**
  * Split leaf `at` in `dir` with a new pane showing `note` (right of /
- * below it). Inside a split of the same direction the new pane becomes
+ * below it; left of / above it with `before`, e.g. a note dropped on a
+ * pane's left or top edge). Inside a split of the same direction the new pane becomes
  * a sibling and the two share the old pane's space. Returns null when
  * the pane cap is reached or `at` is unknown.
  */
-export function splitPane(s: PaneState, at: string, dir: SplitDir, note: string, id: string = newPaneId()): PaneState | null {
+export function splitPane(s: PaneState, at: string, dir: SplitDir, note: string, id: string = newPaneId(), before = false): PaneState | null {
   if (!findLeaf(s.root, at) || paneCount(s) >= MAX_PANES) return null;
   const path = pathTo(s.root, at) ?? [];
   if (path.length >= MAX_DEPTH) return null;
@@ -184,11 +190,12 @@ export function splitPane(s: PaneState, at: string, dir: SplitDir, note: string,
   if (parent && parent.dir === dir) {
     const i = parent.children.findIndex((c) => c.id === at);
     const half = parent.sizes[i] / 2;
-    const children = [...parent.children.slice(0, i + 1), fresh, ...parent.children.slice(i + 1)];
+    const k = before ? i : i + 1;
+    const children = [...parent.children.slice(0, k), fresh, ...parent.children.slice(k)];
     const sizes = [...parent.sizes.slice(0, i), half, half, ...parent.sizes.slice(i + 1)];
     return { root: mapNode(s.root, parent.id, () => ({ ...parent, children, sizes })), active: id };
   }
-  const root = mapNode(s.root, at, (leaf) => ({ kind: 'split', id: newPaneId('s'), dir, children: [leaf, fresh], sizes: [0.5, 0.5] }));
+  const root = mapNode(s.root, at, (leaf) => ({ kind: 'split', id: newPaneId('s'), dir, children: before ? [fresh, leaf] : [leaf, fresh], sizes: [0.5, 0.5] }));
   return { root, active: id };
 }
 

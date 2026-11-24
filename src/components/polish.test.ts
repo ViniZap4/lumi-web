@@ -234,6 +234,9 @@ describe('ContextMenu', () => {
     };
     expect((document.activeElement as HTMLElement).textContent).toContain('Open');
     k('j');
+    expect((document.activeElement as HTMLElement).textContent).toContain('Open right');
+    k('j');
+    k('j');
     expect((document.activeElement as HTMLElement).textContent).toContain('Edit');
     k('Enter');
     expect(onrun).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'edit' }));

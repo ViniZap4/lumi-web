@@ -6,7 +6,7 @@
 import type { Entry } from './notetree.ts';
 import type { ShellAction } from './shell-keymap.ts';
 
-export type MenuActionKind = ShellAction['kind'] | 'copyLink' | 'newFolder';
+export type MenuActionKind = ShellAction['kind'] | 'copyLink' | 'newFolder' | 'openRight' | 'openBelow';
 
 export interface MenuItem {
   id: string;
@@ -52,7 +52,14 @@ export function menuFor(entry: Entry | null, c: MenuContext = {}): MenuItem[] {
     ];
   }
   const items: MenuItem[] = [];
-  if (!c.reader) items.push({ id: 'open', label: 'Open', keys: '⏎', action: 'open' });
+  if (!c.reader) {
+    items.push(
+      { id: 'open', label: 'Open', keys: '⏎', action: 'open' },
+      // The same three as the row's inline actions (SPEC-PARTE2 §3).
+      { id: 'open-right', label: 'Open right', keys: '⌃v', action: 'openRight' },
+      { id: 'open-below', label: 'Open below', keys: '⌃s', action: 'openBelow' },
+    );
+  }
   items.push(
     { id: 'edit', label: 'Edit', keys: 'e', action: 'edit' },
     { id: 'rename', label: 'Rename / move…', keys: 'r', action: 'rename', disabled: off, sep: true },

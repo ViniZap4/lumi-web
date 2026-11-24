@@ -7,7 +7,7 @@
   // Home/End, and = / Enter to share the space equally.
   import type { Snippet } from 'svelte';
   import type { PaneNode, PaneLeaf } from '../lib/pane-tree.ts';
-  import { MIN_SIZE } from '../lib/pane-tree.ts';
+  import { MIN_SIZE, containsLeaf } from '../lib/pane-tree.ts';
   import PaneTree from './PaneTree.svelte';
 
   interface Props {
@@ -18,8 +18,11 @@
     onequalize: () => void;
     /** Resize finished (persist). */
     onresized?: () => void;
+    /** Zoomed leaf (tmux): every other cell is hidden — kept mounted,
+     *  so their sessions and scroll positions survive the unzoom. */
+    zoomed?: string | null;
   }
-  const { node, leaf, onresize, onequalize, onresized }: Props = $props();
+  const { node, leaf, onresize, onequalize, onresized, zoomed = null }: Props = $props();
 
   let box = $state<HTMLElement | null>(null);
   let dragging = $state<number | null>(null);
@@ -81,10 +84,10 @@
 {:else}
   <div class="pane-split" class:col={node.dir === 'col'} class:dragging={dragging != null} bind:this={box} data-split={node.id}>
     {#each node.children as c, i (c.id)}
-      <div class="pane-cell" style="flex: {node.sizes[i]} 1 0px">
-        <PaneTree node={c} {leaf} {onresize} {onequalize} {onresized} />
+      <div class="pane-cell" class:zoom-hide={zoomed != null && !containsLeaf(c, zoomed)} style="flex: {node.sizes[i]} 1 0px">
+        <PaneTree node={c} {leaf} {onresize} {onequalize} {onresized} {zoomed} />
       </div>
-      {#if i < node.children.length - 1}
+      {#if i < node.children.length - 1 && zoomed == null}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
         <div
           class="pane-divider"
@@ -127,6 +130,7 @@
     display: flex;
   }
   .pane-cell > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+  .pane-cell.zoom-hide { display: none; }
   .pane-divider {
     flex: none;
     position: relative;

@@ -19,7 +19,7 @@
     follow(): void;
     hover(): void;
     /** `:vsplit [note]` / `:split [note]` / `:only` / `:close`. */
-    win(cmd: 'vsplit' | 'split' | 'only' | 'close', arg: string): void;
+    win(cmd: 'vsplit' | 'split' | 'only' | 'close' | 'zoom', arg: string): void;
   }
   const handlers = new WeakMap<object, ExHandlers>();
   let lastFocused: ExHandlers | null = null;
@@ -57,6 +57,7 @@
     Vim.defineEx('split', 'sp', (cm: unknown, p: ExParams) => target(cm)?.win('split', argOf(p)));
     Vim.defineEx('only', 'on', (cm: unknown) => target(cm)?.win('only', ''));
     Vim.defineEx('close', 'clo', (cm: unknown) => target(cm)?.win('close', ''));
+    Vim.defineEx('zoom', 'zo', (cm: unknown) => target(cm)?.win('zoom', ''));
     // Neovim-style yank highlight (purely visual).
     installYankFlash(Vim as never, () => !motionAllowed());
   }

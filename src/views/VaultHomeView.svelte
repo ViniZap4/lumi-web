@@ -47,7 +47,9 @@
   import { structuredFocus } from '../lib/structured-mode.svelte.ts';
   import { noteIconKind } from '../lib/note-icons.ts';
   import NoteIcon from '../components/NoteIcon.svelte';
-  import { withViewTransition, sharedTransition, animate, scrollBehavior } from '../lib/motion.ts';
+  import { withViewTransition, sharedTransition, animate, scrollBehavior, SPRING, motionAllowed } from '../lib/motion.ts';
+  import { installPaneClickFocus } from '../lib/pane-click.ts';
+  import { dropSide, noteIdOfKey, NOTE_DRAG_TYPE, type DropTarget } from '../lib/pane-drop.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
   import ToastStack from '../components/ToastStack.svelte';
   import ModePill from '../components/ModePill.svelte';
@@ -260,6 +262,16 @@
   onMount(() => {
     window.addEventListener('keydown', handleKey);
     window.addEventListener('focusin', onFocusIn);
+    // First click/tap in a pane focuses it AND acts (SPEC-PARTE2 §3).
+    const offClick = rootEl
+      ? installPaneClickFocus(rootEl, {
+          activate: (leaf) => {
+            if (panes && panes.active !== leaf && findLeaf(panes.root, leaf)) panes = focusLeafState(panes, leaf);
+            if (leaf !== primaryLeaf && multi) focusedPane = 'leaf';
+          },
+          focus: (leaf) => focusLeaf(leaf),
+        })
+      : () => {};
     let mq: MediaQueryList | null = null;
     const onmq = () => (narrowView = !!mq?.matches);
     try {
@@ -270,6 +282,7 @@
       /* jsdom */
     }
     return () => {
+      offClick();
       window.removeEventListener('keydown', handleKey);
       window.removeEventListener('focusin', onFocusIn);
       mq?.removeEventListener?.('change', onmq);
@@ -310,6 +323,8 @@
    *  note panes, h/j/k/l follow the pane tree's geometry; the editor |
    *  preview pair of the primary pane moves inside first. */
   function navigatePane(dir: PaneDir): boolean {
+    // Moving to another pane unzooms first (tmux).
+    if (zoomed) setZoom(null, false);
     if (multi && panes) return navigateTree(dir);
     const from = activePane;
     const to = paneTarget(layout, from, dir, prevPane);
@@ -991,8 +1006,92 @@
     return panes;
   }
 
+  // ---- zoom (tmux-style, SPEC-PARTE2 §3) ------------------------------------
+  // `zoomed` is the leaf filling the note area; the others stay mounted
+  // (hidden, not closed). Never persisted.
+  let zoomed = $state<string | null>(null);
+  $effect(() => {
+    if (zoomed && (!multi || !panes || !findLeaf(panes.root, zoomed))) untrack(() => (zoomed = null));
+  });
+
+  function leafElement(id: string): HTMLElement | null {
+    return rootEl?.querySelector<HTMLElement>(`[data-leaf="${id}"]`) ?? null;
+  }
+
+  /** Zoom `id` (or unzoom with null). The zoomed pane is revealed from
+   *  its old box to the full note area (clip, no text distortion); on
+   *  unzoom the hidden panes settle back in around it. */
+  async function setZoom(id: string | null, animated = true): Promise<void> {
+    if (id === zoomed) return;
+    if (id && (!multi || !panes || !findLeaf(panes.root, id))) {
+      flash('zoom needs a split — ⌃w v first', 'warn');
+      return;
+    }
+    const target = id ?? zoomed!;
+    const el = leafElement(target);
+    const first = el?.getBoundingClientRect() ?? null;
+    if (id && panes) panes = focusLeafState(panes, id);
+    zoomed = id;
+    await tick();
+    if (!animated || !motionAllowed()) return;
+    const s = SPRING.gentle;
+    const now = leafElement(target);
+    if (id && now && first) {
+      const last = now.getBoundingClientRect();
+      const inset = `inset(${Math.max(0, first.top - last.top)}px ${Math.max(0, last.right - first.right)}px ${Math.max(0, last.bottom - first.bottom)}px ${Math.max(0, first.left - last.left)}px round 10px)`;
+      animate(now, [{ clipPath: inset }, { clipPath: 'inset(0px round 0px)' }], s.ms, s.easing);
+    } else if (!id) {
+      const others = [...(rootEl?.querySelectorAll<HTMLElement>('[data-leaf]') ?? [])].filter((x) => x.dataset.leaf !== target);
+      others.forEach((x, i) => animate(x, [{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], s.ms, s.easing, Math.min(120, i * 30)));
+      if (now) animate(now, [{ transform: 'scale(1.015)' }, { transform: 'none' }], s.ms, s.easing);
+    }
+  }
+
+  function toggleZoom(id: string = activeLeafId): void {
+    void setZoom(zoomed ? null : id);
+  }
+
+  // ---- drag a note from the explorer onto a pane edge ---------------------
+  let dropAt = $state<{ leaf: string; t: DropTarget; rect: { left: number; top: number; width: number; height: number } } | null>(null);
+  let noteDragging = $state(false);
+
+  function dropTargetAt(x: number, y: number): typeof dropAt {
+    const stage = previewEl;
+    if (!stage || pane !== 'note') return null;
+    const els = multi ? [...stage.querySelectorAll<HTMLElement>('[data-leaf]')] : [stage];
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (!r.width) continue;
+      const t = dropSide(r, x, y);
+      if (t) return { leaf: el.dataset.leaf ?? primaryLeaf, t, rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+    }
+    return null;
+  }
+  function onStageDragOver(e: DragEvent): void {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes(NOTE_DRAG_TYPE)) return;
+    const d = dropTargetAt(e.clientX, e.clientY);
+    dropAt = d;
+    if (d) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+  function onStageDrop(e: DragEvent): void {
+    const d = dropAt ?? dropTargetAt(e.clientX, e.clientY);
+    dropAt = null;
+    const key = e.dataTransfer?.getData(NOTE_DRAG_TYPE);
+    const id = key ? noteIdOfKey(key) : null;
+    if (!d || !id) return;
+    e.preventDefault();
+    fx = null;
+    noteDragging = false;
+    void splitWith(d.t.dir, id, d.leaf, d.t.before);
+  }
+
   /** Open `note` in a new pane beside (`row`) or below (`col`) leaf `at`. */
-  async function splitWith(dir: SplitDir, note: string | null, at: string = activeLeafId): Promise<void> {
+  async function splitWith(dir: SplitDir, note: string | null, at: string = activeLeafId, before = false): Promise<void> {
+    // Opening a split unzooms first.
+    if (zoomed) zoomed = null;
     // From the home, the first note simply opens.
     if (pane === 'home' || !notes.selectedID) {
       if (note) openNote(note);
@@ -1003,12 +1102,13 @@
     if (!base) return flash('open a note first', 'warn');
     const target = note ?? findLeaf(base.root, at)?.note ?? notes.selectedID;
     if (!target) return;
-    const next = splitPane(base, findLeaf(base.root, at) ? at : base.active, dir, target);
+    const next = splitPane(base, findLeaf(base.root, at) ? at : base.active, dir, target, undefined, before);
     if (!next) return flash('too many panes — close one first (⌃w q)', 'warn');
     panes = next;
     await tick();
     const el = rootEl?.querySelector<HTMLElement>(`[data-leaf="${next.active}"]`);
-    animate(el, [{ opacity: 0, transform: dir === 'row' ? 'translateX(18px) scale(0.985)' : 'translateY(14px) scale(0.985)' }, { opacity: 1, transform: 'none' }], 240);
+    const off = (dir === 'row' ? 18 : 14) * (before ? -1 : 1);
+    animate(el, [{ opacity: 0, transform: dir === 'row' ? `translateX(${off}px) scale(0.985)` : `translateY(${off}px) scale(0.985)` }, { opacity: 1, transform: 'none' }], SPRING.gentle.ms, SPRING.gentle.easing);
     focusedPane = 'leaf';
     paneRefs[next.active]?.focus();
     requestAnimationFrame(() => {
@@ -1092,6 +1192,7 @@
       }
       case 'close': closeLeaf(); return;
       case 'only': onlyLeaf(); return;
+      case 'zoom': toggleZoom(); return;
       case 'equal': if (panes) panes = equalize(panes); return;
       case 'linkV':
       case 'linkH': {
@@ -1611,6 +1712,7 @@
       case 'hsplit': runWin('split'); return;
       case 'closePane': runWin('close'); return;
       case 'onlyPane': runWin('only'); return;
+      case 'zoomPane': runWin('zoom'); return;
       case 'equalPanes': runWin('equal'); return;
       case 'explorer': openFloating(); return;
       case 'books': openBooks(); return;
@@ -1850,6 +1952,7 @@
       ? [
           { id: 'close-pane', title: 'Close pane', keys: '⌃w q', group: 'pane window', run: () => runWin('close') },
           { id: 'only-pane', title: 'Keep only this pane', keys: '⌃w o', group: 'pane window only', run: () => runWin('only') },
+          { id: 'zoom-pane', title: zoomed ? 'Unzoom pane (:zoom)' : 'Zoom pane (:zoom)', keys: '⌃w z', group: 'pane window zoom maximize focus tmux', run: () => runWin('zoom') },
           { id: 'equal-panes', title: 'Equalize panes', keys: '⌃w =', group: 'pane window resize', run: () => runWin('equal') },
         ]
       : []),
@@ -1875,13 +1978,14 @@
   /** `:` lines typed in the palette (reader / home): the pane ex
    *  commands. true = handled. */
   function runExLine(line: string): boolean {
-    const m = /^\s*(vs|vsp|vspl|vspli|vsplit|sp|spl|spli|split|on|onl|only|clo|clos|close|q|quit|exp|expl|explo|explor|explore|Ex|books?)\b\s*(.*)$/.exec(line);
+    const m = /^\s*(vs|vsp|vspl|vspli|vsplit|sp|spl|spli|split|on|onl|only|zo|zoo|zoom|clo|clos|close|q|quit|exp|expl|explo|explor|explore|Ex|books?)\b\s*(.*)$/.exec(line);
     if (!m) return false;
     const cmd = m[1];
     const arg = m[2].trim();
     if (cmd.startsWith('vs')) runWin('vsplit', { arg });
     else if (cmd.startsWith('sp')) runWin('split', { arg });
     else if (cmd.startsWith('on')) runWin('only');
+    else if (cmd.startsWith('zo')) runWin('zoom');
     else if (cmd.startsWith('clo') || cmd === 'q' || cmd === 'quit') runWin('close');
     else if (cmd.startsWith('book')) openBooks();
     else openFloating();
@@ -2002,6 +2106,9 @@
       tabindex="-1"
       aria-label="Note"
       oncontextmenu={multi ? undefined : onReaderContext}
+      ondragover={onStageDragOver}
+      ondragleave={(e) => { if (!previewEl?.contains(e.relatedTarget as Node | null)) dropAt = null; }}
+      ondrop={onStageDrop}
     >
       {#if multi && panes}
         {#if narrowView}
@@ -2021,6 +2128,7 @@
             <PaneTree
               node={panes.root}
               leaf={paneLeaf}
+              {zoomed}
               onresize={(id, i, at) => { if (panes) panes = resizeSplit(panes, id, i, at); }}
               onequalize={() => { if (panes) panes = equalize(panes); }}
             />
@@ -2028,6 +2136,14 @@
         {/if}
       {:else}
         {@render mainContent()}
+      {/if}
+      {#if dropAt}
+        <!-- Where the dragged note will land (edge highlight). -->
+        {@const st = previewEl?.getBoundingClientRect()}
+        {@const r = dropAt.rect}
+        <div class="drop-ghost" data-side={dropAt.t.side} aria-hidden="true"
+          style="left: {r.left - (st?.left ?? 0)}px; top: {r.top - (st?.top ?? 0)}px; width: {r.width}px; height: {r.height}px"
+        ><span class="drop-edge"></span><span class="drop-label">{dropAt.t.side === 'left' ? 'Open left' : dropAt.t.side === 'right' ? 'Open right' : dropAt.t.side === 'top' ? 'Open above' : 'Open below'}</span></div>
       {/if}
     </main>
   {/if}
@@ -2041,6 +2157,7 @@
       <ModePill mode={vimState.mode} label={vimModeLabel(vimState.mode, vimState.sub)} />
       {#if vimState.pending && !editorSettings.value.legend}<span class="sb-pending">{vimState.pending}</span>{/if}
     {/if}
+    {#if zoomed}<button type="button" class="sb-zoom" onclick={() => toggleZoom()} title="Zoomed pane — ⌃w z or :zoom restores the layout" data-testid="status-zoom">zoomed</button>{/if}
     <span class="sb-path mono" title={fmtPath()}>{fmtPath()}</span>
     {#if !editMode}
       <span class="sb-item" aria-live="off">{notes.list.length} notes{notes.loadingMore ? '…' : ''}</span>
@@ -2100,6 +2217,7 @@
         ops={fxOps}
         bind:yanked
         onopen={fxOpen}
+        ondragnote={(on) => { noteDragging = on; if (!on) dropAt = null; }}
         onedit={(id) => { closeFloating(); void editNote(id); }}
         onbook={(id) => { fx = null; books.setActive(id); }}
         onapp={fxApp}
@@ -2219,6 +2337,8 @@
       active={activeLeafId === l.id}
       onfocus={() => { if (panes && panes.active !== l.id) panes = focusLeafState(panes, l.id); focusedPane = 'leaf'; }}
       onclose={() => closeLeaf(l.id)}
+      zoomed={zoomed === l.id}
+      onzoom={() => toggleZoom(l.id)}
       onfollow={(href, where, from, wiki) => followLink(href, where, from, wiki, l.id)}
       onlink={(href, e, from) => routeClick(href, e, from, l.id)}
       onhover={(link, rect, from) => hoverKey(link, rect, from, l.id)}
@@ -2280,8 +2400,10 @@
           </div>
         {:else if editMode && editSession && NoteEditor}
           <div class="editor-frame" class:split={splitOn}>
-            <header class="note-bar" data-testid="note-bar">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <header class="note-bar" data-testid="note-bar" ondblclick={(e) => { if (multi && !(e.target as Element).closest('button, input')) toggleZoom(primaryLeaf); }}>
               <div class="nb-lead">
+                {#if zoomed === primaryLeaf}<span class="zoom-badge" data-testid="zoom-badge">zoomed</span>{/if}
                 <span class="conn-dot conn-{editSession.status}" data-testid="conn-status" title="Live sync: {editSession.status}">{editSession.status}</span>
                 {#if noteCrumbs.length > 0}
                   <span class="nb-crumbs" aria-hidden="true">{noteCrumbs.join(' / ')}<span class="nb-sep">/</span></span>
@@ -2321,6 +2443,11 @@
                   aria-label="Editor settings" title="Editor settings (:settings)">
                   <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
                 </button>
+{#if multi}
+                  <button class="ui-btn ghost sm icon zoom-btn" class:on={zoomed === primaryLeaf} type="button" onclick={() => toggleZoom(primaryLeaf)} aria-pressed={zoomed === primaryLeaf} aria-label={zoomed === primaryLeaf ? 'Unzoom pane' : 'Zoom pane'} title="{zoomed === primaryLeaf ? 'Unzoom' : 'Zoom'} (⌃w z · :zoom · double-click the header)">
+                    {#if zoomed === primaryLeaf}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
+                  </button>
+                {/if}
                 <span class="nb-divider" aria-hidden="true"></span>
                 <button class="ui-btn sm nb-done" onclick={exitEditAnimated} type="button" title="Done (:q, {keyLabel('⌘E')})">Done</button>
               </div>
@@ -2397,7 +2524,9 @@
           </div>
         {:else}
           <article class="rendered lumi-prose" data-prose={editorSettings.value.proseFont}>
-            <header class="reading-head">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <header class="reading-head" ondblclick={(e) => { if (multi && !(e.target as Element).closest('button, input')) toggleZoom(primaryLeaf); }}>
+              {#if zoomed === primaryLeaf}<span class="zoom-badge" data-testid="zoom-badge">zoomed</span>{/if}
               {#if noteCrumbs.length > 0}
                 <nav class="note-crumbs" aria-label="Note location">
                   {#each noteCrumbs as c, i (i)}{#if i > 0}<span class="crumb-sep" aria-hidden="true">/</span>{/if}<span class="crumb-part">{c}</span>{/each}
@@ -2416,6 +2545,11 @@
                 <button class="ui-btn ghost sm icon" type="button" onclick={() => void splitWith('row', null, primaryLeaf)} aria-label="Split right" title="Split right (⌃w v · :vsplit)">
                   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.3"/></svg>
                 </button>
+{#if multi}
+                  <button class="ui-btn ghost sm icon zoom-btn" class:on={zoomed === primaryLeaf} type="button" onclick={() => toggleZoom(primaryLeaf)} aria-pressed={zoomed === primaryLeaf} aria-label={zoomed === primaryLeaf ? 'Unzoom pane' : 'Zoom pane'} title="{zoomed === primaryLeaf ? 'Unzoom' : 'Zoom'} (⌃w z · :zoom · double-click the header)">
+                    {#if zoomed === primaryLeaf}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
+                  </button>
+                {/if}
                 <button class="ui-btn sm nb-edit" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title="Edit (e · {keyLabel('⌘E')})">{editorLoading ? 'Loading…' : 'Edit'}</button>
                 <button class="ui-btn ghost sm icon danger-hover" onclick={beginDelete} type="button" aria-label="Delete note"
                   disabled={structuralOffline} title={structuralOffline ? OFFLINE_HINT : 'Delete (d)'}>

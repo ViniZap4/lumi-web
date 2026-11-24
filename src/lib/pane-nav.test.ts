@@ -205,6 +205,7 @@ describe('Ctrl-w window commands (SPEC-PARTE2 §3)', () => {
     expect(win(k('q'))).toEqual({ kind: 'win', cmd: 'close' });
     expect(win(k('c'))).toEqual({ kind: 'win', cmd: 'close' });
     expect(win(k('o'))).toEqual({ kind: 'win', cmd: 'only' });
+    expect(win(k('z'))).toEqual({ kind: 'win', cmd: 'zoom' });
     expect(win(k('='))).toEqual({ kind: 'win', cmd: 'equal' });
     expect(win(k('f'))).toEqual({ kind: 'win', cmd: 'linkV' });
     expect(win(k('Enter'))).toEqual({ kind: 'win', cmd: 'linkV' });

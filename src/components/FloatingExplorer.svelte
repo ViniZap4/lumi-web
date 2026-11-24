@@ -70,6 +70,8 @@
   import ContextMenu from './ContextMenu.svelte';
   import HintOverlay from './HintOverlay.svelte';
   import SyncDot from './SyncDot.svelte';
+  import CommandLegend from './CommandLegend.svelte';
+  import { explorerLegend, type LegendItem } from '../lib/legend.ts';
 
   interface Props {
     vaultID: string;
@@ -88,6 +90,9 @@
     yanked?: Entry | null;
     /** Open a note. `from` is the row's name (shared-element morph). */
     onopen: (noteID: string, where: OpenWhere, from?: HTMLElement | null) => void;
+    /** A note row is being dragged (true) / the drag ended (false):
+     *  the overlay steps aside so it can be dropped on a pane edge. */
+    ondragnote?: (on: boolean) => void;
     /** Open a note straight in the editor (`e`). */
     onedit?: (noteID: string) => void;
     /** Switch to another book (books level). */
@@ -113,6 +118,7 @@
     ops,
     yanked = $bindable(null),
     onopen,
+    ondragnote,
     onedit,
     onbook,
     onapp,
@@ -647,6 +653,10 @@
   function runMenu(it: MenuItem): void {
     const e = menu?.entry ?? null;
     menu = null;
+    if (it.action === 'openRight' || it.action === 'openBelow') {
+      if (e?.kind === 'note') onopen(e.note.id, it.action === 'openRight' ? 'vsplit' : 'hsplit', rowNameEl());
+      return;
+    }
     if (it.action === 'copyLink') {
       if (e?.kind === 'note') ops.copyLink?.(e);
       return;
@@ -667,6 +677,47 @@
     if (e.kind === 'folder') nav.right();
     else if (sheet) onopen(e.note.id, 'current', rowNameEl());
     void focusCol();
+  }
+  // ---- footer legend ---------------------------------------------------------------
+  let filterFocused = $state(false);
+  const legendState = $derived(
+    level === 'books' ? 'books' : pendingDelete ? 'confirm' : prompt ? 'prompt' : filterFocused ? 'filter' : 'files',
+  );
+  const legendItems = $derived(explorerLegend(legendState));
+
+  /** A legend item was clicked: the same action its keys run. */
+  function legendAction(it: LegendItem): void {
+    const d = it.do;
+    if (!d) return;
+    const [ns, arg] = [d.slice(0, d.indexOf(':')), d.slice(d.indexOf(':') + 1)];
+    if (ns === 'shell') {
+      const a = { kind: arg } as ShellAction;
+      if (level === 'books') runBooks(a);
+      else run(a);
+    } else if (ns === 'fx') {
+      switch (arg) {
+        case 'down': if (level === 'books') runBooks({ kind: 'move', n: 1 }); else run({ kind: 'move', n: 1 }); break;
+        case 'vsplit': open('vsplit'); return;
+        case 'hsplit': open('hsplit'); return;
+        case 'filterKeep': filterOpen = nav.filter !== ''; break;
+        case 'filterClear': nav.setFilter(''); filterOpen = false; break;
+        case 'promptSubmit': void submitPrompt(); return;
+        case 'promptCancel': prompt = null; break;
+        case 'confirmYes': void confirmDelete(); return;
+        case 'confirmNo': pendingDelete = null; break;
+      }
+    }
+    if (!prompt) void focusCol();
+  }
+
+  function rowAction(i: number, e: Entry, where: OpenWhere): void {
+    nav.setCursor(i);
+    if (e.kind === 'note') onopen(e.note.id, where, rowNameEl());
+  }
+  let draggingOut = $state(false);
+  function dragNote(on: boolean): void {
+    draggingOut = on;
+    ondragnote?.(on);
   }
   function openCurrent(i: number, e: Entry): void {
     nav.setCursor(i);
@@ -693,7 +744,7 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<div class="fx-scrim" class:sheet role="presentation" onclick={close} data-testid="floating-explorer-scrim">
+<div class="fx-scrim" class:sheet class:dragging-out={draggingOut} role="presentation" onclick={close} data-testid="floating-explorer-scrim">
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="fx"
@@ -738,11 +789,6 @@
         {/if}
       </nav>
       {#if pending}<span class="fx-pending mono">{pending}</span>{/if}
-      {#if level === 'files'}
-        <span class="fx-keys" aria-hidden="true"><kbd>⏎</kbd> open <kbd>⌃v</kbd> vsplit <kbd>⌃s</kbd> split <kbd>h</kbd> books <kbd>Esc</kbd></span>
-      {:else}
-        <span class="fx-keys" aria-hidden="true"><kbd>⏎</kbd> open book <kbd>h</kbd> accounts <kbd>a</kbd> new <kbd>Esc</kbd></span>
-      {/if}
       <button class="ui-btn ghost sm icon" type="button" onclick={close} aria-label="Close explorer">
         <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
@@ -829,12 +875,12 @@
           {/if}
         </section>
       </div>
-      <footer class="fx-status mono">
-        <span>{books.list.length} books · {groups.length} {groups.length === 1 ? 'account' : 'accounts'}</span>
-        <span class="fx-spacer"></span>
+      <footer class="fx-status" data-testid="fx-footer">
+        <CommandLegend embedded items={legendItems} onaction={legendAction} onmore={() => appKey({ kind: 'help' })} />
         {#if flashMsg}<span class="fx-flash" role="status">{flashMsg}</span>{/if}
         <button type="button" class="fx-link" onclick={newBook}>New book…</button>
         <button type="button" class="fx-link" onclick={() => { close(); onmanage?.(); }}>Manage…</button>
+        <span class="fx-stat mono" data-testid="fx-stat">{books.list.length} books · {groups.length} {groups.length === 1 ? 'account' : 'accounts'}</span>
       </footer>
     {:else}
       <div class="fx-cols">
@@ -861,6 +907,8 @@
                 value={nav.filter}
                 bind:this={filterInput}
                 oninput={(e) => nav.setFilter(e.currentTarget.value)}
+                onfocus={() => (filterFocused = true)}
+                onblur={() => (filterFocused = false)}
                 onkeydown={onFilterKey}
               />
               <span class="fx-count mono">{nav.entries.length}</span>
@@ -880,6 +928,8 @@
             emptyText={nav.filter ? 'No matches' : 'Empty folder — a to create'}
             onpick={pickCurrent}
             onopen={openCurrent}
+            onrowaction={sheet ? undefined : rowAction}
+            ondragnote={sheet ? undefined : dragNote}
             oncontext={onRowContext}
             ondropnote={(k, t) => void dropNote(k, t)}
           />
@@ -925,15 +975,14 @@
           <button class="ui-btn sm ghost" type="button" onclick={() => (pendingDelete = null)}>Cancel <kbd>n</kbd></button>
           <button class="ui-btn sm danger solid" type="button" onclick={() => void confirmDelete()}>Delete <kbd>y</kbd></button>
         </div>
-      {:else}
-        <footer class="fx-status mono">
-          <span>{nav.entries.length} items{nav.filter ? ` · “${nav.filter}”` : ''}</span>
-          {#if nav.showHidden}<span>hidden shown</span>{/if}
-          {#if yanked}<span>yanked {yanked.name}</span>{/if}
-          <span class="fx-spacer"></span>
-          {#if flashMsg}<span class="fx-flash" role="status">{flashMsg}</span>{/if}
-        </footer>
       {/if}
+      <!-- The footer is the explorer's command legend (context-aware,
+           fitted to the width, clickable) plus a small item count. -->
+      <footer class="fx-status" data-testid="fx-footer">
+        <CommandLegend embedded items={legendItems} onaction={legendAction} onmore={() => appKey({ kind: 'help' })} />
+        {#if flashMsg}<span class="fx-flash" role="status">{flashMsg}</span>{/if}
+        <span class="fx-stat mono" data-testid="fx-stat">{nav.entries.length} {nav.entries.length === 1 ? 'item' : 'items'}{nav.filter ? ` · “${nav.filter}”` : ''}{nav.showHidden ? ' · hidden shown' : ''}{yanked ? ` · yanked ${yanked.name}` : ''}</span>
+      </footer>
     {/if}
     <div class="ui-sr-only" aria-live="polite" data-testid="nav-live">{liveMsg}</div>
   </div>
@@ -994,8 +1043,6 @@
   .fx-crumb[aria-current='location'] { color: var(--color-text); font-weight: 600; }
   .fx-sep { color: var(--color-text-dim); opacity: 0.5; }
   .fx-pending { color: var(--color-warning); font-size: var(--text-xs); }
-  .fx-keys { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-2xs); color: var(--color-text-dim); white-space: nowrap; }
-  .fx-keys kbd { margin-left: 6px; }
   .fx-cols {
     flex: 1;
     min-height: 0;
@@ -1087,11 +1134,10 @@
   .fx-grab { flex: none; width: 36px; height: 4px; margin: 6px auto 0; border-radius: 2px; background: color-mix(in srgb, var(--color-text) 22%, transparent); }
   .fx.sheet .fx-head { height: 48px; background: transparent; }
   .fx.sheet .fx-cols { grid-template-columns: minmax(0, 1fr); }
-  .fx.sheet .fx-parent, .fx.sheet .fx-preview, .fx.sheet .fx-keys { display: none; }
+  .fx.sheet .fx-parent, .fx.sheet .fx-preview { display: none; }
   .fx.sheet .fx-current { border-right: none; }
   .fx.sheet .fx-row { font-size: var(--text-md); }
   .fx.sheet .fx-current :global(.row) { font-size: var(--text-md); }
   @media (max-width: 720px) {
-    .fx-keys { display: none; }
-  }
+    }
 </style>

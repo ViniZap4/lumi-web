@@ -109,9 +109,12 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['⌃w s  :split [note]', 'split below'],
       ['⌃w q  :q  :close', 'close pane'],
       ['⌃w o  :only', 'keep only this pane'],
+      ['⌃w z  :zoom', 'zoom the pane to fill the note area, and back'],
       ['⌃w =', 'equal sizes'],
       ['⌃w < > + -', 'resize (or drag a divider)'],
-      ['click', 'focus a pane'],
+      ['click', 'focus a pane (the click still acts)'],
+      ['double-click a pane header', 'zoom / unzoom'],
+      ['drag a note to a pane edge', 'split there (from the explorer)'],
     ],
   },
   {

@@ -21,8 +21,10 @@
     onaction?: (item: LegendItem) => void;
     /** The overflow marker (opens the full keymap). */
     onmore?: () => void;
+    /** Inside another bar (the explorer footer): no bar chrome. */
+    embedded?: boolean;
   }
-  const { items, pending = null, mode = null, onaction, onmore }: Props = $props();
+  const { items, pending = null, mode = null, onaction, onmore, embedded = false }: Props = $props();
 
   /** Must match `.items { gap }` and the `.more` width below. */
   const GAP = 16;
@@ -74,7 +76,7 @@
   }
 </script>
 
-<div class="legend" class:pending={!!pending} role="toolbar" aria-label="Command legend" data-hint-skip data-testid="command-legend">
+<div class="legend" class:embedded class:pending={!!pending} role="toolbar" aria-label="Command legend" data-hint-skip data-testid="command-legend">
   {#if mode}<span class="mode" data-mode={mode.toLowerCase()}>{mode}</span>{/if}
   {#if pending}<span class="typed" aria-live="polite">{pending}<span class="caret">…</span></span>{/if}
   <span class="items" bind:this={wrap}>
@@ -115,6 +117,7 @@
     white-space: nowrap;
     user-select: none;
   }
+  .legend.embedded { flex: 1; min-width: 0; height: auto; padding: 0; border: none; background: transparent; }
   /* Touch-only devices have no keys to show. */
   @media (hover: none) and (pointer: coarse) {
     .legend { display: none; }

@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import {
   parseCanvas, serializeCanvas, commitCanvas, patchNodes, addNode, addEdge, removeItems, patchEdge,
   canvasColor, newCanvasId, detectCanvasStyle, type CanvasData,
@@ -12,8 +11,8 @@ import { CanvasKeys } from './canvas-keys.ts';
 import { applyTextEdits, diffRange, editCost } from '../text-diff.ts';
 import { memoryLiveText } from '../live-text.ts';
 
-const dir = new URL('../../test/fixtures/canvas/', import.meta.url);
-const read = (f: string) => readFileSync(new URL(f, dir), 'utf8');
+const raw = import.meta.glob('../../test/fixtures/canvas/*.canvas', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const read = (f: string) => raw[`../../test/fixtures/canvas/${f}`];
 const obsidian = read('obsidian.canvas');
 const pretty = read('pretty.canvas');
 

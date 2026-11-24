@@ -61,6 +61,12 @@ export interface CanvasEdge {
 
 type Json = Record<string, unknown>;
 
+/** A vault note offered by the file-node picker. */
+export interface CanvasNoteRef {
+  path: string;
+  title?: string;
+}
+
 /** The file as parsed: raw objects kept as-is (unknown keys included). */
 export interface CanvasData {
   /** Top-level object (its `nodes`/`edges` are replaced on serialize). */

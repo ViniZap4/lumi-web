@@ -1,12 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
 import { parseKanban, serializeKanban, buildKanban, isKanbanText, kanbanFormatOf } from './kanban.ts';
 import { planKanban, type KanbanOp } from './kanban-edits.ts';
 import { applyTextEdits, editCost } from '../text-diff.ts';
 import { KanbanKeys, clampCursor } from './kanban-keys.ts';
 
-const dir = new URL('../../test/fixtures/kanban/', import.meta.url);
-const fixtures = Object.fromEntries(readdirSync(dir).map((f) => [f, readFileSync(new URL(f, dir), 'utf8')]));
+const raw = import.meta.glob('../../test/fixtures/kanban/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const fixtures: Record<string, string> = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.split('/').pop()!, v]));
 
 function run(text: string, op: KanbanOp): string {
   return applyTextEdits(text, planKanban(parseKanban(text), op));

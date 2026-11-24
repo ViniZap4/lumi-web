@@ -7,11 +7,14 @@
  * headers) and never sees note content — that lives in IndexedDB.
  *
  *   install   precache index.html + every built asset (hashed names)
+ *             except the lazy diagram renderer (mermaid)
  *   activate  drop caches of older builds, take control
  *   navigate  network first (a deploy is picked up at once when
  *             online), cached index.html when the network fails
- *   assets    cache first for the precached build files, network for
- *             everything else
+ *   assets    cache first for the precached build files; the mermaid
+ *             chunks are cached on first use (cache first, bounded,
+ *             per build) so a diagram type seen once works offline;
+ *             network for everything else
  *
  * No skipWaiting on install: a new build waits until every tab of the
  * old one is closed, so an open tab never loses the lazy chunks it may
@@ -23,6 +26,9 @@ const CACHE = 'lumi-shell-' + VERSION;
 const SHELL = '/index.html';
 const NAV_TIMEOUT_MS = 4000;
 const PRECACHED = new Set(PRECACHE);
+const RUNTIME = new Set(__LUMI_SW_RUNTIME__);
+const LAZY_CACHE = 'lumi-lazy-' + VERSION;
+const LAZY_MAX = 120;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -34,7 +40,13 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('lumi-shell-') && k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((k) => (k.startsWith('lumi-shell-') && k !== CACHE) || (k.startsWith('lumi-lazy-') && k !== LAZY_CACHE))
+            .map((k) => caches.delete(k)),
+        ),
+      )
       .then(() => self.clients.claim()),
   );
 });
@@ -78,5 +90,23 @@ self.addEventListener('fetch', (event) => {
 
   if (PRECACHED.has(url.pathname)) {
     event.respondWith(caches.match(url.pathname, { cacheName: CACHE }).then((r) => r || fetch(req)));
+    return;
   }
+
+  if (RUNTIME.has(url.pathname)) event.respondWith(lazyChunk(req, url.pathname));
 });
+
+/** Cache first; a miss is fetched, stored and the cache trimmed to
+ *  LAZY_MAX entries (oldest first). Hashed names never go stale. */
+async function lazyChunk(req, path) {
+  const cache = await caches.open(LAZY_CACHE);
+  const hit = await cache.match(path);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok && res.type === 'basic') {
+    await cache.put(path, res.clone());
+    const keys = await cache.keys();
+    for (const k of keys.slice(0, Math.max(0, keys.length - LAZY_MAX))) await cache.delete(k);
+  }
+  return res;
+}

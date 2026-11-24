@@ -9,6 +9,8 @@ export interface EnhanceOptions {
   highlight?: boolean;
 }
 
+import { enhanceMermaid } from './mermaid.ts';
+
 let highlighter: Promise<typeof import('./code-highlight.ts')> | null = null;
 
 export function enhanceRendered(root: HTMLElement, opts: EnhanceOptions): void {
@@ -76,6 +78,10 @@ export function enhanceRendered(root: HTMLElement, opts: EnhanceOptions): void {
         .catch(() => { code.dataset.hl = 'none'; });
     }
   });
+
+  // ```mermaid diagrams (mermaid itself is a lazy chunk, loaded only
+  // when a block exists; cached results paint synchronously).
+  if (root.querySelector('.md-mermaid')) enhanceMermaid(root);
 
   // Long tables scroll inside their wrapper with a sticky header.
   root.querySelectorAll<HTMLElement>('.md-table').forEach((t) => {

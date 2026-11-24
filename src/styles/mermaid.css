@@ -1,0 +1,109 @@
+/* ```mermaid blocks (lib/mermaid.ts). Same frame as code blocks; the
+   drawing sits on the page colour, the source is a code well. */
+
+.md-mermaid {
+  border: 1px solid var(--md-code-border);
+  border-radius: var(--radius);
+  background: var(--md-code-bg);
+  overflow: hidden;
+}
+.md-body .md-mermaid { margin: var(--md-rhythm) 0; }
+.md-mermaid:hover .md-copy, .md-mermaid .md-copy:focus-visible, .md-mermaid .md-copy.done,
+.md-mermaid .md-copy[aria-pressed='true'] { opacity: 1; }
+.md-mermaid .md-copy[aria-pressed='true'] { color: var(--color-primary); }
+.md-mermaid-head .md-code-lang { text-transform: none; }
+
+.md-mermaid-src { margin: 0; padding: 0.85em 1.1em 0.95em; overflow-x: auto; line-height: 1.6; }
+.md-mermaid-src code { font-size: 0.84em; color: var(--color-text); background: none; padding: 0; }
+.md-mermaid-src { border-top: 1px solid transparent; }
+
+/* Drawn: the source hides behind the "Source" toggle. */
+.md-mermaid[data-state='done']:not(.show-src) > .md-mermaid-src { display: none; }
+.md-mermaid.show-src > .md-mermaid-src { border-top-color: var(--md-code-border); }
+.md-mermaid-fig:empty { display: none; }
+.md-mermaid-fig {
+  display: flex;
+  justify-content: center;
+  padding: 1em;
+  background: var(--color-background);
+  overflow-x: auto;
+  cursor: zoom-in;
+  outline: none;
+}
+.md-mermaid-fig:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line, var(--color-primary)); }
+.md-mermaid-fig svg { max-width: 100%; height: auto; }
+.md-mermaid[aria-busy='true'] .md-code-lang::after { content: ' · drawing…'; opacity: 0.7; }
+.md-mermaid[aria-busy='true'] > .md-mermaid-fig:not(:empty) { opacity: 0.6; transition: opacity 160ms var(--ease); }
+
+/* Error card: friendly, never alarming; the source stays below. */
+.md-mermaid-error {
+  margin: 0.75em;
+  padding: 0.7em 0.9em;
+  border: 1px solid color-mix(in oklch, var(--color-error) 40%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--color-error) 8%, transparent);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.md-mermaid-error-title { margin: 0 0 0.35em; font-weight: 600; color: var(--color-error); }
+.md-mermaid-error-msg {
+  margin: 0;
+  max-height: 8.5em;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+}
+.md-mermaid-error-hint { margin: 0.45em 0 0; font-size: 12px; opacity: 0.75; }
+.md-mermaid[data-state='error'] > .md-mermaid-src { border-top-color: var(--md-code-border); }
+
+/* Surfaces without the DOM pass (kanban cards, canvas text): a badge
+   instead of raw source. */
+.md-mermaid:not([data-state]) > .md-mermaid-src { display: none; }
+.md-mermaid:not([data-state])::before {
+  content: '◇ mermaid · ' attr(data-kind);
+  display: block;
+  padding: 0.35em 0.7em;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--md-marker, var(--color-text-dim));
+}
+
+/* Compact previews (hover card, explorer): no toolbar, smaller well. */
+.lumi-prose.compact .md-mermaid-fig { padding: 0.5em; cursor: default; }
+.lumi-prose.compact .md-mermaid-fig svg { max-height: 16em; }
+
+/* Live Preview widget: clicking the drawing edits its source. */
+.cm-lp-mermaid { padding: 0.2em 0; }
+.cm-lp-mermaid .md-mermaid { margin: 0.4em 0; }
+.cm-lp-mermaid .md-mermaid-fig { cursor: text; }
+
+/* Lightbox */
+.mmd-lightbox { padding: 0; align-items: stretch; flex-direction: column; }
+.mmd-lb-stage { position: relative; flex: 1; overflow: hidden; cursor: grab; touch-action: none; }
+.mmd-lb-stage.dragging { cursor: grabbing; }
+.mmd-lb-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  padding: 0;
+  background: var(--color-background);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-4, var(--shadow-pop));
+}
+.mmd-lb-canvas svg { display: block; }
+.mmd-lb-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--glass-bg, var(--color-overlay-bg));
+  border-top: 1px solid var(--hairline, var(--color-border));
+  font-size: 13px;
+}
+.mmd-lb-title { flex: 1; min-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); }
+.mmd-lb-pct { min-width: 3.5em; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-dim); }

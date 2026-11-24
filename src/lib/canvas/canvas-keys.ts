@@ -44,8 +44,28 @@ export class CanvasKeys {
     this.pending = null;
   }
 
-  /** `hasSelection`: a node or edge is selected. */
-  feed(e: CanvasKeyLike, hasSelection: boolean): CanvasKeyAction | null {
+  /** `hasSelection`: a node or edge is selected. `reading` (SPEC-PARTE2
+   *  §5a): only navigation (cycle, open, pan, zoom, fit, Esc) — the keys
+   *  that would change the canvas are not owned (they reach the shell). */
+  feed(e: CanvasKeyLike, hasSelection: boolean, reading = false): CanvasKeyAction | null {
+    const a = this.feedAny(e, hasSelection);
+    if (!reading || !a) return a;
+    switch (a.kind) {
+      case 'cycle':
+      case 'activate':
+      case 'openFile':
+      case 'pan':
+      case 'zoom':
+      case 'fit':
+      case 'escape':
+        return a;
+      default:
+        this.pending = null;
+        return null;
+    }
+  }
+
+  private feedAny(e: CanvasKeyLike, hasSelection: boolean): CanvasKeyAction | null {
     if (e.metaKey || e.altKey) return null;
     const k = e.key;
     const p = this.pending;

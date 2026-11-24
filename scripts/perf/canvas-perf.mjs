@@ -218,7 +218,8 @@ async function canvasReady(label) {
   // The canvas must become live (editable) — not stay on a read-only preview.
   await page.waitForFunction(() => {
     const v = [...document.querySelectorAll('[data-testid=canvas-view]')].pop();
-    return v && !/loading|connecting/.test(v.querySelector('[data-testid=canvas-status]')?.textContent ?? '') && !v.querySelector('.cv-tools button[disabled]');
+    // Opens live, in Reading (SPEC-PARTE2 §5a).
+    return v && !/loading|connecting/.test(v.querySelector('[data-testid=canvas-status]')?.textContent ?? '') && v.closest('[data-testid=structured-note]')?.dataset.mode === 'read';
   }, null, { timeout: 8000 }).catch(() => { throw new Error(label + ': canvas never became live/editable'); });
 }
 // The canvas must own the keyboard right after an in-app open (the
@@ -266,6 +267,7 @@ await measure('seq: create fresh.canvas and open', async () => {
   await canvasReady('create canvas');
   await keysWork('create canvas');
   await canvas().focus();
+  await page.keyboard.press('e'); // Reading → Edit
   await page.keyboard.press('a');
   await page.keyboard.type('first card', { delay: 5 });
   await page.keyboard.press('Escape');
@@ -280,6 +282,8 @@ for (const name of ['small', 'empty', 'obsidian', 'invalid', 'big']) {
   });
   await measure(`${name}: idle 2s`, () => wait(2000), { idle: true });
   if (name === 'invalid' || name === 'empty') continue;
+  // Gestures that edit need Edit mode (the canvas opens in Reading).
+  await canvas().locator('[data-testid=canvas-mode] button', { hasText: 'Edit' }).click().catch(() => {});
   await measure(`${name}: wheel pan`, () => wheelPan());
   await measure(`${name}: ctrl+wheel zoom`, () => wheelZoom());
   await measure(`${name}: drag pan`, () => dragPan());
@@ -314,8 +318,7 @@ await measure('split: switch panes x6', async () => {
 await measure('split: big | big Source (same Y.Doc)', async () => {
   await canvas().click({ position: { x: 30, y: 300 } });
   await page.keyboard.press('Escape');
-  await canvas().focus();
-  await page.keyboard.press('e');
+  await canvas().locator('[data-testid=canvas-mode] button', { hasText: 'Source' }).click();
   await wait(1200);
 });
 await measure('source split: idle 2s', () => wait(2000), { idle: true });

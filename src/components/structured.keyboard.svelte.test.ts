@@ -167,3 +167,121 @@ describe('CanvasView keys', () => {
     expect((doc.read().match(/"type":"text"/g) ?? []).length).toBe(3);
   });
 });
+
+// SPEC-PARTE2 §5a: Reading | Edit | Source. Reading never emits edits.
+describe('Reading | Edit modes', () => {
+  async function mountIn(Comp: any, text: string, testid: string, extra: Record<string, unknown> = {}) {
+    target = document.createElement('div');
+    document.body.appendChild(target);
+    const doc = memoryLiveText(text);
+    const calls = spy(doc);
+    let undos = 0;
+    doc.undo = () => void undos++;
+    doc.redo = () => void undos++;
+    const modes: string[] = [];
+    const props = $state({ doc, mode: 'read' as 'read' | 'edit', onmode: (m: 'read' | 'edit') => { modes.push(m); props.mode = m; }, ...extra });
+    cmp = mount(Comp, { target, props });
+    await settle();
+    const root = target.querySelector<HTMLElement>(`[data-testid="${testid}"]`)!;
+    return { doc, calls, root, modes, props, undos: () => undos };
+  }
+  function dbl(el: Element): void {
+    el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    flushSync();
+  }
+
+  it('canvas Reading: navigation works, nothing writes', async () => {
+    const { doc, calls, root, modes, undos } = await mountIn(CanvasView, CANVAS, 'canvas-view');
+    const world = root.querySelector<HTMLElement>('.cv-world')!;
+    const t0 = world.style.transform;
+    key(root, 'l');
+    expect(world.style.transform).not.toBe(t0); // pans
+    key(root, 'Tab');
+    await settle();
+    expect(root.querySelector('.cv-node.sel')).not.toBeNull(); // selects
+    for (const k of ['a', 'f', 'd', 'x', 'Backspace', 'Delete', 'H', 'J', 'K', 'L', 'c', '1', 'u', 'Enter']) key(root, k);
+    key(root, 'r', { ctrlKey: true });
+    key(root, 'ArrowLeft', { shiftKey: true });
+    dbl(root);
+    dbl(root.querySelector('[data-node-id="a"]')!);
+    await settle();
+    expect(calls).toHaveLength(0);
+    expect(undos()).toBe(0);
+    expect(doc.read()).toBe(CANVAS);
+    expect(root.querySelector('textarea')).toBeNull();
+    expect(root.querySelector('[data-handle]')).toBeNull(); // no connect handles
+    expect(modes).toEqual([]);
+    // Keys Reading does not own reach the shell.
+    expect(key(root, 'K').defaultPrevented).toBe(false);
+  });
+
+  it('canvas: i/e enter Edit, Esc with a selection clears it, then returns to Reading; ⌘E toggles', async () => {
+    const { calls, root, modes } = await mountIn(CanvasView, CANVAS, 'canvas-view');
+    key(root, 'i');
+    await settle();
+    expect(modes).toEqual(['edit']);
+    key(root, 'Tab');
+    key(root, 'L');
+    await settle();
+    expect(calls).toHaveLength(1); // Edit writes
+    key(root, 'Escape'); // clears the selection first
+    await settle();
+    expect(modes).toEqual(['edit']);
+    key(root, 'Escape');
+    await settle();
+    expect(modes).toEqual(['edit', 'read']);
+    key(root, 'e', { metaKey: true });
+    key(root, 'e', { ctrlKey: true });
+    expect(modes).toEqual(['edit', 'read', 'edit', 'read']);
+    key(root, 'e');
+    key(root, 'q');
+    expect(modes.slice(-2)).toEqual(['edit', 'read']);
+  });
+
+  it('canvas: the mode control switches modes and Source', async () => {
+    let source = 0;
+    const { root, modes } = await mountIn(CanvasView, CANVAS, 'canvas-view', { onsource: () => source++ });
+    const seg = root.querySelector('[data-testid="canvas-mode"]')!;
+    const btn = (t: string) => Array.from(seg.querySelectorAll('button')).find((b) => b.textContent === t)!;
+    expect(btn('Reading').getAttribute('aria-pressed')).toBe('true');
+    btn('Edit').click();
+    flushSync();
+    expect(modes).toEqual(['edit']);
+    expect(btn('Edit').getAttribute('aria-pressed')).toBe('true');
+    btn('Source').click();
+    expect(source).toBe(1);
+  });
+
+  it('board Reading: j/k move the cursor, nothing writes (no toggles, moves, deletes)', async () => {
+    const { doc, calls, root, modes, undos } = await mountIn(KanbanBoard, BOARD, 'kanban-board');
+    key(root, 'j');
+    await settle();
+    expect(root.querySelector('.kb-card.focused')?.textContent).toContain('beta');
+    for (const k of ['J', 'K', 'H', 'L', 'x', 'a', 'o', 'O', 'A', 'd', 'd', 'y', 'r', '<', '>', 'u', 'Enter']) key(root, k);
+    key(root, 'r', { ctrlKey: true });
+    root.querySelector<HTMLInputElement>('.kb-check')!.click();
+    dbl(root.querySelector('.kb-card')!);
+    await settle();
+    expect(calls).toHaveLength(0);
+    expect(undos()).toBe(0);
+    expect(doc.read()).toBe(BOARD);
+    expect(root.querySelector('textarea')).toBeNull();
+    expect(modes).toEqual([]);
+  });
+
+  it('board: e enters Edit (writes), Esc/q return to Reading', async () => {
+    const { doc, root, modes } = await mountIn(KanbanBoard, BOARD, 'kanban-board');
+    key(root, 'e');
+    await settle();
+    expect(modes).toEqual(['edit']);
+    key(root, 'J');
+    await settle();
+    expect(doc.read()).toContain('- [ ] beta\n- [ ] alpha\n');
+    key(root, 'q');
+    await settle();
+    expect(modes).toEqual(['edit', 'read']);
+    key(root, 'J');
+    await settle();
+    expect(doc.read()).toContain('- [ ] beta\n- [ ] alpha\n'); // unchanged in Reading
+  });
+});

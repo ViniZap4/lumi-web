@@ -20,6 +20,8 @@
   import { getNoteContent } from '../lib/api.ts';
   import { normalizePath } from '../lib/notetree.ts';
   import type { CanvasNoteRef } from '../lib/canvas/canvas.ts';
+  import { editorSettings } from '../lib/editor-settings.svelte.ts';
+  import { initialStructuredMode, structuredFocus, type StructuredMode } from '../lib/structured-mode.svelte.ts';
 
   interface Props {
     vaultID: string;
@@ -43,6 +45,27 @@
 
   // svelte-ignore state_referenced_locally
   const preview = memoryLiveText(body, false);
+
+  // Reading | Edit | Source (SPEC-PARTE2 §5a): opens in Reading unless
+  // "open notes in" is set to editing. Source is `onsource`.
+  let mode = $state<StructuredMode>(initialStructuredMode(editorSettings.value.openIn));
+  const focusOwner = {};
+  function setMode(m: StructuredMode): void {
+    mode = m;
+    if (hasFocus) claim();
+  }
+  let hasFocus = false;
+  function claim(): void {
+    hasFocus = true;
+    structuredFocus.claim(focusOwner, { kind, mode, set: setMode, source: onsource });
+  }
+  function onfocusout(e: FocusEvent): void {
+    const next = e.relatedTarget as Node | null;
+    if (next && (e.currentTarget as HTMLElement).contains(next)) return;
+    hasFocus = false;
+    structuredFocus.blur(focusOwner);
+  }
+  $effect(() => () => structuredFocus.release(focusOwner));
   let live = $state<LiveText | null>(null);
   let session = $state<EditorSession | null>(null);
   let error = $state<string | null>(null);
@@ -160,7 +183,7 @@
   }
 </script>
 
-<div class="snv" data-kind={kind} data-testid="structured-note">
+<div class="snv" data-kind={kind} data-mode={mode} data-testid="structured-note" onfocusin={claim} {onfocusout}>
   {#if error}<div class="error snv-error" data-testid="structured-error">{error}</div>{/if}
   {#if session?.lastError}<div class="error snv-error">{session.lastError}</div>{/if}
   {#if session?.editable && session.emptyAtSync && body !== ''}
@@ -171,9 +194,9 @@
   {/if}
   {#if View}
     {#if kind === 'kanban'}
-      <View {doc} {title} {onsource} {onlink} {status} />
+      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} />
     {:else}
-      <View {doc} {title} {onsource} {onlink} {status} notes={noteRefs} {loadNote} onopenfile={openFile} />
+      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} notes={noteRefs} {loadNote} onopenfile={openFile} />
     {/if}
   {:else}
     <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading…</div>

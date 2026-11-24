@@ -26,7 +26,11 @@ export type LegendContext =
   /** The floating explorer overlay (SPEC-PARTE2 §2), files level. */
   | 'float'
   /** A hover preview card opened with `K` (§4). */
-  | 'hover';
+  | 'hover'
+  /** A JSON canvas has the keyboard (Reading or Edit, §5a/§6). */
+  | 'canvas'
+  /** A kanban board has the keyboard (Reading or Edit, §5a/§5). */
+  | 'board';
 
 export interface LegendItem {
   keys: string;
@@ -50,7 +54,59 @@ export interface LegendExtras {
   split?: boolean;
   /** More than one pane on screen and Ctrl-h/j/k/l pane keys on. */
   panes?: boolean;
+  /** Canvas / board mode (SPEC-PARTE2 §5a). Default Reading. */
+  structuredMode?: 'read' | 'edit';
 }
+
+/** Canvas in Reading: look, never change (SPEC-PARTE2 §5a). */
+export const CANVAS_READ_ITEMS: LegendItem[] = [
+  { keys: 'h j k l', label: 'pan' },
+  { keys: '+ - 0', label: 'zoom/fit' },
+  { keys: 'Tab', label: 'next node' },
+  { keys: '⏎ gf', label: 'open', tip: 'Open the selected file / link node' },
+  { keys: '⌃w f', label: 'open in split' },
+  { keys: 'e i', label: 'edit', tip: 'Edit mode (also ⌘E / the switch)' },
+  { keys: 'space', label: 'commands', do: 'shell:palette' },
+  { keys: '?', label: 'keys', do: 'shell:help' },
+];
+
+/** Canvas in Edit (SPEC-PARTE2 §6). */
+export const CANVAS_EDIT_ITEMS: LegendItem[] = [
+  { keys: 'a', label: 'new card' },
+  { keys: 'f', label: 'add note' },
+  { keys: 'H J K L', label: 'move' },
+  { keys: '⏎', label: 'edit/open' },
+  { keys: 'd', label: 'delete' },
+  { keys: 'c 1-6', label: 'color' },
+  { keys: 'u ⌃r', label: 'undo/redo' },
+  { keys: 'h j k l', label: 'pan' },
+  { keys: 'Esc', label: 'reading', tip: 'Esc / q with nothing selected: back to Reading (also ⌘E)' },
+  { keys: '?', label: 'keys', do: 'shell:help' },
+];
+
+/** Board in Reading (SPEC-PARTE2 §5a). */
+export const BOARD_READ_ITEMS: LegendItem[] = [
+  { keys: 'h l', label: 'column' },
+  { keys: 'j k', label: 'card' },
+  { keys: '⏎', label: 'follow link' },
+  { keys: '/', label: 'filter' },
+  { keys: 'e i', label: 'edit', tip: 'Edit mode (also ⌘E / the switch)' },
+  { keys: 'space', label: 'commands', do: 'shell:palette' },
+  { keys: '?', label: 'keys', do: 'shell:help' },
+];
+
+/** Board in Edit (SPEC-PARTE2 §5). */
+export const BOARD_EDIT_ITEMS: LegendItem[] = [
+  { keys: 'H L J K', label: 'move card' },
+  { keys: 'a o', label: 'new card' },
+  { keys: 'A', label: 'new column' },
+  { keys: '⏎ i', label: 'edit card' },
+  { keys: 'x', label: 'done' },
+  { keys: 'dd', label: 'delete' },
+  { keys: 'u ⌃r', label: 'undo/redo' },
+  { keys: 'Esc', label: 'reading', tip: 'Esc / q: back to Reading (also ⌘E)' },
+  { keys: '?', label: 'keys', do: 'shell:help' },
+];
 
 /** Completions after `Ctrl-w` (vim window commands). */
 export const PANE_W: LegendItem[] = [
@@ -229,6 +285,8 @@ export function legendFor(ctx: LegendContext, pending: string | null = null, x: 
   if (ctx === 'books') return BOOKS_ITEMS;
   if (ctx === 'hover') return HOVER_ITEMS;
   if (pend === '⌃w') return PANE_W;
+  if (ctx === 'canvas') return x.structuredMode === 'edit' ? CANVAS_EDIT_ITEMS : CANVAS_READ_ITEMS;
+  if (ctx === 'board') return x.structuredMode === 'edit' ? BOARD_EDIT_ITEMS : BOARD_READ_ITEMS;
 
   if (ctx === 'preview') {
     const count = /^(\d+)/.exec(pend)?.[1];

@@ -126,6 +126,13 @@ describe('VaultHomeView structured notes', () => {
     expect(target.querySelector('article.rendered')).toBeNull();
     // Live once the session has synced (status badge cleared).
     await waitFor(() => !target.querySelector('[data-testid="kanban-status"]'), 'live board');
+    // Opens in Reading (SPEC-PARTE2 §5a): J changes nothing until `e`.
+    expect(target.querySelector('[data-testid="structured-note"]')!.getAttribute('data-mode')).toBe('read');
+    key(board, 'J');
+    await settle();
+    expect(fakeServer.text('n1/sync')).toBe(BODY);
+    key(board, 'e');
+    expect(target.querySelector('[data-testid="structured-note"]')!.getAttribute('data-mode')).toBe('edit');
     key(board, 'J');
     await settle();
     expect(fakeServer.text('n1/sync')).toContain('- [ ] beta\n- [ ] alpha\n');

@@ -86,6 +86,20 @@ export const KEYMAP: readonly KeymapSection[] = [
     ],
   },
   {
+    title: 'Canvas & board modes',
+    rows: [
+      ['(opens in) Reading', 'look and navigate — nothing changes'],
+      ['e  i  ⌘E  the switch', 'Edit: the interactive canvas / board'],
+      ['Esc  q  ⌘E', 'back to Reading (nothing selected)'],
+      ['Source', 'the raw JSON / markdown in the editor'],
+      ['h j k l  + - 0  Tab', 'canvas: pan, zoom/fit, next node'],
+      ['⏎  gf  ⌃w f', 'canvas: open the node (here / split)'],
+      ['a f  H J K L  d  c1-6  u', 'canvas Edit: add, move, delete, color, undo'],
+      ['h l  j k  ⏎  /', 'board: column, card, follow link, filter'],
+      ['H L J K  a o A  x  dd', 'board Edit: move, new card/column, done, delete'],
+    ],
+  },
+  {
     title: 'Panes',
     rows: [
       ['⌃h ⌃j ⌃k ⌃l', 'pane left / below / above / right'],

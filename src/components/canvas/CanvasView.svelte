@@ -20,6 +20,7 @@
   import { CanvasKeys } from '../../lib/canvas/canvas-keys.ts';
   import { renderMarkdown } from '../../lib/markdown.ts';
   import { motionAllowed } from '../../lib/motion.ts';
+  import { modeKey, type StructuredMode } from '../../lib/structured-mode.svelte.ts';
 
   interface Props {
     doc: LiveText;
@@ -37,8 +38,12 @@
     loadNote?: (path: string) => Promise<string | null>;
     status?: string | null;
     autofocus?: boolean;
+    /** Reading | Edit (SPEC-PARTE2 §5a). Reading never writes. */
+    mode?: StructuredMode;
+    /** Mode switch (Reading | Edit | Source control, i/e, Esc/q, ⌘E). */
+    onmode?: (m: StructuredMode) => void;
   }
-  let { doc, title = '', onsource, onopenfile, onopenlink, onlink, notes = [], loadNote, status = null, autofocus = true }: Props = $props();
+  let { doc, title = '', onsource, onopenfile, onopenlink, onlink, notes = [], loadNote, status = null, autofocus = true, mode = 'edit', onmode }: Props = $props();
 
   // ---- text → canvas ------------------------------------------------------------
   let text = $state('');
@@ -55,7 +60,9 @@
     if (parsed.ok) lastGood = { nodes: parsed.nodes, edges: parsed.edges };
   });
   const invalid = $derived(parsed.ok ? null : parsed.error);
-  const editable = $derived(doc.editable && !invalid);
+  const reading = $derived(mode === 'read');
+  const editable = $derived(doc.editable && !invalid && !reading);
+  const lockedMsg = $derived(reading ? 'Reading — press e to edit' : invalid ? 'Invalid JSON: fix it in Source' : 'Read-only');
   const baseNodes = $derived(parsed.ok ? parsed.nodes : lastGood.nodes);
   const edges = $derived(parsed.ok ? parsed.edges : lastGood.edges);
 
@@ -69,7 +76,7 @@
   const MAX_BYTES = 4 * 1024 * 1024;
   function commit(op: CanvasOp): boolean {
     if (!editable) {
-      flash(invalid ? 'Invalid JSON: fix it in Source' : 'Read-only');
+      flash(lockedMsg);
       return false;
     }
     const cur = doc.read();
@@ -171,13 +178,13 @@
   let typingTimer: ReturnType<typeof setTimeout> | null = null;
 
   function startEdit(n: CanvasNode, isNew = false): void {
-    if (!editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     select([n.id]);
     if (n.type === 'text') editing = { kind: 'text', id: n.id, draft: (n as TextNode).text, isNew };
     else if (n.type === 'group') editing = { kind: 'label', id: n.id, draft: (n as GroupNode).label ?? '' };
   }
   function startEdgeEdit(e: CanvasEdge): void {
-    if (!editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     select([], e.id);
     editing = { kind: 'edge', id: e.id, draft: e.label ?? '' };
   }
@@ -225,7 +232,7 @@
 
   // ---- creating -----------------------------------------------------------------------------
   function addTextAt(p: Point): void {
-    if (!editable) return flash(invalid ? 'Invalid JSON: fix it in Source' : 'Read-only');
+    if (!editable) return flash(lockedMsg);
     const node: TextNode = { id: newCanvasId(), type: 'text', text: '', x: Math.round(p.x - 125), y: Math.round(p.y - 30), width: 250, height: 60 };
     if (commit(addNode(node))) {
       select([node.id]);
@@ -245,7 +252,7 @@
     return notes.filter((n) => !q || n.path.toLowerCase().includes(q) || (n.title ?? '').toLowerCase().includes(q)).slice(0, 50);
   });
   function openPicker(at?: Point): void {
-    if (!editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     picker = { query: '', at: at ?? nextSlot(400), cursor: 0 };
   }
   function pickNote(n: CanvasNoteRef): void {
@@ -298,12 +305,14 @@
   function activate(): void {
     if (selectedEdge) {
       const e = edges.find((x) => x.id === selectedEdge);
-      if (e) startEdgeEdit(e);
+      if (e && !reading) startEdgeEdit(e);
       return;
     }
     const n = selNode;
     if (!n) return;
-    if (n.type === 'text' || n.type === 'group') startEdit(n);
+    if (n.type === 'text' || n.type === 'group') {
+      if (!reading) startEdit(n);
+    }
     else openNode(n);
   }
 
@@ -491,6 +500,12 @@
     if (isTyping(t) || t.closest('.cv-ui')) return;
     const nodeEl = t.closest<HTMLElement>('[data-node-id]');
     const edgeEl = t.closest<HTMLElement>('[data-edge-id]');
+    if (reading) {
+      // Reading: double-click opens file / link nodes, nothing else.
+      const n = nodeEl ? byId.get(nodeEl.dataset.nodeId!) : null;
+      if (n && (n.type === 'file' || n.type === 'link')) openNode(n, e.metaKey || e.ctrlKey);
+      return;
+    }
     if (nodeEl) {
       const n = byId.get(nodeEl.dataset.nodeId!);
       if (!n) return;
@@ -527,8 +542,18 @@
       e.preventDefault();
       return;
     }
+    if (onmode) {
+      const m = modeKey(e, mode, !hasSelection && !keys.pending);
+      if (m) {
+        keys.reset();
+        pending = null;
+        e.preventDefault();
+        if (m !== mode) onmode(m);
+        return;
+      }
+    }
     const had = keys.pending;
-    const a = keys.feed(e, hasSelection);
+    const a = keys.feed(e, hasSelection, reading);
     pending = keys.pending;
     if (!a) {
       // `Ctrl-w …` other than f / Enter is a window command: leave both
@@ -583,10 +608,10 @@
         setColor(a.color);
         break;
       case 'undo':
-        doc.undo?.();
+        if (editable) doc.undo?.();
         break;
       case 'redo':
-        doc.redo?.();
+        if (editable) doc.redo?.();
         break;
       case 'escape':
         if (hasSelection) select([]);
@@ -777,7 +802,13 @@
       {#if notice}<span class="cv-notice" role="status">{notice}</span>{/if}
     </div>
     <div class="cv-actions">
-      {#if onsource}
+      {#if onmode}
+        <div class="ui-seg" role="group" aria-label="Mode" data-testid="canvas-mode">
+          <button type="button" class:active={reading} aria-pressed={reading} onclick={() => onmode?.('read')} title="Reading: pan, zoom, open — no changes (Esc)">Reading</button>
+          <button type="button" class:active={!reading} aria-pressed={!reading} onclick={() => onmode?.('edit')} title="Edit the canvas (i, e, ⌘E)">Edit</button>
+          {#if onsource}<button type="button" aria-pressed="false" onclick={() => onsource?.()} title="JSON source">Source</button>{/if}
+        </div>
+      {:else if onsource}
         <div class="ui-seg" role="group" aria-label="View">
           <button type="button" class="active" aria-pressed="true">Canvas</button>
           <button type="button" aria-pressed="false" onclick={() => onsource?.()} title="JSON source (e)">Source</button>

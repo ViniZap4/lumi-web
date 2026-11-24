@@ -15,6 +15,7 @@
   import { KanbanKeys, clampCursor, type KanbanCursor } from '../../lib/kanban/kanban-keys.ts';
   import { renderMarkdown } from '../../lib/markdown.ts';
   import { motionAllowed, animate } from '../../lib/motion.ts';
+  import { modeKey, type StructuredMode } from '../../lib/structured-mode.svelte.ts';
 
   interface Props {
     doc: LiveText;
@@ -26,8 +27,12 @@
     /** Shown in the toolbar (e.g. "connecting…", "read-only"). */
     status?: string | null;
     autofocus?: boolean;
+    /** Reading | Edit (SPEC-PARTE2 §5a). Reading never writes. */
+    mode?: StructuredMode;
+    /** Mode switch (Reading | Edit | Source control, i/e, Esc/q, ⌘E). */
+    onmode?: (m: StructuredMode) => void;
   }
-  let { doc, title = '', onsource, onlink, status = null, autofocus = true }: Props = $props();
+  let { doc, title = '', onsource, onlink, status = null, autofocus = true, mode = 'edit', onmode }: Props = $props();
 
   // ---- text → board ---------------------------------------------------------
   let text = $state('');
@@ -115,7 +120,9 @@
   });
 
   // ---- operations -----------------------------------------------------------
-  const editable = $derived(doc.editable);
+  const reading = $derived(mode === 'read');
+  const editable = $derived(doc.editable && !reading);
+  const lockedMsg = $derived(reading ? 'Reading — press e to edit' : 'Read-only');
   let notice = $state<string | null>(null);
   let noticeTimer: ReturnType<typeof setTimeout> | null = null;
   function flash(msg: string): void {
@@ -126,8 +133,8 @@
 
   /** Plan against the CURRENT text and apply in one transaction. */
   function exec(build: (b: KanbanBoard) => KanbanOp | null): KanbanBoard | null {
-    if (!doc.editable) {
-      flash('Read-only');
+    if (!editable) {
+      flash(lockedMsg);
       return null;
     }
     const b = parseKanban(doc.read());
@@ -209,25 +216,25 @@
   }
 
   function startEdit(vm: CardVM): void {
-    if (!doc.editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     editing = { kind: 'card', key: vm.key, anchor: doc.anchor(vm.card.start), draft: vm.card.text };
     focusKey = vm.key;
   }
   function startNew(lane: number, index: number): void {
-    if (!doc.editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     if (!needsNoFilter()) return;
     const l = board.lanes[lane];
     if (!l) return;
     editing = { kind: 'new', lane, laneAnchor: doc.anchor(l.start), index, draft: '' };
   }
   function startRename(lane: number): void {
-    if (!doc.editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     const l = board.lanes[lane];
     if (!l) return;
     editing = { kind: 'lane', lane, laneAnchor: doc.anchor(l.start), draft: l.title };
   }
   function startNewLane(): void {
-    if (!doc.editable) return flash('Read-only');
+    if (!editable) return flash(lockedMsg);
     editing = { kind: 'newLane', draft: '' };
   }
 
@@ -319,6 +326,26 @@
       confirmKey = null;
       return;
     }
+    if (onmode) {
+      const idle = !keys.pending && !filter && !filterOpen;
+      const m = modeKey(e, mode, idle);
+      if (m) {
+        keys.reset();
+        pending = null;
+        e.preventDefault();
+        if (m !== mode) onmode(m);
+        return;
+      }
+    }
+    if (reading && e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+      // Reading: Enter follows the focused card's first link.
+      const a = root?.querySelector<HTMLAnchorElement>('[aria-current="true"] .kb-card-body a[href]');
+      if (a) {
+        e.preventDefault();
+        a.click();
+      }
+      return;
+    }
     const had = keys.pending;
     const a = keys.feed(e, cur, shape);
     pending = keys.pending;
@@ -326,6 +353,8 @@
       if (keys.pending || had) e.preventDefault();
       return;
     }
+    // Reading owns navigation only; K, x, H/L… reach the shell (hover card, hints).
+    if (reading && a.kind !== 'cursor' && a.kind !== 'filter' && a.kind !== 'escape') return;
     const vm = lanesVM[cur.lane]?.cards[cur.card];
     switch (a.kind) {
       case 'cursor':
@@ -344,12 +373,12 @@
         if (vm) startEdit(vm);
         break;
       case 'toggle':
-        if (vm && doc.editable) toggle(vm);
-        else if (!doc.editable) flash('Read-only');
+        if (vm && editable) toggle(vm);
+        else if (!editable) flash(lockedMsg);
         break;
       case 'delete':
-        if (vm && doc.editable) confirmKey = vm.key;
-        else if (!doc.editable) flash('Read-only');
+        if (vm && editable) confirmKey = vm.key;
+        else if (!editable) flash(lockedMsg);
         break;
       case 'filter':
         filterOpen = true;
@@ -366,10 +395,12 @@
         break;
       }
       case 'undo':
-        doc.undo?.();
+        if (editable) doc.undo?.();
+        else flash(lockedMsg);
         break;
       case 'redo':
-        doc.redo?.();
+        if (editable) doc.redo?.();
+        else flash(lockedMsg);
         break;
       case 'escape':
         if (filter || filterOpen) {
@@ -422,7 +453,7 @@
     if (e.button !== 0 || editing || isInteractive(e.target)) return;
     root?.focus({ preventScroll: true });
     setCursor({ lane, card: index });
-    if (!doc.editable || filtering) return;
+    if (!editable || filtering) return;
     press = { kind: 'card', key: vm.key, lane, index, x0: e.clientX, y0: e.clientY, el: e.currentTarget as HTMLElement, html: vm.html };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp, { once: true });
@@ -432,7 +463,7 @@
     if (e.button !== 0 || editing || isInteractive(e.target)) return;
     root?.focus({ preventScroll: true });
     setCursor({ lane, card: cur.lane === lane ? cur.card : 0 });
-    if (!doc.editable || filtering) return;
+    if (!editable || filtering) return;
     const el = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-lane-index]')!;
     press = { kind: 'lane', key: l.key, lane, index: lane, x0: e.clientX, y0: e.clientY, el, html: '' };
     window.addEventListener('pointermove', onPointerMove);
@@ -610,7 +641,13 @@
         <button class="ui-btn ghost sm" type="button" onclick={() => { filterOpen = true; void tick().then(() => filterInput?.focus()); }} title="Filter (/)">Filter</button>
       {/if}
       <button class="ui-btn ghost sm" type="button" onclick={startNewLane} disabled={!editable} title="New column (A)">+ Column</button>
-      {#if onsource}
+      {#if onmode}
+        <div class="ui-seg" role="group" aria-label="Mode" data-testid="board-mode">
+          <button type="button" class:active={reading} aria-pressed={reading} onclick={() => onmode?.('read')} title="Reading: browse and follow links — no changes (Esc)">Reading</button>
+          <button type="button" class:active={!reading} aria-pressed={!reading} onclick={() => onmode?.('edit')} title="Edit the board (i, e, ⌘E)">Edit</button>
+          {#if onsource}<button type="button" aria-pressed="false" onclick={() => onsource?.()} title="Markdown source">Source</button>{/if}
+        </div>
+      {:else if onsource}
         <div class="ui-seg" role="group" aria-label="View">
           <button type="button" class="active" aria-pressed="true">Board</button>
           <button type="button" aria-pressed="false" onclick={() => onsource?.()} title="Markdown source (e)">Source</button>
@@ -666,7 +703,7 @@
                   aria-hidden={'placeholder' in it ? 'true' : undefined}
                   animate:flip={{ duration: flipMs() }}
                   onpointerdown={(e) => vm && onCardPointerDown(e, vm, laneIdx, ci)}
-                  ondblclick={() => vm && startEdit(vm)}
+                  ondblclick={() => vm && !reading && startEdit(vm)}
                 >
                   {#if 'draft' in it}
                     {#if editing?.kind === 'new'}

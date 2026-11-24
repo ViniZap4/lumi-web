@@ -44,6 +44,7 @@
   import { PreviewKeymap, type PreviewAction } from '../lib/preview-keys.ts';
   import { menuFor, type MenuItem } from '../lib/context-actions.ts';
   import { focusPane } from '../lib/view-focus.ts';
+  import { structuredFocus } from '../lib/structured-mode.svelte.ts';
   import { withViewTransition, sharedTransition, animate, scrollBehavior } from '../lib/motion.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
   import ToastStack from '../components/ToastStack.svelte';
@@ -1770,6 +1771,9 @@
     if (fx) return fxLevel === 'books' ? 'books' : 'float';
     if (hover?.keyboard) return 'hover';
     if (pane === 'home') return 'home';
+    // A canvas / board has the keyboard: its own keys (Reading or Edit).
+    const sf = structuredFocus.current;
+    if (sf) return sf.kind === 'canvas' ? 'canvas' : 'board';
     if (activePane === 'leaf') return paneInfo[activeLeafId]?.editing ? (eff.vim ? contextForVimMode(vimState.mode) : 'insert') : 'reader';
     if (editMode && editSession && activePane === 'split') return 'preview';
     if (editMode && editSession) return eff.vim ? contextForVimMode(vimState.mode) : 'insert';
@@ -1795,6 +1799,7 @@
       source: editMode && editorSettings.value.editMode === 'source',
       split: editMode && splitOn,
       panes: multiPane && editorSettings.value.paneNav,
+      structuredMode: structuredFocus.current?.mode,
       leaderMaps: editMode
         ? appliedMappings()
             .filter((m) => m.lhs.startsWith(LEADER_TOKEN))
@@ -1802,11 +1807,24 @@
         : [],
     }),
   );
-  const legendMode = $derived(legendCtx === 'float' ? 'explorer' : legendCtx === 'hover' ? 'preview' : legendCtx);
+  const legendMode = $derived(
+    legendCtx === 'float' ? 'explorer'
+    : legendCtx === 'hover' ? 'preview'
+    : legendCtx === 'canvas' || legendCtx === 'board' ? (structuredFocus.current?.mode === 'edit' ? 'edit' : 'reading')
+    : legendCtx,
+  );
 
   // ---- palette ------------------------------------------------------------------
 
   const paletteCommands: PaletteCommand[] = $derived([
+    // Canvas / board modes (SPEC-PARTE2 §5a) for the view that had the keyboard.
+    ...(structuredFocus.last
+      ? ([
+          { id: 'structuredRead', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Reading mode`, keys: 'Esc', group: 'mode view read only canvas board kanban', run: () => structuredFocus.last?.set('read') },
+          { id: 'structuredEdit', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Edit mode`, keys: 'e', group: 'mode edit canvas board kanban', run: () => structuredFocus.last?.set('edit') },
+          ...(structuredFocus.last.source ? [{ id: 'structuredSource', title: `${structuredFocus.last.kind === 'canvas' ? 'Canvas' : 'Board'}: Source`, group: 'mode source json markdown raw canvas board kanban', run: () => structuredFocus.last?.source?.() }] : []),
+        ] as PaletteCommand[])
+      : []),
     { id: 'explorer', title: 'Open explorer', keys: '-', group: 'files browse yazi floating overlay open navigate', run: () => openFloating() },
     { id: 'books', title: 'Switch book…', keys: 'gb', group: 'navigate books vault accounts floating', run: openBooks },
     { id: 'root', title: 'Explorer at book root', keys: 'gh', group: 'navigate home files', run: () => openFloating({ root: true }) },

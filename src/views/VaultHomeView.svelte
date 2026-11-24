@@ -37,6 +37,8 @@
   import HelpOverlay from '../components/HelpOverlay.svelte';
   import MarkdownView from '../components/MarkdownView.svelte';
   import SourceSplit from '../components/SourceSplit.svelte';
+  import StructuredNoteView from '../components/StructuredNoteView.svelte';
+  import { noteViewKind } from '../lib/note-kind.ts';
   import ContextMenu from '../components/ContextMenu.svelte';
   import HintOverlay from '../components/HintOverlay.svelte';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
@@ -1372,6 +1374,8 @@
   const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
   const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
   const readingMinutes = $derived(readingTime(readingWords));
+  // Part 2 note view switch: markdown reader vs kanban board vs canvas.
+  const noteKind = $derived(noteViewKind({ path: notes.content?.path ?? notes.selected?.path, kind: notes.content?.kind ?? notes.selected?.kind, frontmatter: notes.content?.frontmatter }));
   /** The body opens with `# <title>`: don't print the title twice. */
   const titleInBody = $derived(!!notes.content && startsWithTitle(notes.content.body ?? '', notes.selected?.title ?? ''));
   const noteFolder = $derived(notes.selected ? dirOf(notes.selected.path) : '');
@@ -1777,6 +1781,12 @@
           </div>
         {:else if editorLoading}
           <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading editor…</div>
+        {:else if noteKind !== 'markdown' && vaults.selectedID && notes.selectedID}
+          {#key `${vaults.selectedID}/${notes.selectedID}`}
+            <StructuredNoteView vaultID={vaults.selectedID} noteID={notes.selectedID} kind={noteKind}
+              body={notes.content.body ?? ''} title={notes.selected?.title ?? ''}
+              onsource={() => void enterEdit()} onlink={onMdLink} />
+          {/key}
         {:else}
           <article class="rendered lumi-prose" data-prose={editorSettings.value.proseFont}>
             <header class="reading-head">
@@ -2171,6 +2181,7 @@
      column below (centred by the editor itself), the scrollbar at the
      pane edge. */
   .preview:has(> .editor-frame) { padding: 0; overflow: hidden; }
+  .preview:has(> :global(.snv)) { padding: 0; overflow: hidden; }
   .editor-frame {
     display: flex;
     flex-direction: column;

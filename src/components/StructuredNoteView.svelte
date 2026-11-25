@@ -81,10 +81,18 @@
     });
   });
 
+  // Bumped to rejoin with a NEW session (read-only view rebuilt by the
+  // server: 1012 mirror_rebuild).
+  let generation = $state(0);
+  $effect(() => {
+    if (session?.rejoin) untrack(() => generation++);
+  });
+
   $effect(() => {
     const v = vaultID;
     const n = noteID;
     const k = kind;
+    void generation;
     let cancelled = false;
     let pooled = false;
     let mine: EditorSession | null = null;
@@ -122,7 +130,7 @@
           sync.setEditor(v, mine);
         }
         const s = mine;
-        live = ymod.yLiveText(s.ytext, { undoManager: s.undoManager, editable: () => s.editable && !s.stopped && !s.lineageConflict });
+        live = ymod.yLiveText(s.ytext, { undoManager: s.undoManager, editable: () => s.editable && !s.stopped && !s.lineageConflict && !s.readOnly });
       } catch (e) {
         if (!cancelled) error = `Failed to load the ${k === 'kanban' ? 'board' : 'canvas'}: ${(e as Error).message}`;
       }
@@ -154,6 +162,7 @@
     if (!s) return 'loading…';
     if (s.lineageConflict) return 'conflict copy saved';
     if (s.stopped) return 'live editing unavailable';
+    if (s.readOnly) return s.editable ? 'somente leitura · ao vivo' : 'conectando… (somente leitura)';
     if (!s.editable) return 'connecting… (read-only)';
     if (s.status !== 'connected') return 'offline';
     return s.peers.length ? `${s.peers.length + 1} editing` : null;

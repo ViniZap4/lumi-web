@@ -35,6 +35,8 @@ export interface WsTicket {
   /** CRDT epoch of the note at mint time (lib/lineage.ts). Absent on
    *  older servers. */
   crdt_epoch?: string | null;
+  /** "read" | "edit" (servers with read-only live views). */
+  mode?: 'read' | 'edit';
 }
 
 export type WsAuthMode = 'unknown' | 'ticket' | 'token';

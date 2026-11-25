@@ -90,6 +90,7 @@
   import { yUndoExtension, yUndoKeymap } from '../lib/editor-undo.ts';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
+  import { readOnlyYSync } from '../lib/read-only-sync.ts';
   import { remoteCaretGlide } from '../lib/remote-caret-glide.ts';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
   import type { EditorSettings } from '../lib/editor-settings.ts';
@@ -479,8 +480,10 @@
       keysC.of(baseKeys(s)),
       markdown({ base: markdownLanguage, codeLanguages: languages }),
       previewC.of(previewExt(s)),
-      yUndoExtension(session.undoManager),
-      yCollab(session.ytext, session.provider?.awareness ?? null, { undoManager: false }),
+      // Read-only live view (viewer, mirror): Y → editor only; no undo.
+      ...(session.readOnly
+        ? [readOnlyYSync(session.ytext, session.provider?.awareness ?? null)]
+        : [yUndoExtension(session.undoManager), yCollab(session.ytext, session.provider?.awareness ?? null, { undoManager: false })]),
       // After yCollab: peers' carets glide between positions (motion v2).
       remoteCaretGlide((session.provider?.awareness ?? null) as Parameters<typeof remoteCaretGlide>[0]),
       EditorView.updateListener.of(scheduleStats),
@@ -703,6 +706,7 @@
   class="note-editor-host"
   class:readable={settings.readableWidth}
   data-testid="note-editor"
+  data-readonly={session.readOnly ? 'true' : undefined}
   data-mode={settings.editMode}
   data-prose={settings.proseFont}
   bind:this={container}

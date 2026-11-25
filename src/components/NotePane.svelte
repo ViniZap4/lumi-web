@@ -7,6 +7,7 @@
   import { onDestroy, tick, untrack } from 'svelte';
   import type { PaneLeaf, SplitDir } from '../lib/pane-tree.ts';
   import { notes } from '../lib/notes.svelte.ts';
+  import { books } from '../lib/books.svelte.ts';
   import { loadNote, peekNote } from '../lib/note-content.ts';
   import { renderBlocks, startsWithTitle, taskToggle } from '../lib/markdown.ts';
   import { dirOf } from '../lib/notetree.ts';
@@ -144,6 +145,16 @@
       if (line != null) editorRef?.gotoLine(line);
     });
   }
+
+  // A read-only view whose note the server rebuilt (1012 mirror_rebuild),
+  // or a lineage conflict: rejoin with a NEW empty session.
+  $effect(() => {
+    if (!(session?.rejoin || session?.lineageConflict)) return;
+    untrack(() => {
+      exitEdit();
+      void enterEdit();
+    });
+  });
 
   export async function enterEdit(): Promise<void> {
     if (session || editing) return;
@@ -303,9 +314,10 @@
             <button type="button" class:active={editorSettings.value.editMode === 'live'} aria-pressed={editorSettings.value.editMode === 'live'} onclick={() => setMode('live')}>Live</button>
             <button type="button" class:active={editorSettings.value.editMode === 'source'} aria-pressed={editorSettings.value.editMode === 'source'} onclick={() => setMode('source')}>Source</button>
           </span>
+          {#if session.readOnly}<span class="ro-chip" data-testid="read-only-live" title="Você vê as edições ao vivo, mas não pode alterar esta nota">Somente leitura</span>{/if}
           <button class="ui-btn sm pane-btn" type="button" onclick={exitEdit} title="Reading view ({keyLabel('⌘E')}, :q closes the pane)">Done</button>
         {:else}
-          <button class="ui-btn sm pane-btn" type="button" onclick={() => void enterEdit()} disabled={!content} title="Edit (e)">Edit</button>
+          <button class="ui-btn sm pane-btn" type="button" onclick={() => void enterEdit()} disabled={!content} title={books.isReadOnly(p.vaultID) ? 'Ver ao vivo, somente leitura (e)' : 'Edit (e)'}>{books.isReadOnly(p.vaultID) ? 'Ao vivo' : 'Edit'}</button>
         {/if}
       {/if}
       {@render paneTail()}
@@ -314,6 +326,7 @@
   {/if}
 
   {#if editError}<div class="pane-error" role="alert">{editError}</div>{/if}
+  {#if editing && session?.lastError}<div class="pane-error" role="alert" data-testid="session-error">{session.lastError}</div>{/if}
 
   {#if view !== MARKDOWN_VIEW && content}
     <!-- svelte-ignore a11y_no_static_element_interactions -->

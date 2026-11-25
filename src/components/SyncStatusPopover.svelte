@@ -187,7 +187,7 @@
             <ul>
               {#each alts as a (a.server_url + '#' + a.account)}
                 <li>
-                  {serverLabel(a.server_url)} · {a.account}{#if a.federation_role} · {a.federation_role === 'home' ? 'origem' : 'seguidor'}{/if}
+                  {serverLabel(a.server_url)} · {a.account}{#if a.federation_role} · {a.federation_role === 'home' ? 'origem' : a.federation_role === 'mirror' ? 'espelho' : 'seguidor'}{/if}
                   {#if showAlts}<button type="button" class="link-button" onclick={() => switchTo(a)}>usar este</button>{/if}
                 </li>
               {/each}

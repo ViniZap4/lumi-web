@@ -73,6 +73,13 @@ export class FakeProvider {
     Y.applyUpdate(this.server.doc(this.room), update, this);
   };
 
+  /** Same name as y-websocket's handler, so a read-only session can
+   *  detach it exactly like the real provider's. */
+  readonly _updateHandler = this.onClientUpdate;
+  /** Bytes of client state offered to the server in handshakes (a
+   *  read-only view must offer nothing new). */
+  offeredToServer = 0;
+
   private readonly onServerUpdate = (update: Uint8Array, origin: unknown) => {
     if (origin === this || !this.connected) return;
     Y.applyUpdate(this.doc, update, this);
@@ -93,7 +100,7 @@ export class FakeProvider {
     this.url = this.urlFor(opts.params ?? {});
     this.awareness = new Awareness(doc);
     server.providers.push(this);
-    doc.on('update', this.onClientUpdate);
+    doc.on('update', this._updateHandler);
     server.doc(room).on('update', this.onServerUpdate);
     queueMicrotask(() => this.open());
   }
@@ -153,7 +160,9 @@ export class FakeProvider {
     const sdoc = this.server.doc(this.room);
     // Client answers server step1 with its missing updates.
     const toServer = Y.encodeStateAsUpdate(this.doc, Y.encodeStateVector(sdoc));
+    const before = Y.encodeStateVector(sdoc);
     Y.applyUpdate(sdoc, toServer, this);
+    if (!equalBytes(before, Y.encodeStateVector(sdoc))) this.offeredToServer += toServer.length;
     // Server answers client step1 → synced.
     const toClient = Y.encodeStateAsUpdate(sdoc, Y.encodeStateVector(this.doc));
     Y.applyUpdate(this.doc, toClient, this);
@@ -192,7 +201,7 @@ export class FakeProvider {
     if (this.destroyed) return;
     this.destroyed = true;
     this.disconnect();
-    this.doc.off('update', this.onClientUpdate);
+    this.doc.off('update', this._updateHandler);
     this.server.doc(this.room).off('update', this.onServerUpdate);
     this.awareness.destroy();
     this.handlers.clear();
@@ -212,4 +221,10 @@ export function fakeProviderFactory(server: FakeServer = fakeServer) {
 
 export async function flushMicrotasks(n = 5): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
+}
+
+function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }

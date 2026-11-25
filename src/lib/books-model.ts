@@ -23,7 +23,7 @@ export interface Book {
 export interface Alternate {
   server_url: string;
   account: string;
-  federation_role: 'home' | 'follower' | null;
+  federation_role: 'home' | 'follower' | 'mirror' | null;
 }
 
 export interface AccountVaults {
@@ -66,7 +66,7 @@ export function sortBooks(books: readonly Book[]): Book[] {
   return [...books].sort((a, b) => a.sort - b.sort || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-function fedRole(v: Vault): 'home' | 'follower' | null {
+function fedRole(v: Vault): 'home' | 'follower' | 'mirror' | null {
   return v.federation?.role ?? null;
 }
 

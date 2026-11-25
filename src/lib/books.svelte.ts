@@ -117,6 +117,12 @@ export class BooksStore {
     return bookAccountKey(book);
   }
 
+  /** Live view only, never edits: the account lacks note.edit here
+   *  (can_edit false) or the book is a read-only mirror on its server. */
+  isReadOnly(vaultID: string): boolean {
+    return this.canEdit[vaultID] === false || this.info[vaultID]?.federation?.role === 'mirror';
+  }
+
   bookForVault(vaultID: string): Book | null {
     return this.list.find((b) => b.vault_id === vaultID) ?? null;
   }

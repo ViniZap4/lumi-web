@@ -56,6 +56,8 @@ export async function planSession(vaultID: string, noteID: string, o: PlanOpts =
   const token = accounts.tokenFor(key);
   if (!token) return `Entre em ${serverLabel(acct.server_url)} para editar.`;
   const client = accounts.client(key);
+  // Viewers and mirror books get a read-only live view (mode "read").
+  const readOnly = books.isReadOnly(vaultID);
 
   const rkey = offline.keyFor(vaultID, noteID);
   let initial: ReplicaRecord | null = null;
@@ -92,9 +94,10 @@ export async function planSession(vaultID: string, noteID: string, o: PlanOpts =
       o.onAuthFailure?.();
     },
     // Fresh single-use ticket per (re)connect; 404 → ?token= fallback.
-    fetchTicket: () => createNoteWsTicket(vaultID, noteID),
+    fetchTicket: () => createNoteWsTicket(vaultID, noteID, readOnly ? 'read' : undefined),
+    readOnly,
     getToken: () => accounts.tokenFor(key),
-    offline: rkey && offline.store.available
+    offline: !readOnly && rkey && offline.store.available
       ? {
           store: offline.store,
           key: rkey,

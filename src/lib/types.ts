@@ -45,9 +45,12 @@ export interface Vault {
 
 // SPEC-LIVROS §3.5: `federation` block on GET /api/vaults rows.
 export interface VaultFederationInfo {
-  role: 'home' | 'follower' | null;
+  /** `mirror`: a read-only one-way mirror on this server (M2). */
+  role: 'home' | 'follower' | 'mirror' | null;
   home_url?: string | null;
   status?: string | null;
+  /** This server's follower link: "replica" | "mirror" | null. */
+  mode?: 'replica' | 'mirror' | null;
 }
 
 // GET /api/info (public). SPEC-LIVROS §3.5.

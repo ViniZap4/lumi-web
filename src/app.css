@@ -1078,3 +1078,17 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-text) 18%, transparent); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--color-text) 32%, transparent); }
+
+/* Read-only live view (viewer / mirror book): a quiet chip beside Done. */
+.ro-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--tint-hover);
+  color: var(--ink-3, var(--color-text-dim));
+  font-size: var(--text-2xs, 11px);
+  font-weight: 600;
+  white-space: nowrap;
+}

@@ -158,7 +158,9 @@
   // conflict copy) and stopped. Rebuild a fresh session — the replica
   // is gone, so it joins empty and adopts the server's history.
   $effect(() => {
-    const c = editSession?.lineageConflict;
+    // Also a read-only view whose note the server rebuilt (1012
+    // mirror_rebuild): rejoin with a NEW empty doc, never the old one.
+    const c = editSession?.lineageConflict || editSession?.rejoin;
     if (!c) return;
     untrack(() => {
       exitEdit();
@@ -1859,6 +1861,8 @@
 
   // ---- modals + editor ----------------------------------------------------
 
+  /** Viewer / mirror book: "Edit" opens a read-only live view. */
+  const readOnlyBook = $derived(!!vaults.selectedID && books.isReadOnly(vaults.selectedID));
   /** Cursor line for the Source editor's mount (canvas "Abrir Source"). */
   let sourceLine = $state<number | null>(null);
   async function enterEdit(): Promise<void> {
@@ -2599,6 +2603,7 @@
                     {#if zoomed === primaryLeaf}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
                   </button>
                 {/if}
+                {#if editSession.readOnly}<span class="ro-chip" data-testid="read-only-live" title="Você vê as edições ao vivo, mas não pode alterar esta nota">Somente leitura</span>{/if}
                 <span class="nb-divider" aria-hidden="true"></span>
                 <button class="ui-btn sm nb-done" onclick={exitEditAnimated} type="button" title="Done (:q, {keyLabel('⌘E')})">Done</button>
               </div>
@@ -2702,7 +2707,7 @@
                     {#if zoomed === primaryLeaf}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
                   </button>
                 {/if}
-                <button class="ui-btn sm nb-edit" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title="Edit (e · {keyLabel('⌘E')})">{editorLoading ? 'Loading…' : 'Edit'}</button>
+                <button class="ui-btn sm nb-edit" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title={readOnlyBook ? 'Ver ao vivo, somente leitura (e)' : `Edit (e · ${keyLabel('⌘E')})`}>{editorLoading ? 'Loading…' : readOnlyBook ? 'Ao vivo' : 'Edit'}</button>
                 <button class="ui-btn ghost sm icon danger-hover" onclick={beginDelete} type="button" aria-label="Delete note"
                   disabled={structuralOffline} title={structuralOffline ? OFFLINE_HINT : 'Delete (d)'}>
                   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>

@@ -509,8 +509,10 @@ export class ApiClient {
 
   /** Single-use, 30 s ticket for the note sync WebSocket (wave 3).
    *  Older servers answer 404 — callers fall back to `?token=`. */
-  createNoteWsTicket(vaultID: string, noteID: string): Promise<WsTicket> {
-    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/ws-ticket`, { method: 'POST' });
+  /** `mode: 'read'` mints a read-only ticket (needs note.read only):
+   *  the socket receives updates and must never send any. */
+  createNoteWsTicket(vaultID: string, noteID: string, mode?: 'read'): Promise<WsTicket> {
+    return this.request(`/api/vaults/${vaultID}/notes/${enc(noteID)}/ws-ticket`, mode ? { method: 'POST', body: { mode } } : { method: 'POST' });
   }
 
   getNoteSnapshot(vaultID: string, noteID: string): Promise<NoteSnapshot> {
@@ -647,7 +649,7 @@ export async function getNoteContent(v: string, n: string, s?: AbortSignal) { re
 export async function createNote(v: string, i: CreateNoteInput) { return vc(v).createNote(v, i); }
 export async function updateNote(v: string, n: string, i: UpdateNoteInput) { return vc(v).updateNote(v, n, i); }
 export async function deleteNote(v: string, n: string) { return vc(v).deleteNote(v, n); }
-export async function createNoteWsTicket(v: string, n: string) { return vc(v).createNoteWsTicket(v, n); }
+export async function createNoteWsTicket(v: string, n: string, mode?: 'read') { return vc(v).createNoteWsTicket(v, n, mode); }
 export async function getNoteSnapshot(v: string, n: string) { return vc(v).getNoteSnapshot(v, n); }
 export async function getNoteStateVector(v: string, n: string) { return vc(v).getNoteStateVector(v, n); }
 export async function applyNoteDiff(v: string, n: string, t: string, b?: string) { return vc(v).applyNoteDiff(v, n, t, b); }

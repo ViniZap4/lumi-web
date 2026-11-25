@@ -129,8 +129,29 @@ describe('VaultHomeView editor', () => {
     vi.mocked(api.createNoteWsTicket).mockResolvedValue({ ticket: 'tkt-1', expires_at: '' });
     await openNoteAndEdit();
     await settle();
-    expect(api.createNoteWsTicket).toHaveBeenCalledWith('v1', 'n1');
+    expect(api.createNoteWsTicket).toHaveBeenCalledWith('v1', 'n1', undefined); // an edit ticket (no mode)
     expect(fakeServer.providers[0].url).toBe('wss://lumi.work.com/api/vaults/v1/notes/n1/sync?ticket=tkt-1');
+  });
+
+  it('a viewer (can_edit false) opens a READ-ONLY live view: read ticket, no edits, chip', async () => {
+    vi.mocked(api.createNoteWsTicket).mockResolvedValue({ ticket: 'tkt-r', expires_at: '', mode: 'read' });
+    books.canEdit = { ...books.canEdit, v1: false };
+    cmp = mount(VaultHomeView, { target });
+    await settle();
+    await notes.select('n1');
+    await settle();
+    (await waitFor(() => findButton('Ao vivo'), 'Ao vivo button')).click();
+    await waitFor(() => target.querySelector('.cm-content'), 'editor');
+    await settle();
+    expect(api.createNoteWsTicket).toHaveBeenCalledWith('v1', 'n1', 'read');
+    expect(target.querySelector('[data-testid="read-only-live"]')?.textContent).toBe('Somente leitura');
+    expect(target.querySelector('[data-testid="note-editor"]')?.getAttribute('data-readonly')).toBe('true');
+    // Remote edits arrive live.
+    fakeServer.doc('n1/sync').getText('content').insert(0, 'LIVE ');
+    await settle();
+    expect(target.querySelector('.cm-content')!.textContent!.startsWith('LIVE ')).toBe(true);
+    expect(fakeServer.providers[0].awareness.getLocalState()).toBeNull();
+    expect(fakeServer.text('n1/sync')).toBe('LIVE ' + BODY);
   });
 
   it('stays in edit mode after entering it (selection effect does not cancel)', async () => {

@@ -98,6 +98,9 @@ export const FATAL_CLOSE_CODES: Record<number, string> = {
 /** Client-side close code raised by the lineage gate. */
 export const LINEAGE_CLOSE_CODE = 4409;
 const NOTE_GONE_CLOSE_CODE = 4404;
+/** Server restart/rebuild ("mirror_rebuild" on a read-only view). */
+export const MIRROR_REBUILD_CLOSE_CODE = 1012;
+export const READ_ONLY_REFUSED = 'Somente leitura: o servidor recusou esta conexão (4403). Recarregue a nota para tentar de novo.';
 const AUTH_CLOSE_CODE = 4401;
 
 /** Minimal surface of y-websocket's provider that the session uses.
@@ -188,6 +191,10 @@ export interface EditorSessionOptions {
   offline?: OfflineOptions;
   /** Background flush of a persisted replica: no presence broadcast. */
   headless?: boolean;
+  /** Read-only live view (viewer without note.edit, mirror book): the
+   *  ticket is minted with mode "read"; the session receives updates and
+   *  never sends any (no doc updates, no presence). */
+  readOnly?: boolean;
 }
 
 export const defaultProviderFactory: ProviderFactory = (serverUrl, room, doc, opts) => {
@@ -250,6 +257,12 @@ export class EditorSession {
   /** Provider reports a completed handshake on the CURRENT connection
    *  (flips back to false on disconnect, unlike `synced`). */
   liveSynced = $state(false);
+  /** Read-only live view: never sends (see EditorSessionOptions.readOnly). */
+  readonly readOnly: boolean;
+  /** The server rebuilt the note under this read-only view (close 1012
+   *  mirror_rebuild): this doc must not be reused. The view joins a
+   *  NEW empty session (protocol rule 4). */
+  rejoin = $state(false);
 
   /** CRDT-CLIENT-PROTOCOL §2.1 state, for the book sync indicator. */
   get protocolState(): EditorState {
@@ -290,7 +303,7 @@ export class EditorSession {
    *  handshake has succeeded since. */
   private authRetryUsed = false;
   private readonly opts: Required<
-    Omit<EditorSessionOptions, 'onAuthFailure' | 'serverUrl' | 'fetchTicket' | 'getToken' | 'WebSocketImpl' | 'offline' | 'headless'>
+    Omit<EditorSessionOptions, 'onAuthFailure' | 'serverUrl' | 'fetchTicket' | 'getToken' | 'WebSocketImpl' | 'offline' | 'headless' | 'readOnly'>
   > &
     Pick<EditorSessionOptions, 'onAuthFailure'>;
 
@@ -348,6 +361,19 @@ export class EditorSession {
   private readonly onClose = (ev: CloseEvent | null) => {
     if (this.destroyed || this.stopped) return;
     const code = ev?.code;
+    if (this.readOnly && code === MIRROR_REBUILD_CLOSE_CODE) {
+      // The server's doc for this note was rebuilt: reconnecting with
+      // this doc would offer it items the server no longer has.
+      this.stopped = true;
+      this.status = 'closed';
+      this.rejoin = true;
+      try { this.provider.disconnect(); } catch {}
+      return;
+    }
+    if (this.readOnly && code === 4403) {
+      this.stop(READ_ONLY_REFUSED);
+      return;
+    }
     if (code === AUTH_CLOSE_CODE && this.authMode === 'ticket' && !this.authRetryUsed) {
       // Ticket rejected (expired in flight, replayed, server restart):
       // let y-websocket reconnect — the next attempt fetches a NEW
@@ -374,6 +400,13 @@ export class EditorSession {
 
   private readonly onDocUpdate = (_u: Uint8Array, origin: unknown) => {
     if (this.destroyed || origin === this.provider) return;
+    if (this.readOnly) {
+      // Never sent (the provider's update handler is detached), but the
+      // doc now differs from the server's: stop rather than offer it
+      // on the next handshake (the server would close with 4403).
+      this.stop('Somente leitura: uma alteração local foi bloqueada. Recarregue a nota.');
+      return;
+    }
     if (this.offline) {
       // Persistence tracks `unsent`; while live, confirm once idle.
       if (this.status === 'connected' && this.liveSynced) this.scheduleConfirm();
@@ -416,7 +449,9 @@ export class EditorSession {
     // the default `null` origin, so no untagged write (task toggle,
     // recovery) can ever be undone as if it were the user's edit.
     this.undoManager = new Y.UndoManager(this.ytext, { trackedOrigins: new Set() });
-    this.offline = options.offline ?? null;
+    this.readOnly = options.readOnly === true;
+    // A read-only view keeps no offline replica (nothing to send later).
+    this.offline = this.readOnly ? null : (options.offline ?? null);
     this.persistence = this.offline
       ? new ReplicaPersistence({
           store: this.offline.store,
@@ -451,7 +486,13 @@ export class EditorSession {
       ? { params: {}, resolveParams: () => this.resolveParams(), WebSocketImpl: options.WebSocketImpl }
       : { params: { token }, WebSocketImpl: options.WebSocketImpl });
 
-    if (options.headless) {
+    if (this.readOnly) {
+      // Never send: no doc updates (detach y-websocket's update
+      // handler) and no presence.
+      const p = this.provider as unknown as { _updateHandler?: (u: Uint8Array, o: unknown) => void };
+      if (p._updateHandler) this.ydoc.off('update', p._updateHandler);
+      this.provider.awareness.setLocalState(null);
+    } else if (options.headless) {
       this.provider.awareness.setLocalState(null);
     } else {
       this.provider.awareness.setLocalStateField('user', {

@@ -90,6 +90,7 @@
   import { yUndoExtension, yUndoKeymap } from '../lib/editor-undo.ts';
   import { vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
+  import { remoteCaretGlide } from '../lib/remote-caret-glide.ts';
   import type { EditorSession } from '../lib/editor-session.svelte.ts';
   import type { EditorSettings } from '../lib/editor-settings.ts';
   import type { NoteSummary } from '../lib/types.ts';
@@ -251,7 +252,12 @@
       borderRightWidth: '0',
       marginRight: '0',
       animation: 'peer-caret-in var(--spring-glide-ms) var(--spring-glide) both, peer-caret-idle 12s linear forwards',
+      // A box, so the glide (a transform, lib/remote-caret-glide.ts) applies.
+      display: 'inline-block',
     },
+    // Gliding from its previous spot: no re-grow on arrival (that is for
+    // a caret that appears); the name tag still pops.
+    '.cm-ySelectionCaret.cm-ySelectionCaret-glide': { animation: 'peer-caret-idle 12s linear forwards' },
     '.cm-ySelectionCaretDot': {
       width: '6px',
       height: '6px',
@@ -475,6 +481,8 @@
       previewC.of(previewExt(s)),
       yUndoExtension(session.undoManager),
       yCollab(session.ytext, session.provider?.awareness ?? null, { undoManager: false }),
+      // After yCollab: peers' carets glide between positions (motion v2).
+      remoteCaretGlide((session.provider?.awareness ?? null) as Parameters<typeof remoteCaretGlide>[0]),
       EditorView.updateListener.of(scheduleStats),
       linkHelper(linkDeps),
       noteLinkHandler.of((href, ev) => {

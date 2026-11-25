@@ -239,7 +239,7 @@
   }
 
   async function toggleTask(i: number): Promise<void> {
-    if (!content) return;
+    if (!content || books.isReadOnly(p.vaultID)) return;
     const before = content.body;
     const ch = taskToggle(before, i);
     if (!ch) return;
@@ -383,7 +383,7 @@
       {:else if content}
         <article class="rendered lumi-prose" data-prose={editorSettings.value.proseFont}>
           {#if !titleInBody}<h1 class="rendered-title">{title}</h1>{/if}
-          <MarkdownView {blocks} onlink={(href, e) => p.onlink(href, e, path)} ontoggletask={editing ? undefined : (i) => void toggleTask(i)} />
+          <MarkdownView {blocks} onlink={(href, e) => p.onlink(href, e, path)} ontoggletask={editing || books.isReadOnly(p.vaultID) ? undefined : (i) => void toggleTask(i)} />
         </article>
       {/if}
     </div>

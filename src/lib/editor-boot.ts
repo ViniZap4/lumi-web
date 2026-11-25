@@ -184,6 +184,8 @@ const TOGGLE_JOIN_MS = 8_000;
  * one transaction. Returns the new text, or an error string.
  */
 export async function toggleTaskHeadless(vaultID: string, noteID: string, index: number): Promise<{ text: string } | { error: string }> {
+  // Viewer / mirror book: a task toggle is an edit — never mint a ticket.
+  if (books.isReadOnly(vaultID)) return { error: 'Somente leitura: você não pode alterar esta nota.' };
   const { taskToggle } = await import('./markdown.ts');
   const Ctor = await loadEditorSession();
   const plan = await planSession(vaultID, noteID, { headless: true });

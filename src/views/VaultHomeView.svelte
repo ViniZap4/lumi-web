@@ -24,7 +24,7 @@
   import { ShellKeymap, CHORD_TIMEOUT_MS, type ShellAction } from '../lib/shell-keymap.ts';
   import type { MillerNav } from '../lib/miller.svelte.ts';
   import { dirOf, normalizePath, type Entry, type NoteEntry } from '../lib/notetree.ts';
-  import { movedPath, copyTitle } from '../lib/fileops.ts';
+  import { movedPath, copyTitle, noteCreateInput } from '../lib/fileops.ts';
   import { markdownLink } from '../lib/links.ts';
   import { legendFor, contextForVimMode, type LegendContext, type LegendItem } from '../lib/legend.ts';
   import { PaneKeys, paneLayout, paneTarget, panesOf, fallsThroughWithoutTarget, PANE_CHORD_MS, type PaneId, type PaneDir, type WinCmd } from '../lib/pane-nav.ts';
@@ -820,7 +820,7 @@
 
   /** POST (always at the book root), then PATCH the path into `folder`. */
   async function createNoteIn(n: MillerNav, title: string, folder: string, body = '', kind?: 'canvas'): Promise<void> {
-    const created = await notes.create(kind ? { title, body, kind } : { title, body });
+    const created = await notes.create(noteCreateInput(title, body, kind));
     if (!created) return;
     let final = created;
     if (folder) {
@@ -889,7 +889,7 @@
     const vid = vaults.selectedID;
     const id = notes.selectedID;
     const body = notes.content?.body ?? '';
-    if (!vid || !id) return;
+    if (!vid || !id || books.isReadOnly(vid)) return; // viewer / mirror: never an edit ticket
     const ch = taskToggle(body, index);
     if (!ch) return;
     notes.applyLocalBody(id, body.slice(0, ch.from) + ch.insert + body.slice(ch.to));
@@ -2678,7 +2678,7 @@
                 ratio={editorSettings.value.previewRatio}
                 prose={editorSettings.value.proseFont}
                 onratio={(r) => editorSettings.update({ previewRatio: r })}
-                ontoggletask={toggleTaskInEditor}
+                ontoggletask={editSession?.readOnly ? undefined : toggleTaskInEditor}
                 onlink={onMdLink}
               >
                 <NoteEditor
@@ -2752,7 +2752,7 @@
             </header>
             {#if !titleInBody}<h1 class="rendered-title" data-vt-target="note-title">{notes.selected?.title}</h1>{/if}
             <!-- DOMPurify-sanitised blocks, see lib/markdown.ts. -->
-            <MarkdownView blocks={previewBlocks} onlink={onMdLink} ontoggletask={(i) => void toggleTaskFromReader(i)} />
+            <MarkdownView blocks={previewBlocks} onlink={onMdLink} ontoggletask={readOnlyBook ? undefined : (i) => void toggleTaskFromReader(i)} />
           </article>
         {/if}
       {/if}

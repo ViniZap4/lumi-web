@@ -133,6 +133,28 @@ describe('VaultHomeView editor', () => {
     expect(fakeServer.providers[0].url).toBe('wss://lumi.work.com/api/vaults/v1/notes/n1/sync?ticket=tkt-1');
   });
 
+  it('read-only book: reader task checkboxes are disabled and never request an edit ticket', async () => {
+    vi.mocked(api.getNoteContent).mockResolvedValue({ id: 'n1', vault_id: 'v1', path: 'n1.md', frontmatter: {}, body: '# T\n\n- [ ] one\n- [x] two\n' });
+    vi.mocked(api.createNoteWsTicket).mockResolvedValue({ ticket: 'tkt', expires_at: '' });
+    books.canEdit = { ...books.canEdit, v1: false };
+    cmp = mount(VaultHomeView, { target });
+    await settle();
+    await notes.select('n1');
+    const boxes = await waitFor(() => {
+      const b = target.querySelectorAll<HTMLInputElement>('input[data-task]');
+      return b.length === 2 ? b : null;
+    }, 'task boxes');
+    await settle();
+    for (const b of boxes) expect(b.disabled).toBe(true);
+    // A synthetic click reaches the handler even on a disabled box (jsdom):
+    // it must still never start an edit.
+    boxes[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(api.createNoteWsTicket).not.toHaveBeenCalled();
+    expect(fakeServer.providers).toHaveLength(0);
+    expect(api.applyNoteDiff).not.toHaveBeenCalled();
+  });
+
   it('a viewer (can_edit false) opens a READ-ONLY live view: read ticket, no edits, chip', async () => {
     vi.mocked(api.createNoteWsTicket).mockResolvedValue({ ticket: 'tkt-r', expires_at: '', mode: 'read' });
     books.canEdit = { ...books.canEdit, v1: false };

@@ -9,7 +9,7 @@
 // level are kept, in their original order.
 
 import { diffEdits, type TextEdit } from '../text-diff.ts';
-import { locateJsonError, type JsonErrorAt } from './canvas-recover.ts';
+import { healMissingCommas, locateJsonError, type JsonErrorAt } from './canvas-recover.ts';
 
 export type CanvasSide = 'top' | 'right' | 'bottom' | 'left';
 export type CanvasEnd = 'none' | 'arrow';
@@ -210,11 +210,26 @@ export function parseCanvas(text: string): CanvasParse {
   if (!text.trim()) top = {};
   else {
     let v: unknown;
+    let parseError = '';
     try {
       v = JSON.parse(text);
     } catch (e) {
+      parseError = (e as Error).message;
+      // Concurrent first cards: objects in an array with no comma
+      // between them. Read them as if the comma were there (no banner);
+      // the next local commit writes valid JSON (diffEdits).
+      const healed = healMissingCommas(text);
+      if (healed != null) {
+        try {
+          v = JSON.parse(healed);
+        } catch {
+          v = undefined;
+        }
+      }
+    }
+    if (v === undefined) {
       const at = locateJsonError(text);
-      if (!at) return { ok: false, error: `JSON inválido: ${(e as Error).message}` };
+      if (!at) return { ok: false, error: `JSON inválido: ${parseError}` };
       return { ok: false, error: `${at.message} (linha ${at.line}, coluna ${at.column})`, at };
     }
     if (!isObj(v)) return { ok: false, error: 'um canvas precisa ser um objeto JSON ({ … })' };

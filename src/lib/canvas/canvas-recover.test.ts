@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { keepDocumentText, lineColumn, locateJsonError, newerDocument, splitJsonDocuments } from './canvas-recover.ts';
+import { healMissingCommas, keepDocumentText, lineColumn, locateJsonError, newerDocument, splitJsonDocuments } from './canvas-recover.ts';
 import { parseCanvas } from './canvas.ts';
 
 describe('locateJsonError', () => {
@@ -58,5 +58,19 @@ describe('splitJsonDocuments / newerDocument', () => {
     expect(newerDocument(d, A).text).toBe(B);
     expect(newerDocument(d, null).text).toBe(B);
     expect(keepDocumentText(`${A}${B}\n`, d[0])).toBe(A + '\n');
+  });
+});
+
+describe('healMissingCommas', () => {
+  it('adds a comma only between two objects of an array', () => {
+    expect(healMissingCommas('{"nodes":[\n\t\t{"id":"a"}\n\t\n\t\t{"id":"b"}\n\t]}')).toBe('{"nodes":[\n\t\t{"id":"a"},\n\t\n\t\t{"id":"b"}\n\t]}');
+    expect(healMissingCommas('{"a":[{"x":1}{"y":2}{"z":3}]}')).toBe('{"a":[{"x":1},{"y":2},{"z":3}]}');
+  });
+  it('leaves everything else alone (top-level documents, strings, other errors)', () => {
+    expect(healMissingCommas('{"a":1}{"b":2}')).toBeNull();
+    expect(healMissingCommas('{"t":"}{"}')).toBeNull();
+    expect(healMissingCommas('{"a":[1 2]}')).toBeNull();
+    expect(healMissingCommas('{"a":{"b":1}}')).toBeNull();
+    expect(parseCanvas('{"nodes":[{"id":"a"} 7]}').ok).toBe(false);
   });
 });

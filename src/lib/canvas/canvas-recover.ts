@@ -185,3 +185,45 @@ export function newerDocument(docs: readonly [JsonDocument, JsonDocument], lastV
 export function keepDocumentText(current: string, doc: JsonDocument): string {
   return doc.text + (/\n$/.test(current) ? '\n' : '');
 }
+
+/**
+ * The one corruption tolerated on read: two array elements that are
+ * objects with NO comma between them (`}` whitespace `{` inside an
+ * array). Two replicas adding the first card to an empty multi-line
+ * canvas at the same time merge exactly like that. Returns the text
+ * with those commas added (a read-side view only; never written back
+ * concurrently: the next local commit re-serialises valid JSON), or
+ * null when there is nothing to heal. Nothing broader is accepted.
+ */
+export function healMissingCommas(s: string): string | null {
+  const stack: number[] = [];
+  const at: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0x22) {
+      // Skip a string (escapes included).
+      for (i++; i < s.length; i++) {
+        const d = s.charCodeAt(i);
+        if (d === 0x5c) i++;
+        else if (d === 0x22) break;
+      }
+      continue;
+    }
+    if (c === 0x7b || c === 0x5b) stack.push(c);
+    else if (c === 0x7d || c === 0x5d) {
+      stack.pop();
+      if (c === 0x7d && stack[stack.length - 1] === 0x5b) {
+        const j = skipWs(s, i + 1);
+        if (s[j] === '{') at.push(i + 1);
+      }
+    }
+  }
+  if (!at.length) return null;
+  let out = '';
+  let prev = 0;
+  for (const p of at) {
+    out += s.slice(prev, p) + ',';
+    prev = p;
+  }
+  return out + s.slice(prev);
+}

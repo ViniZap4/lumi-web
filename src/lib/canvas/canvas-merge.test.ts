@@ -71,18 +71,48 @@ describe('concurrent canvas commits (CRDT merge)', () => {
     expect(docs!.map((d) => parseCanvas(d.text).ok)).toEqual([true, true]);
   });
 
-  it('two replicas adding the first card to the server-created empty canvas cannot merge validly (restore path)', () => {
-    // `{"nodes":[],"edges":[]}\n` (server EmptyCanvas) is single-line,
-    // so the first commit also restyles it to Obsidian's layout: both
-    // replicas replace the same span and both inserts survive. Text
-    // JSON has no conflict-free way to append to an empty array from
-    // two sites; the view keeps the last valid text and offers to
-    // restore it.
+  it('two replicas adding the first card to the old single-line empty canvas cannot merge validly (restore path)', () => {
+    // `{"nodes":[],"edges":[]}\n` (servers before the multi-line empty
+    // canvas) is single-line, so the first commit also restyles it:
+    // both replicas replace the same span and both inserts survive.
     const [a, b] = pair('{"nodes":[],"edges":[]}\n');
     commit(a, addNode(card('fromA')));
     commit(b, addNode(card('fromB')));
     exchange(a, b);
     expect(parseCanvas(text(a)).ok).toBe(false);
+  });
+
+  it('concurrent first cards on the multi-line empty canvas: tolerated on read, healed by the next commit', () => {
+    // The server's empty canvas is multi-line, so each first card is
+    // inserted as whole lines inside `[` … `]`. Merged, the two objects
+    // sit on adjacent lines with NO comma between them.
+    const EMPTY = '{\n\t"nodes":[],\n\t"edges":[]\n}';
+    const [a, b] = pair(EMPTY);
+    commit(a, addNode(card('fromA')));
+    commit(b, addNode(card('fromB')));
+    exchange(a, b);
+    const merged = text(a);
+    expect(() => JSON.parse(merged)).toThrow();
+    expect(merged).toMatch(/\}\s*\n\s*\{/);
+    // Read: both cards, no error (no banner).
+    const p = parseCanvas(merged);
+    expect(p.ok).toBe(true);
+    if (p.ok) expect(p.nodes.map((n) => n.id).sort()).toEqual(['fromA', 'fromB']);
+    // Nothing was written by reading.
+    expect(text(a)).toBe(merged);
+    // A later commit from either side re-serialises valid JSON, and the
+    // merge with the other replica stays valid.
+    for (const side of ['a', 'b'] as const) {
+      const [x, y] = pair(merged);
+      commit(side === 'a' ? x : y, patchNodes({ fromA: { x: 500 } }));
+      exchange(x, y);
+      expect(text(x)).toBe(text(y));
+      expect(() => JSON.parse(text(x))).not.toThrow();
+      const q = parseCanvas(text(x));
+      expect(q.ok && q.nodes.find((n) => n.id === 'fromA')?.x).toBe(500);
+      // Commas only between elements: no trailing comma before `]`.
+      expect(text(x)).not.toMatch(/,\s*\]/);
+    }
   });
 
   it('appending cards concurrently to a non-empty canvas stays valid', () => {

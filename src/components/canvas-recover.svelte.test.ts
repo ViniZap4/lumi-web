@@ -54,16 +54,24 @@ afterEach(() => {
 describe('canvas invalid-JSON banner', () => {
   it('explains the error in pt-BR with its position; Abrir Source goes to the line', async () => {
     const { doc, onsource } = setup(A);
-    corrupt(doc, A.replace('}\n\t],', '}\n\t\t{"id":"z"}\n\t],'));
+    corrupt(doc, A.replace('"text":"A"', '"text":"A" "x"'));
     await settle();
     const banner = q('canvas-invalid')!;
     expect(banner.textContent).toContain('JSON inválido');
-    expect(banner.textContent).toContain('(linha 4, coluna 3)');
+    expect(banner.textContent).toContain('(linha 3, coluna 38)');
     expect(banner.textContent).toContain('Mostrando a última versão válida');
     q('canvas-open-source')!.click();
-    expect(onsource).toHaveBeenCalledWith({ line: 4 });
+    expect(onsource).toHaveBeenCalledWith({ line: 3 });
     // Not two documents → no "keep the newer" choice.
     expect(q('canvas-keep-newer')).toBeNull();
+  });
+
+  it('two cards with no comma between them (concurrent first cards) show no banner', async () => {
+    const { doc } = setup(A);
+    corrupt(doc, A.replace('}\n\t],', '}\n\t\t{"id":"z","type":"text","text":"Z","x":0,"y":0,"width":200,"height":60}\n\t],'));
+    await settle();
+    expect(q('canvas-invalid')).toBeNull();
+    expect(target.querySelectorAll('.cv-node').length).toBe(2);
   });
 
   it('Restaurar última versão válida writes ONE minimal ranged edit, and u undoes it', async () => {

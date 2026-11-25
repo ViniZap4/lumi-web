@@ -463,6 +463,8 @@
     | { kind: 'pinch'; d0: number; z0: Viewport; m0: Point };
   let gesture = $state<Gesture | null>(null);
   const pointers = new Map<number, Point>();
+  /** Last client position per pointer (no layout read while panning). */
+  const clientPts = new Map<number, Point>();
   let spaceDown = $state(false);
 
   function isTyping(t: EventTarget | null): boolean {
@@ -477,7 +479,10 @@
     if (isTyping(t) || t.closest('.cv-ui')) return;
     root.focus({ preventScroll: true });
     pointers.set(e.pointerId, screenPoint(e));
+    clientPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
+      flushPan();
+      for (const [id, c] of clientPts) if (pointers.has(id)) pointers.set(id, screenPoint({ clientX: c.x, clientY: c.y }));
       const [a, b] = [...pointers.values()];
       draft = {};
       gesture = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y), z0: view, m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
@@ -530,8 +535,36 @@
     gesture = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
   }
 
+  // Pan perf: pointermove can fire several times per frame; the view
+  // is written once per animation frame, and a pan never reads layout
+  // (screenPoint's getBoundingClientRect forced a style recalc of the
+  // just-moved layers on every event).
+  let panRaf = 0;
+  let panNext: Viewport | null = null;
+  function schedulePan(v: Viewport): void {
+    panNext = v;
+    if (panRaf) return;
+    panRaf = requestAnimationFrame(() => {
+      panRaf = 0;
+      if (panNext) setView(panNext);
+      panNext = null;
+    });
+  }
+  function flushPan(): void {
+    if (panRaf) cancelAnimationFrame(panRaf);
+    panRaf = 0;
+    if (panNext) setView(panNext);
+    panNext = null;
+  }
+  $effect(() => () => {
+    if (panRaf) cancelAnimationFrame(panRaf);
+  });
+
   function onpointermove(e: PointerEvent): void {
-    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, screenPoint(e));
+    if (pointers.has(e.pointerId)) {
+      clientPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size > 1 || gesture?.kind !== 'pan') pointers.set(e.pointerId, screenPoint(e));
+    }
     const g = gesture;
     if (!g) return;
     if (g.kind === 'pinch') {
@@ -544,7 +577,7 @@
       return;
     }
     if (g.kind === 'pan') {
-      setView({ ...view, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy });
+      schedulePan({ ...view, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy });
       const t = performance.now();
       panTrail.push({ x: e.clientX, y: e.clientY, t });
       while (panTrail.length > 2 && t - panTrail[0].t > 80) panTrail.shift();
@@ -567,7 +600,9 @@
   }
 
   function onpointerup(e: PointerEvent): void {
+    flushPan();
     pointers.delete(e.pointerId);
+    clientPts.delete(e.pointerId);
     const g = gesture;
     if (g?.kind === 'pinch') {
       if (pointers.size < 2) gesture = null;
@@ -764,6 +799,16 @@
   });
 
   const gridSize = $derived(24 * view.zoom);
+  // Pan perf: the dot grid is its own leaf layer, moved by a transform
+  // (modulo one cell). It used to be the root's background driven by
+  // inherited custom properties (--gx/--gy): every pan frame then
+  // invalidated the style of every node's DOM (≈ 35 ms per frame with
+  // 300 nodes). Nothing inherits from a leaf.
+  const gridShift = $derived.by(() => {
+    const g = gridSize > 0 ? gridSize : 24;
+    const m = (v: number) => ((v % g) + g) % g;
+    return `transform: translate3d(${(m(view.x) - g).toFixed(2)}px, ${(m(view.y) - g).toFixed(2)}px, 0); background-size: ${g}px ${g}px`;
+  });
   const zoomPct = $derived(Math.round(view.zoom * 100));
   const SIDES: CanvasSide[] = ['top', 'right', 'bottom', 'left'];
 
@@ -796,8 +841,8 @@
   {onpointerup}
   onpointercancel={onpointerup}
   {ondblclick}
-  style="--grid: {gridSize}px; --gx: {view.x}px; --gy: {view.y}px"
 >
+  <div class="cv-grid" aria-hidden="true" style={gridShift}></div>
   <div class="cv-world" class:ease={easing} style="transform: translate({view.x}px, {view.y}px) scale({view.zoom})">
     {#each groups as g (g.id)}
       {@const c = colorCSS(g.color)}
@@ -990,15 +1035,23 @@
     overflow: hidden;
     outline: none;
     background-color: var(--color-background);
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--color-text) 14%, transparent) 1px, transparent 1.2px);
-    background-size: var(--grid) var(--grid);
-    background-position: var(--gx) var(--gy);
     color: var(--color-text);
     touch-action: none;
     user-select: none;
     cursor: default;
   }
   .cv.panning { cursor: grabbing; }
+  .cv-grid {
+    position: absolute;
+    left: 0;
+    top: 0;
+    /* One cell of slack on every side: the layer shifts by < 1 cell. */
+    width: calc(100% + 96px * 4);
+    height: calc(100% + 96px * 4);
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--color-text) 14%, transparent) 1px, transparent 1.2px);
+    pointer-events: none;
+    will-change: transform;
+  }
   .cv-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
   .cv-world.ease { transition: transform var(--spring-gentle-ms) var(--spring-gentle); }
 
@@ -1014,7 +1067,7 @@
     overflow: visible;
     cursor: grab;
     /* Spawn: a node pops into being (also the canvas's opening reveal). */
-    animation: node-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+    animation: node-in var(--spring-bouncy-ms) var(--spring-bouncy) backwards;
     transition: box-shadow var(--dur-fade) var(--ease), border-color var(--dur-fade) var(--ease);
   }
   .cv-node:hover { box-shadow: var(--elev-3), var(--edge-light); }
@@ -1105,8 +1158,14 @@
   .cv-edge-line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   /* Edges draw themselves from their source (new edges, and the reveal
      when the canvas opens); arrow heads fade in as the line arrives. */
-  .cv-edge:not(.connecting) .cv-edge-line { stroke-dasharray: 1; animation: edge-draw 620ms var(--spring-soft) 260ms both; }
-  .cv-edge:not(.connecting) .cv-edge-head { animation: pop-in var(--spring-bouncy-ms) var(--spring-bouncy) 760ms both; transform-box: fill-box; transform-origin: center; }
+  /* Fill BACKWARDS, never both: a finished animation with a forwards
+     fill stays in effect, and 400 arrow heads holding a transform
+     animation made every pan frame redraw the edge layer (≈ 130 ms per
+     frame with 300 nodes / 400 edges, scripts/perf/canvas-pan-perf.mjs).
+     Each end pose is the element's own style, so nothing changes at
+     the end. */
+  .cv-edge:not(.connecting) .cv-edge-line { stroke-dasharray: 1; animation: edge-draw 620ms var(--spring-soft) 260ms backwards; }
+  .cv-edge:not(.connecting) .cv-edge-head { animation: pop-in var(--spring-bouncy-ms) var(--spring-bouncy) 760ms backwards; transform-box: fill-box; transform-origin: center; }
   @keyframes edge-draw { from { stroke-dashoffset: 1; } }
   .cv-edge.connecting .cv-edge-line { animation: edge-march 0.6s linear infinite; }
   @keyframes edge-march { to { stroke-dashoffset: -11; } }

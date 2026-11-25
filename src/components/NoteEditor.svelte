@@ -142,9 +142,12 @@
     onexplore?: () => void;
     /** The editor got focus (pane focus tracking). */
     onfocus?: () => void;
+    /** 1-based line for the cursor when the view mounts (e.g. the line
+     *  of a canvas JSON error). */
+    initialLine?: number | null;
   };
 
-  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate, onpane, onpanepending, onquit, onwin, onfollow, onhover, onexplore, onfocus }: Props = $props();
+  const { session, settings, onexit, onopensettings, ontogglemode, ontogglesplit, onstats, notes, notePath, onopennote, onvimstate, onpane, onpanepending, onquit, onwin, onfollow, onhover, onexplore, onfocus, initialLine = null }: Props = $props();
   const paneKeys = new PaneKeys();
 
   // The vimrc's `set` options override the device settings while vim
@@ -501,6 +504,10 @@
     lastFocused = exHandlers;
     watchVim();
     emitStats();
+    if (initialLine != null) {
+      gotoLine(initialLine);
+      view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: 'center' }) });
+    }
     view.focus();
   }
 

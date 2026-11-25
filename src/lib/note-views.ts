@@ -59,7 +59,7 @@ export interface NoteViewProps {
   /** Note title (for headers). */
   title?: string;
   /** Switch this pane to the markdown Source editor (Board ⇄ Source). */
-  onsource?: () => void;
+  onsource?: (o?: { line?: number }) => void;
   /** A link clicked inside the view (plain / Cmd / Shift-Cmd click). */
   onlink?: (href: string, e: MouseEvent) => void;
 }

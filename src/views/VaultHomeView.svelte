@@ -1859,6 +1859,8 @@
 
   // ---- modals + editor ----------------------------------------------------
 
+  /** Cursor line for the Source editor's mount (canvas "Abrir Source"). */
+  let sourceLine = $state<number | null>(null);
   async function enterEdit(): Promise<void> {
     const vaultID = vaults.selectedID;
     const noteID = notes.selectedID;
@@ -1906,6 +1908,7 @@
 
   /** Leave edit mode and destroy the single-note session. */
   function exitEdit(): void {
+    sourceLine = null;
     const sess = editSession;
     if (sess) {
       // Show the latest collaborative text in the preview right away;
@@ -2537,7 +2540,7 @@
               acquireSession={() => acquireEditorSession(vaults.selectedID!, notes.selectedID!)}
               releaseSession={(x) => editorPool.release(x)}
               title={notes.selected?.title ?? ''}
-              onsource={() => { setPrimaryView(MARKDOWN_VIEW); void enterEdit(); }}
+              onsource={(o) => { sourceLine = o?.line ?? null; setPrimaryView(MARKDOWN_VIEW); void enterEdit().then(() => { if (o?.line != null) noteEditorRef?.gotoLine(o.line); }); }}
               onlink={onMdLink}
             />
           </div>
@@ -2644,6 +2647,7 @@
                 <NoteEditor
                   bind:this={noteEditorRef}
                   session={editSession}
+                  initialLine={sourceLine}
                   settings={editorSettings.value}
                   onexit={exitEditAnimated}
                   onopensettings={() => uiState.openSettings('editor')}

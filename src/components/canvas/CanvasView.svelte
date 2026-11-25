@@ -1,3 +1,9 @@
+<script lang="ts" module>
+  // Last text that parsed, per note (memoKey), for "Restaurar última
+  // versão válida" after the view remounts. Memory only (this tab).
+  const lastValidTexts = new Map<string, string>();
+</script>
+
 <script lang="ts">
   // JSON Canvas 1.0 view + editor (SPEC-PARTE2 §6) over a LiveText.
   //
@@ -18,6 +24,8 @@
     hitNode, readingOrder, arrowHead, contains, type Viewport, type Point,
   } from '../../lib/canvas/canvas-view.ts';
   import { CanvasKeys } from '../../lib/canvas/canvas-keys.ts';
+  import { splitJsonDocuments, newerDocument, keepDocumentText } from '../../lib/canvas/canvas-recover.ts';
+  import { applyTextEdits, diffRange } from '../../lib/text-diff.ts';
   import { renderMarkdown } from '../../lib/markdown.ts';
   import { motionAllowed } from '../../lib/motion.ts';
   import { modeKey, type StructuredMode } from '../../lib/structured-mode.svelte.ts';
@@ -25,7 +33,10 @@
   interface Props {
     doc: LiveText;
     title?: string;
-    onsource?: () => void;
+    /** Open the JSON source; `line` (1-based) puts the cursor there. */
+    onsource?: (o?: { line?: number }) => void;
+    /** Identity of the note (vault/note) for the last-valid-text memo. */
+    memoKey?: string;
     /** Open a vault file (file node): current pane or a split. */
     onopenfile?: (path: string, opts: { split: boolean }) => void;
     /** Open an external URL (link node). Default: new tab, noopener. */
@@ -43,7 +54,7 @@
     /** Mode switch (Reading | Edit | Source control, i/e, Esc/q, ⌘E). */
     onmode?: (m: StructuredMode) => void;
   }
-  let { doc, title = '', onsource, onopenfile, onopenlink, onlink, notes = [], loadNote, status = null, autofocus = true, mode = 'edit', onmode }: Props = $props();
+  let { doc, title = '', onsource, memoKey, onopenfile, onopenlink, onlink, notes = [], loadNote, status = null, autofocus = true, mode = 'edit', onmode }: Props = $props();
 
   // ---- text → canvas ------------------------------------------------------------
   let text = $state('');
@@ -56,13 +67,50 @@
   });
   const parsed = $derived(parseCanvas(text));
   let lastGood = $state<{ nodes: CanvasNode[]; edges: CanvasEdge[] }>({ nodes: [], edges: [] });
+  // The last text that parsed (memory, per note): what "Restaurar
+  // última versão válida" writes back.
+  // svelte-ignore state_referenced_locally
+  let lastGoodText = $state<string | null>(memoKey ? (lastValidTexts.get(memoKey) ?? null) : null);
   $effect(() => {
-    if (parsed.ok) lastGood = { nodes: parsed.nodes, edges: parsed.edges };
+    if (parsed.ok) {
+      lastGood = { nodes: parsed.nodes, edges: parsed.edges };
+      if (text.trim()) {
+        lastGoodText = text;
+        if (memoKey) lastValidTexts.set(memoKey, text);
+      }
+    }
   });
   const invalid = $derived(parsed.ok ? null : parsed.error);
+  const invalidAt = $derived(parsed.ok ? null : (parsed.at ?? null));
+  /** Two whole documents back to back (concurrent first writes). */
+  const twoDocs = $derived(invalid ? splitJsonDocuments(text) : null);
+
+  function openSourceAtError(): void {
+    onsource?.(invalidAt ? { line: invalidAt.line } : undefined);
+  }
+  /** Write `next` over the CURRENT text as ONE minimal ranged edit
+   *  (one undo step). Allowed while the JSON is invalid. */
+  function replaceText(next: string): boolean {
+    if (!doc.editable) {
+      flash('Somente leitura');
+      return false;
+    }
+    const e = diffRange(doc.read(), next);
+    if (e) doc.apply([e]);
+    return !!e;
+  }
+  function restoreLastValid(): void {
+    if (lastGoodText != null && replaceText(lastGoodText)) flash('Última versão válida restaurada (u desfaz)');
+  }
+  function keepNewer(): void {
+    const cur = doc.read();
+    const docs = splitJsonDocuments(cur);
+    if (!docs) return;
+    if (replaceText(keepDocumentText(cur, newerDocument(docs, lastGoodText)))) flash('Versão mais recente mantida (u desfaz)');
+  }
   const reading = $derived(mode === 'read');
   const editable = $derived(doc.editable && !invalid && !reading);
-  const lockedMsg = $derived(reading ? 'Reading — press e to edit' : invalid ? 'Invalid JSON: fix it in Source' : 'Read-only');
+  const lockedMsg = $derived(reading ? 'Reading — press e to edit' : invalid ? 'JSON inválido: corrija no Source' : 'Read-only');
   const baseNodes = $derived(parsed.ok ? parsed.nodes : lastGood.nodes);
   const edges = $derived(parsed.ok ? parsed.edges : lastGood.edges);
 
@@ -82,8 +130,8 @@
     const cur = doc.read();
     const edits = commitCanvas(cur, op);
     // Server limit: 4 MiB of UTF-8 per file.
-    if (edits.length && cur.length + edits[0].insert.length > 1_000_000) {
-      const next = cur.slice(0, edits[0].from) + edits[0].insert + cur.slice(edits[0].to);
+    if (edits.length && cur.length + edits.reduce((n, e) => n + e.insert.length, 0) > 1_000_000) {
+      const next = applyTextEdits(cur, edits);
       if (new TextEncoder().encode(next).length > MAX_BYTES) {
         flash('Canvas too large (4 MiB limit)');
         return false;
@@ -870,7 +918,15 @@
   </header>
 
   {#if invalid}
-    <div class="cv-banner cv-ui" role="alert">This canvas is not valid JSON ({invalid}). Showing the last valid state, read-only.</div>
+    <div class="cv-banner recover cv-ui" role="alert" data-testid="canvas-invalid">
+      <p class="cv-banner-msg"><strong>JSON inválido</strong> — {invalid}. Mostrando a última versão válida, somente leitura.</p>
+      {#if twoDocs}<p class="cv-banner-msg">O arquivo tem dois canvases seguidos (provavelmente duas edições simultâneas).</p>{/if}
+      <div class="cv-banner-actions">
+        {#if onsource}<button class="ui-btn sm" type="button" onclick={openSourceAtError} data-testid="canvas-open-source">Abrir Source{invalidAt ? ` (linha ${invalidAt.line})` : ''}</button>{/if}
+        {#if twoDocs && doc.editable}<button class="ui-btn sm" type="button" onclick={keepNewer} data-testid="canvas-keep-newer">Manter a versão mais recente</button>{/if}
+        {#if lastGoodText != null && doc.editable}<button class="ui-btn sm" type="button" onclick={restoreLastValid} data-testid="canvas-restore">Restaurar última versão válida</button>{/if}
+      </div>
+    </div>
   {:else if parsed.ok && parsed.issues.length}
     <div class="cv-banner warn cv-ui" title={parsed.issues.join('\n')}>{parsed.issues.length} item{parsed.issues.length === 1 ? '' : 's'} could not be shown (kept in the file).</div>
   {/if}
@@ -1120,6 +1176,9 @@
     border: 1px solid color-mix(in srgb, var(--color-error) 45%, transparent);
     z-index: 5;
   }
+  .cv-banner.recover { display: grid; gap: 6px; width: min(560px, calc(100% - 32px)); padding: 10px 12px; }
+  .cv-banner-msg { margin: 0; line-height: 1.45; }
+  .cv-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .cv-banner.warn { background: color-mix(in srgb, var(--color-warning) 14%, var(--color-background)); border-color: color-mix(in srgb, var(--color-warning) 40%, transparent); }
   .cv-empty { position: absolute; inset: 36px 0 0; display: grid; place-items: center; color: var(--color-text-dim); font-size: var(--text-sm); pointer-events: none; }
   .cv-tools {

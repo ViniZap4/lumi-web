@@ -66,7 +66,7 @@
   let editing = $state(false);
   let editError = $state<string | null>(null);
   let NoteEditor = $state<NoteEditorComp | null>(null);
-  let editorRef = $state<{ focus(): void; linkUnderCursor(): LinkAt | null } | null>(null);
+  let editorRef = $state<{ focus(): void; gotoLine(n: number): void; linkUnderCursor(): LinkAt | null } | null>(null);
 
   const meta = $derived(notes.list.find((n) => n.id === p.leaf.note) ?? null);
   const path = $derived(meta?.path ?? content?.path ?? '');
@@ -134,6 +134,17 @@
     session = null;
   });
 
+  /** Line to put the cursor on when the Source editor mounts (canvas
+   *  "Abrir Source" at a JSON error). */
+  let sourceLine = $state<number | null>(null);
+  function openSource(line?: number): void {
+    sourceLine = line ?? null;
+    p.onview(MARKDOWN_VIEW);
+    void enterEdit().then(() => {
+      if (line != null) editorRef?.gotoLine(line);
+    });
+  }
+
   export async function enterEdit(): Promise<void> {
     if (session || editing) return;
     editing = true;
@@ -163,6 +174,7 @@
   }
 
   export function exitEdit(): void {
+    sourceLine = null;
     const s = session;
     if (s && s.editable && !s.isDestroyed && content && content.id === s.noteID) {
       content = { ...content, body: s.ytext.toString() };
@@ -300,7 +312,7 @@
         acquireSession={() => acquireEditorSession(p.vaultID, p.leaf.note)}
         releaseSession={(s) => editorPool.release(s)}
         {title}
-        onsource={() => { p.onview(MARKDOWN_VIEW); void enterEdit(); }}
+        onsource={(o) => openSource(o?.line)}
         onlink={(href, e) => p.onlink(href, e, path)}
       />
     </div>
@@ -309,6 +321,7 @@
       <NoteEditor
         bind:this={editorRef}
         {session}
+        initialLine={sourceLine}
         settings={editorSettings.value}
         onexit={exitEdit}
         onquit={p.onclose}

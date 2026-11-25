@@ -35,6 +35,25 @@ describe('NoteEditor', () => {
     unmount(cmp);
     target.remove();
   });
+
+  it('initialLine puts the cursor on that line at mount (canvas "Abrir Source")', () => {
+    const body = '{\n\t"nodes":[\n\t\t{"id":"a"}\n\t\t{"id":"b"}\n\t]\n}';
+    const session = fakeSession(body);
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const R = Range.prototype as unknown as Record<string, unknown>;
+    R.getClientRects ??= () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] });
+    R.getBoundingClientRect ??= () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+    const cmp = mount(NoteEditor, { target, props: { session, settings: { ...defaultSettings(), editMode: 'source' } as EditorSettings, initialLine: 4 } }) as unknown as {
+      editorView(): import('@codemirror/view').EditorView;
+    };
+    flushSync();
+    const view = cmp.editorView();
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(4);
+    expect(session.ytext.toString()).toBe(body);
+    unmount(cmp as never);
+    target.remove();
+  });
 });
 
 describe('NoteEditor — vim visual mode + yank highlight', () => {

@@ -33,7 +33,7 @@
     /** No live session (e.g. viewer role): render read-only. */
     readonly?: boolean;
     /** Board ↔ Source / Canvas ↔ Source: open the markdown/JSON editor. */
-    onsource?: () => void;
+    onsource?: (o?: { line?: number }) => void;
     /** Open a vault file (canvas file node). `split` asks for a split pane. */
     onopenfile?: (path: string, opts: { split: boolean }) => void;
     onlink?: (href: string, e: MouseEvent) => void;
@@ -196,7 +196,7 @@
     {#if kind === 'kanban'}
       <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} />
     {:else}
-      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} notes={noteRefs} {loadNote} onopenfile={openFile} />
+      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} memoKey={`${vaultID}/${noteID}`} notes={noteRefs} {loadNote} onopenfile={openFile} />
     {/if}
   {:else}
     <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading…</div>

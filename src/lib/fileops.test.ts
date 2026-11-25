@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { planCreate, planRename, planFolderRename, resolvePath, pathError, movedPath, copyTitle } from './fileops.ts';
+import { noteCreateInput } from './fileops.ts';
+import { EMPTY_CANVAS, serializeCanvas, parseCanvas, DEFAULT_STYLE } from './canvas/canvas.ts';
 
 describe('resolvePath', () => {
   it('relative, absolute, dot-dot clamped', () => {
@@ -83,5 +85,21 @@ describe('canvas file ops (server contract: rename = move, kind never changes)',
     expect(planRename('work/plan.canvas', 'plan', '/y/Z')).toEqual({ kind: 'note', path: 'y/Z.canvas' });
     expect(planRename('work/plan.canvas', 'plan', 'plan')).toEqual({ kind: 'none' });
     expect(planRename('work/plan.canvas', 'plan', 'x.md').kind).toBe('error');
+  });
+});
+
+describe('new canvas body', () => {
+  it('a canvas without a template sends NO body (server template applies); markdown keeps its body', () => {
+    expect(noteCreateInput('map', '', 'canvas')).toEqual({ title: 'map', kind: 'canvas' });
+    expect(noteCreateInput('map', '  \n', 'canvas')).toEqual({ title: 'map', kind: 'canvas' });
+    expect(noteCreateInput('n', '', undefined)).toEqual({ title: 'n', body: '' });
+    expect(noteCreateInput('map', EMPTY_CANVAS, 'canvas')).toEqual({ title: 'map', body: EMPTY_CANVAS, kind: 'canvas' });
+  });
+
+  it('the local empty canvas is exactly the server template, and the first commit on an empty text writes it', () => {
+    expect(EMPTY_CANVAS).toBe('{\n\t"nodes":[],\n\t"edges":[]\n}');
+    expect(serializeCanvas({ top: {}, nodes: [], edges: [] }, DEFAULT_STYLE)).toBe(EMPTY_CANVAS);
+    const p = parseCanvas(EMPTY_CANVAS);
+    expect(p.ok && p.style).toEqual(DEFAULT_STYLE);
   });
 });

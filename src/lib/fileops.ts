@@ -165,3 +165,13 @@ export function copyTitle(title: string, taken: ReadonlySet<string>): string {
   }
   return `${base} ${Date.now()}`;
 }
+
+/**
+ * Body of POST /notes for a new note. A canvas with no template sends NO
+ * body, so the server's empty canvas applies (EMPTY_CANVAS, the same
+ * multi-line layout everywhere); a blank template is never sent as ''.
+ */
+export function noteCreateInput(title: string, body: string, kind?: 'canvas'): { title: string; body?: string; kind?: 'canvas' } {
+  if (kind === 'canvas') return body.trim() ? { title, body, kind } : { title, kind };
+  return { title, body };
+}

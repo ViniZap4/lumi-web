@@ -93,6 +93,10 @@ export type CanvasParse =
 const SIDES: readonly string[] = ['top', 'right', 'bottom', 'left'];
 const TYPES: readonly string[] = ['text', 'file', 'link', 'group'];
 export const DEFAULT_STYLE: CanvasStyle = { layout: 'compact', indent: '\t', trailingNewline: false };
+/** The empty canvas every client and the server create: multi-line, so
+ *  concurrent first cards land as whole lines (no trailing newline).
+ *  Equal to serializeCanvas of an empty canvas in DEFAULT_STYLE. */
+export const EMPTY_CANVAS = '{\n\t"nodes":[],\n\t"edges":[]\n}';
 
 function isObj(v: unknown): v is Json {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

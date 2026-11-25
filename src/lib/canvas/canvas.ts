@@ -8,7 +8,8 @@
 // ranged edit (commitCanvas). Unknown keys on nodes, edges and the top
 // level are kept, in their original order.
 
-import { diffRange, type TextEdit } from '../text-diff.ts';
+import { diffEdits, type TextEdit } from '../text-diff.ts';
+import { locateJsonError, type JsonErrorAt } from './canvas-recover.ts';
 
 export type CanvasSide = 'top' | 'right' | 'bottom' | 'left';
 export type CanvasEnd = 'none' | 'arrow';
@@ -85,7 +86,9 @@ export interface CanvasStyle {
 
 export type CanvasParse =
   | { ok: true; data: CanvasData; nodes: CanvasNode[]; edges: CanvasEdge[]; issues: string[]; style: CanvasStyle }
-  | { ok: false; error: string };
+  /** `error` is pt-BR; `at` is where the JSON breaks (absent when it is
+   *  valid JSON but not an object). */
+  | { ok: false; error: string; at?: JsonErrorAt };
 
 const SIDES: readonly string[] = ['top', 'right', 'bottom', 'left'];
 const TYPES: readonly string[] = ['text', 'file', 'link', 'group'];
@@ -210,9 +213,11 @@ export function parseCanvas(text: string): CanvasParse {
     try {
       v = JSON.parse(text);
     } catch (e) {
-      return { ok: false, error: `Invalid JSON: ${(e as Error).message}` };
+      const at = locateJsonError(text);
+      if (!at) return { ok: false, error: `JSON inválido: ${(e as Error).message}` };
+      return { ok: false, error: `${at.message} (linha ${at.line}, coluna ${at.column})`, at };
     }
-    if (!isObj(v)) return { ok: false, error: 'A canvas file must hold a JSON object.' };
+    if (!isObj(v)) return { ok: false, error: 'um canvas precisa ser um objeto JSON ({ … })' };
     top = v;
   }
   const issues: string[] = [];
@@ -320,13 +325,17 @@ export function removeItems(nodeIDs: readonly string[], edgeIDs: readonly string
 }
 
 /**
- * Apply `op` to the CURRENT text and return the minimal edit (or [] when
- * nothing changes / the text does not parse). The file keeps its style.
+ * Apply `op` to the CURRENT text and return the minimal edits (or []
+ * when nothing changes / the text does not parse). The file keeps its
+ * style. One edit per changed run of lines (text-diff `diffEdits`): a
+ * multi-node move never rewrites the nodes between the moved ones, so a
+ * concurrent edit of those survives the merge intact (with a single
+ * prefix/suffix edit it was left as an orphan fragment next to the
+ * re-inserted copy: invalid JSON, canvas-merge.test.ts).
  */
 export function commitCanvas(current: string, op: CanvasOp): TextEdit[] {
   const p = parseCanvas(current);
   if (!p.ok) return [];
   const next = serializeCanvas(op(p.data), current.trim() ? p.style : DEFAULT_STYLE);
-  const e = diffRange(current, next);
-  return e ? [e] : [];
+  return diffEdits(current, next);
 }

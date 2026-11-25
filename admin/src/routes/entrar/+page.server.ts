@@ -66,7 +66,12 @@ export const actions: Actions = {
 				for (const k of keys) loginThrottle.fail(k);
 				return fail(401, { ...keep, message: BAD_LOGIN });
 			}
-			const status = error instanceof AdminError && error.kind === 'rateLimited' ? 429 : 502;
+			const status =
+				error instanceof AdminError && error.kind === 'rateLimited'
+					? 429
+					: error instanceof AdminError && error.kind === 'accountLocked'
+						? 423
+						: 502;
 			return fail(status, { ...keep, message: adminErrorMessage(error) });
 		}
 		for (const k of keys) loginThrottle.succeed(k);

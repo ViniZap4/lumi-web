@@ -232,6 +232,7 @@ export type AdminErrorKind =
 	| 'soleAdminVaults'
 	| 'tooLarge'
 	| 'rateLimited'
+	| 'accountLocked'
 	| 'server'
 	| 'offline'
 	| 'invalidResponse'
@@ -255,11 +256,24 @@ export class AdminError extends Error {
 }
 
 function retrySeconds(raw: string | null, body: Record<string, unknown> | null): number | null {
-	const fromBody = body?.retry_after_s;
+	const fromBody = body?.retry_after_s ?? body?.retry_after;
 	if (typeof fromBody === 'number' && Number.isFinite(fromBody)) return clampRetry(fromBody);
 	if (raw === null || raw.trim() === '') return null;
 	const n = Number(raw.trim());
 	return Number.isFinite(n) ? clampRetry(n) : null;
+}
+
+/** A lockout can last longer than the rate-limit clamp (up to a day). */
+function lockSeconds(raw: string | null, body: Record<string, unknown> | null): number | null {
+	const b = body?.retry_after;
+	const n = typeof b === 'number' ? b : raw !== null && raw.trim() !== '' ? Number(raw.trim()) : NaN;
+	return Number.isFinite(n) && n >= 0 ? Math.min(Math.ceil(n), 86400) : null;
+}
+
+/** "Conta bloqueada — tente de novo em N min" (minutes rounded up, at least 1). */
+export function lockedMessage(seconds: number | null | undefined): string {
+	if (seconds == null) return 'Conta bloqueada — tente de novo mais tarde.';
+	return `Conta bloqueada — tente de novo em ${Math.max(1, Math.ceil(seconds / 60))} min`;
 }
 
 function clampRetry(n: number): number {
@@ -290,6 +304,8 @@ export function adminErrorFor(
 	if (status === 429) {
 		return new AdminError('rateLimited', status, { retryAfter: retrySeconds(retryAfter, body) });
 	}
+	// Locked account, right password (POST /session): {"error":"account_locked","retry_after":<s>}.
+	if (status === 423) return new AdminError('accountLocked', status, { retryAfter: lockSeconds(retryAfter, body) });
 	if (status >= 500 && status <= 599) return new AdminError('server', status, { detail });
 	return new AdminError('unexpectedStatus', status, { detail });
 }
@@ -342,6 +358,8 @@ export function adminErrorMessage(
 			const s = error.details.retryAfter;
 			return s ? `Muitas tentativas. Tente de novo em ${s} s.` : 'Muitas tentativas. Aguarde um pouco.';
 		}
+		case 'accountLocked':
+			return lockedMessage(error.details.retryAfter);
 		case 'server':
 			return 'O servidor do lumi teve um erro interno. Veja os logs (component=admin).';
 		case 'offline':

@@ -121,6 +121,18 @@ describe('password login', () => {
 		expect(r.value).toMatchObject({ status: 429, data: { message: 'Muitas tentativas. Tente de novo em 42 s.' } });
 	});
 
+	it('a locked account (423 account_locked, right password) says how long to wait', async () => {
+		fakeApi({ 'POST /session': () => json({ error: 'account_locked', retry_after: 600 }, 423, { 'Retry-After': '600' }) });
+		const r = await run(loginActions.usuario, actionEvent({ path: '/entrar', form: { username: 'ana', password: 'right one 1' }, session: null }));
+		expect(r.value).toMatchObject({ status: 423, data: { message: 'Conta bloqueada — tente de novo em 10 min' } });
+	});
+
+	it('a locked account without a usable wait still says it is locked', async () => {
+		fakeApi({ 'POST /session': () => json({ error: 'account_locked' }, 423) });
+		const r = await run(loginActions.usuario, actionEvent({ path: '/entrar', form: { username: 'ana', password: 'right one 1' }, session: null }));
+		expect(r.value).toMatchObject({ status: 423, data: { message: 'Conta bloqueada — tente de novo mais tarde.' } });
+	});
+
 	it('refuses a login answer that is not an lps_ session', () => {
 		expect(() => decodeLogin(loginResponse({ token: 'lpa_' + 'A'.repeat(43) }))).toThrow();
 		expect(() => decodeLogin(loginResponse({ kind: 'token' }))).toThrow();

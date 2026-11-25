@@ -258,6 +258,15 @@ const server = http.createServer((req, res) => {
     remoteTimers.push(t);
     return json(res, 200, { ok: true });
   }
+  // M3 public reader (/p/:slug): anonymous; records whether any auth leaked.
+  if (p === '/api/public/books/demo' || p.startsWith('/api/public/books/demo/notes/')) {
+    if (req.headers.authorization || req.headers['x-lumi-token'] || req.headers.cookie) stats.publicAuthLeaks = (stats.publicAuthLeaks ?? 0) + 1;
+    const pub = [...notes.values()].filter((n) => n.id === 'showcase' || n.id === 'small');
+    if (p === '/api/public/books/demo') return json(res, 200, { name: 'Demo público', notes: pub.map((n) => ({ id: n.id, path: n.path, title: n.title, kind: n.kind, updated_at: NOW })) });
+    const n = notes.get(decodeURIComponent(p.slice('/api/public/books/demo/notes/'.length)));
+    if (!n || !pub.includes(n)) return json(res, 404, { error: 'not_found' });
+    return json(res, 200, { id: n.id, path: n.path, title: n.title, kind: n.kind, updated_at: NOW, body: n.body });
+  }
   if (p === '/api/info') return json(res, 200, { name: 'mock', version: 'mock', protocol: 2, registration: false });
   if (p === '/api/auth/login') return json(res, 200, { token: 'tok', expires_at: '2099-01-01T00:00:00Z', user });
   if (p === '/api/auth/logout') return json(res, 204);

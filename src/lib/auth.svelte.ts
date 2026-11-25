@@ -212,6 +212,14 @@ function fetchMe(serverUrl: string, token: string): Promise<SessionUser> {
   return createClient(serverUrl, () => token).me();
 }
 
+/** 423 account_locked (the password was right, the account is locked
+ *  after too many wrong ones): whole minutes, rounded up, at least 1. */
+export function lockedMessage(retryAfterSeconds: number | undefined): string {
+  if (retryAfterSeconds == null || !Number.isFinite(retryAfterSeconds)) return 'Conta bloqueada — tente de novo mais tarde.';
+  const min = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return `Conta bloqueada — tente de novo em ${min} min`;
+}
+
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
@@ -227,6 +235,8 @@ export function describeError(err: unknown): string {
         return err.detail ?? 'O formulário tem campos inválidos.';
       case 'rate_limited':
         return 'Muitas tentativas. Aguarde um pouco e tente de novo.';
+      case 'account_locked':
+        return lockedMessage(err.retryAfter);
       case 'token_expired':
       case 'unauthorized':
         return 'Sua sessão expirou. Entre novamente.';

@@ -250,6 +250,7 @@ export interface ServerError {
   message?: string;
   capability?: string; // present on capability_missing
   head?: number; // present on 410 resync_required (changes feed)
+  retry_after?: number; // seconds; present on 423 account_locked (login)
 }
 
 // Thrown by the API client on non-2xx. Code mirrors the server's
@@ -259,6 +260,8 @@ export class ApiError extends Error {
   code: string;
   detail?: string;
   capability?: string;
+  /** Seconds until a retry can succeed (423 account_locked). */
+  retryAfter?: number;
   body: ServerError;
 
   constructor(status: number, body: ServerError) {
@@ -268,6 +271,7 @@ export class ApiError extends Error {
     this.code = body.error;
     this.detail = body.detail ?? body.message;
     this.capability = body.capability;
+    if (typeof body.retry_after === 'number' && Number.isFinite(body.retry_after) && body.retry_after >= 0) this.retryAfter = body.retry_after;
   }
 }
 

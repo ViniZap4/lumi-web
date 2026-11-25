@@ -10,7 +10,7 @@
   // (`acquireSession` / `releaseSession`, lib/editor-boot.ts), so a board
   // and its Source editor in another pane edit one Y.Doc; standalone it
   // owns one. The Yjs and view chunks are lazy-loaded.
-  import { untrack, type Component } from 'svelte';
+  import { untrack, type Component, type Snippet } from 'svelte';
   import type { NoteViewKind } from '../lib/note-kind.ts';
   import { memoryLiveText, type LiveText } from '../lib/live-text.ts';
   import { planSession, startSession, loadEditorSession } from '../lib/editor-boot.ts';
@@ -40,8 +40,10 @@
     /** Shared session pool (panes). Absent → this view owns a session. */
     acquireSession?: () => Promise<EditorSession | string>;
     releaseSession?: (s: EditorSession) => void;
+    /** Pane controls rendered at the end of the view's header bar. */
+    paneControls?: Snippet;
   }
-  let { vaultID, noteID, kind, body, title = '', readonly = false, onsource, onopenfile, onlink, acquireSession, releaseSession }: Props = $props();
+  let { vaultID, noteID, kind, body, title = '', readonly = false, onsource, onopenfile, onlink, acquireSession, releaseSession, paneControls }: Props = $props();
 
   // svelte-ignore state_referenced_locally
   const preview = memoryLiveText(body, false);
@@ -194,9 +196,9 @@
   {/if}
   {#if View}
     {#if kind === 'kanban'}
-      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} />
+      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} {paneControls} />
     {:else}
-      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} memoKey={`${vaultID}/${noteID}`} notes={noteRefs} {loadNote} onopenfile={openFile} />
+      <View {doc} {title} {onsource} {onlink} {status} {mode} onmode={setMode} {paneControls} memoKey={`${vaultID}/${noteID}`} notes={noteRefs} {loadNote} onopenfile={openFile} />
     {/if}
   {:else}
     <div class="placeholder"><span class="spinner" aria-hidden="true"></span>Loading…</div>

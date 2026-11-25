@@ -255,6 +255,29 @@
   onpointerdown={p.onfocus}
   aria-label="Pane: {title}"
 >
+  {#snippet paneBadges()}
+    {#if stale}<span class="pane-stale">offline copy</span>{/if}
+    {#if p.zoomed}<span class="zoom-badge" data-testid="zoom-badge">zoomed</span>{/if}
+  {/snippet}
+  {#snippet paneTail()}
+    {#if p.onzoom}
+      <button class="ui-btn ghost sm icon pane-zoom" class:on={p.zoomed} type="button" onclick={p.onzoom} aria-pressed={!!p.zoomed} aria-label={p.zoomed ? 'Unzoom pane' : 'Zoom pane'} title="{p.zoomed ? 'Unzoom' : 'Zoom'} (⌃w z · :zoom · double-click the header)" data-testid="pane-zoom">
+        {#if p.zoomed}<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
+      </button>
+    {/if}
+    <button class="ui-btn ghost sm icon pane-close" type="button" onclick={p.onclose} aria-label="Close pane" title="Close pane (⌃w q)">
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+  {/snippet}
+  <!-- Structured views (board, canvas) have their own header bar: in a
+       pane it doubles as the pane header (badges, zoom, close at its
+       end), so a split pane keeps ONE header row like the single-pane
+       layout. -->
+  {#snippet paneControls()}
+    {@render paneBadges()}
+    {@render paneTail()}
+  {/snippet}
+  {#if view === MARKDOWN_VIEW || !content}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <header class="pane-bar" ondblclick={(e) => { if (!(e.target as Element).closest('button, input')) p.onzoom?.(); }}>
     {#if editing && session}
@@ -265,8 +288,7 @@
       <span class="pane-kind"><NoteIcon kind={noteIconKind({ path, kind: meta?.kind }, content)} size={12} /></span>
       <span class="pane-name">{title}</span>
     </span>
-    {#if stale}<span class="pane-stale">offline copy</span>{/if}
-    {#if p.zoomed}<span class="zoom-badge" data-testid="zoom-badge">zoomed</span>{/if}
+    {@render paneBadges()}
     <span class="pane-actions">
       {#if views.length > 1 && view === MARKDOWN_VIEW}
         <span class="ui-seg pane-seg" role="group" aria-label="View">
@@ -286,21 +308,16 @@
           <button class="ui-btn sm pane-btn" type="button" onclick={() => void enterEdit()} disabled={!content} title="Edit (e)">Edit</button>
         {/if}
       {/if}
-      {#if p.onzoom}
-        <button class="ui-btn ghost sm icon pane-zoom" class:on={p.zoomed} type="button" onclick={p.onzoom} aria-pressed={!!p.zoomed} aria-label={p.zoomed ? 'Unzoom pane' : 'Zoom pane'} title="{p.zoomed ? 'Unzoom' : 'Zoom'} (⌃w z · :zoom · double-click the header)" data-testid="pane-zoom">
-          {#if p.zoomed}<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
-        </button>
-      {/if}
-      <button class="ui-btn ghost sm icon pane-close" type="button" onclick={p.onclose} aria-label="Close pane" title="Close pane (⌃w q)">
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      </button>
+      {@render paneTail()}
     </span>
   </header>
+  {/if}
 
   {#if editError}<div class="pane-error" role="alert">{editError}</div>{/if}
 
   {#if view !== MARKDOWN_VIEW && content}
-    <div class="pane-view">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="pane-view" ondblclick={(e) => { const t = e.target as Element; if (t.closest('.cv-bar, .kb-bar') && !t.closest('button, input, textarea')) p.onzoom?.(); }}>
       <NoteViewHost
         {view}
         vaultID={p.vaultID}
@@ -314,6 +331,7 @@
         {title}
         onsource={(o) => openSource(o?.line)}
         onlink={(href, e) => p.onlink(href, e, path)}
+        {paneControls}
       />
     </div>
   {:else if editing && session && NoteEditor && session.editable && !(session.emptyAtSync && body !== '')}

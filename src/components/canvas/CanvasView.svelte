@@ -13,7 +13,7 @@
   // minimal ranged edit in the file's own JSON style (canvas.ts
   // commitCanvas). Selection is by node/edge id, so remote edits never
   // drop it.
-  import { tick } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import type { LiveText } from '../../lib/live-text.ts';
   import {
     parseCanvas, commitCanvas, patchNodes, patchEdge, addNode, addEdge, removeItems, newCanvasId, canvasColor,
@@ -53,8 +53,10 @@
     mode?: StructuredMode;
     /** Mode switch (Reading | Edit | Source control, i/e, Esc/q, ⌘E). */
     onmode?: (m: StructuredMode) => void;
+    /** Pane controls at the end of the bar (split panes: one header row). */
+    paneControls?: Snippet;
   }
-  let { doc, title = '', onsource, memoKey, onopenfile, onopenlink, onlink, notes = [], loadNote, status = null, autofocus = true, mode = 'edit', onmode }: Props = $props();
+  let { doc, title = '', onsource, memoKey, onopenfile, onopenlink, onlink, notes = [], loadNote, status = null, autofocus = true, mode = 'edit', onmode, paneControls }: Props = $props();
 
   // ---- text → canvas ------------------------------------------------------------
   let text = $state('');
@@ -959,6 +961,7 @@
           <button type="button" aria-pressed="false" onclick={() => onsource?.()} title="JSON source (e)">Source</button>
         </div>
       {/if}
+      {#if paneControls}<span class="pane-controls">{@render paneControls()}</span>{/if}
     </div>
   </header>
 
@@ -1199,6 +1202,8 @@
     user-select: text;
   }
 
+  /* Pane controls (zoom, close, badges) when this bar is a split pane's header. */
+  .pane-controls { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding-left: 6px; border-left: 1px solid var(--hairline); }
   .cv-bar {
     position: absolute;
     left: 0;

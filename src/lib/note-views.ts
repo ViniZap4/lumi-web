@@ -22,6 +22,7 @@
 // live session (`acquireSession`) as minimal ranged Y.Text changes, so
 // collaborative editing and the CRDT protocol rules hold.
 
+import type { Snippet } from 'svelte';
 import type { Component } from 'svelte';
 import type { EditorSession } from './editor-session.svelte.ts';
 import type { OpenWhere } from './link-open.ts';
@@ -62,6 +63,9 @@ export interface NoteViewProps {
   onsource?: (o?: { line?: number }) => void;
   /** A link clicked inside the view (plain / Cmd / Shift-Cmd click). */
   onlink?: (href: string, e: MouseEvent) => void;
+  /** Pane controls (zoom, close, badges) for the view's own header bar:
+   *  in a split the view's bar IS the pane header (one row). */
+  paneControls?: Snippet;
 }
 
 export interface NoteViewSpec {

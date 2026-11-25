@@ -8,7 +8,7 @@
   // transaction (kanban-edits.ts). Focus follows the focused card's key,
   // so a remote edit elsewhere never moves the cursor.
   import { flip } from 'svelte/animate';
-  import { tick } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import type { LiveText } from '../../lib/live-text.ts';
   import { parseKanban, type KanbanBoard, type KanbanCard, type KanbanLane } from '../../lib/kanban/kanban.ts';
   import { planKanban, type KanbanOp } from '../../lib/kanban/kanban-edits.ts';
@@ -31,8 +31,10 @@
     mode?: StructuredMode;
     /** Mode switch (Reading | Edit | Source control, i/e, Esc/q, ⌘E). */
     onmode?: (m: StructuredMode) => void;
+    /** Pane controls at the end of the bar (split panes: one header row). */
+    paneControls?: Snippet;
   }
-  let { doc, title = '', onsource, onlink, status = null, autofocus = true, mode = 'edit', onmode }: Props = $props();
+  let { doc, title = '', onsource, onlink, status = null, autofocus = true, mode = 'edit', onmode, paneControls }: Props = $props();
 
   // ---- text → board ---------------------------------------------------------
   let text = $state('');
@@ -669,6 +671,7 @@
           <button type="button" aria-pressed="false" onclick={() => onsource?.()} title="Markdown source (e)">Source</button>
         </div>
       {/if}
+      {#if paneControls}<span class="pane-controls">{@render paneControls()}</span>{/if}
     </div>
   </header>
 
@@ -822,6 +825,8 @@
   .kb-status { padding: 1px 6px; border-radius: 999px; background: var(--tint-hover); }
   .kb-pending { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-primary); }
   .kb-notice { font-size: var(--text-xs); color: var(--color-warning); }
+  /* Pane controls (zoom, close, badges) when this bar is a split pane's header. */
+  .pane-controls { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding-left: 6px; border-left: 1px solid var(--hairline); }
   .kb-actions { display: flex; align-items: center; gap: 6px; }
   .kb-filter {
     height: 24px;

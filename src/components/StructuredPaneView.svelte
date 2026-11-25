@@ -22,6 +22,7 @@
     body={p.body}
     title={p.title ?? ''}
     onsource={p.onsource}
+    paneControls={p.paneControls}
     onopenfile={openFile}
     onlink={p.onlink}
     acquireSession={p.acquireSession}

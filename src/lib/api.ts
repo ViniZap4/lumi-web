@@ -37,6 +37,7 @@ import {
   type InviteCreated,
   type Federation,
   type FederationInvite,
+  type PublishPolicy,
   type FederationJoinResponse,
   type FederatedMember,
   type ServerInfo,
@@ -132,6 +133,11 @@ export interface CreateFederationInviteInput {
   server_url_hint?: string;
   // ISO 8601. Omitted = server default / no expiry.
   expires_at?: string;
+  /** "mirror": a read-only one-way mirror (default: two-way replica). */
+  mode?: 'replica' | 'mirror';
+  /** M3: publish consent (mirror invites only; needs vault.manage too). */
+  publish?: PublishPolicy;
+  sever_policy?: 'keep' | 'purge';
 }
 
 export interface JoinFederationInput {
@@ -161,6 +167,8 @@ export interface UpdateNoteInput {
   body?: string;
   path?: string;
   tags?: string[];
+  /** M3: set/remove `publish: true` in the frontmatter (not canvases). */
+  publish?: boolean;
 }
 
 const enc = encodeURIComponent;

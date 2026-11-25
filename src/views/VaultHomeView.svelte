@@ -53,6 +53,7 @@
   import { installPaneClickFocus } from '../lib/pane-click.ts';
   import { dropSide, noteIdOfKey, NOTE_DRAG_TYPE, type DropTarget } from '../lib/pane-drop.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
+  import { canTogglePublish, isPublished } from '../lib/publish.ts';
   import ToastStack from '../components/ToastStack.svelte';
   import ModePill from '../components/ModePill.svelte';
   import { effectiveSettings, appliedMappings, LEADER_TOKEN } from '../lib/vim-config.ts';
@@ -1863,6 +1864,37 @@
 
   /** Viewer / mirror book: "Edit" opens a read-only live view. */
   const readOnlyBook = $derived(!!vaults.selectedID && books.isReadOnly(vaults.selectedID));
+  // M3: per-note "Publicar" (frontmatter publish: true; markdown only,
+  // needs note.edit). Offered on books that are a federation home, or
+  // when the note is already published.
+  const published = $derived(isPublished(notes.content?.frontmatter));
+  const showPublish = $derived(
+    !!notes.content &&
+      canTogglePublish({ path: notes.content.path, kind: notes.content.kind, canEdit: !readOnlyBook }) &&
+      (published || (!!vaults.selectedID && books.info[vaults.selectedID]?.federation?.role === 'home')),
+  );
+  let publishBusy = $state(false);
+  async function togglePublish(): Promise<void> {
+    const v = vaults.selectedID;
+    const c = notes.content;
+    if (!v || !c || publishBusy) return;
+    const next = !published;
+    publishBusy = true;
+    try {
+      await api.updateNote(v, c.id, { publish: next });
+      if (notes.content?.id === c.id) {
+        const fm = { ...notes.content.frontmatter };
+        if (next) fm.publish = true;
+        else delete fm.publish;
+        notes.content = { ...notes.content, frontmatter: fm };
+      }
+      toasts.push(next ? 'Nota marcada para publicação.' : 'Nota despublicada.', 'info');
+    } catch (e) {
+      toasts.push(e instanceof ApiError && e.status === 403 ? 'Sem permissão para publicar esta nota.' : `Não foi possível mudar a publicação: ${(e as Error).message}`, 'error');
+    } finally {
+      publishBusy = false;
+    }
+  }
   /** Cursor line for the Source editor's mount (canvas "Abrir Source"). */
   let sourceLine = $state<number | null>(null);
   async function enterEdit(): Promise<void> {
@@ -2707,6 +2739,10 @@
                     {#if zoomed === primaryLeaf}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 2.5l4 4M13.5 13.5l-4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{:else}<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5l-4.5 4.5M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{/if}
                   </button>
                 {/if}
+                {#if showPublish}
+                  <button class="ui-btn ghost sm nb-publish" class:on={published} type="button" aria-pressed={published} disabled={publishBusy || structuralOffline} onclick={() => void togglePublish()} data-testid="note-publish"
+                    title={published ? 'Publicada: o espelho pode mostrá-la a qualquer pessoa. Clique para despublicar.' : 'Publicar: o espelho com publicação poderá mostrá-la a qualquer pessoa, sem login.'}>{published ? 'Publicada' : 'Publicar'}</button>
+                {/if}
                 <button class="ui-btn sm nb-edit" onclick={() => void enterEdit()} disabled={editorLoading} type="button" title={readOnlyBook ? 'Ver ao vivo, somente leitura (e)' : `Edit (e · ${keyLabel('⌘E')})`}>{editorLoading ? 'Loading…' : readOnlyBook ? 'Ao vivo' : 'Edit'}</button>
                 <button class="ui-btn ghost sm icon danger-hover" onclick={beginDelete} type="button" aria-label="Delete note"
                   disabled={structuralOffline} title={structuralOffline ? OFFLINE_HINT : 'Delete (d)'}>
@@ -3395,4 +3431,5 @@
     transition: background var(--dur-tap) var(--ease), color var(--dur-fade) var(--ease);
   }
   .sb-help:hover { color: var(--color-text); background: var(--tint-hover); }
+  .nb-publish.on { color: var(--color-primary); border-color: color-mix(in srgb, var(--color-primary) 45%, transparent); }
 </style>

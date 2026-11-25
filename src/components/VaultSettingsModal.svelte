@@ -21,6 +21,8 @@
     type UpdateRoleInput,
   } from '../lib/vaultmembers.svelte.ts';
   import { federation, validateMemberKey } from '../lib/federation.svelte.ts';
+  import { federationRowView } from '../lib/federation-view.ts';
+  import { publishConsentText, publishScope } from '../lib/publish.ts';
   import {
     ApiError,
     type Federation,
@@ -49,6 +51,7 @@
   let canManageRoles = $derived(hasCapability(myCaps, 'roles.manage'));
   let canExport = $derived(hasCapability(myCaps, 'vault.export'));
   let canFederate = $derived(hasCapability(myCaps, 'vault.federate'));
+  let canManageVault = $derived(hasCapability(myCaps, 'vault.manage'));
 
   // ---- ownership (v3 Phase O) ----
   //
@@ -107,6 +110,13 @@
   let fedInviteExpiresAt = $state('');
   let fedInviteSubmitting = $state(false);
   let fedInviteError = $state<string | null>(null);
+  // M2/M3: a one-way mirror, optionally allowed to publish publicly.
+  let fedInviteMode = $state<'replica' | 'mirror'>('replica');
+  let fedPublish = $state(false);
+  let fedPublishScope = $state<'flagged' | 'all' | 'folder'>('flagged');
+  let fedPublishFolder = $state('');
+  let fedPublishIndex = $state(false);
+  let fedPublishConsent = $state(false);
   // The raw token — held in memory only, shown ONCE after creation.
   let lastFedInviteToken = $state<string | null>(null);
   let fedTokenCopiedAt = $state(0);
@@ -473,6 +483,12 @@
     fedInviteError = null;
     fedInviteServerHint = '';
     fedInviteExpiresAt = '';
+    fedInviteMode = 'replica';
+    fedPublish = false;
+    fedPublishScope = 'flagged';
+    fedPublishFolder = '';
+    fedPublishIndex = false;
+    fedPublishConsent = false;
     // Don't drop lastFedInviteToken — the operator may still need to
     // copy it; it's gone for good once the modal closes.
   }
@@ -489,12 +505,24 @@
       }
       expIso = new Date(fedInviteExpiresAt).toISOString();
     }
+    const publishing = fedInviteMode === 'mirror' && fedPublish;
+    const scope = publishing ? publishScope(fedPublishScope, fedPublishFolder) : null;
+    if (publishing && scope == null) {
+      fedInviteError = 'Informe a pasta a publicar.';
+      return;
+    }
+    if (publishing && !fedPublishConsent) {
+      fedInviteError = 'Confirme que entende que as notas ficarão públicas.';
+      return;
+    }
     fedInviteSubmitting = true;
     fedInviteError = null;
     try {
       const created = await federation.createInvite({
         server_url_hint: fedInviteServerHint.trim() || undefined,
         expires_at: expIso,
+        ...(fedInviteMode === 'mirror' ? { mode: 'mirror' as const } : {}),
+        ...(publishing && scope ? { publish: { allowed: true, scope, index: fedPublishIndex } } : {}),
       });
       lastFedInviteToken = created.token;
       closeFedInviteForm();
@@ -1144,18 +1172,20 @@
           {:else}
             <ul class="rows">
               {#each federation.federations as f (f.id)}
-                <li tabindex="-1" class="row" class:inactive={f.status !== 'active'}>
+                {@const fv = federationRowView(f)}
+                <li tabindex="-1" class="row" class:inactive={f.status !== 'active'} data-testid="federation-row">
                   <div class="row-main">
                     <div class="name">
-                      <span class="badge fed-{f.role}">{f.role}</span>
-                      <span class="badge state-{f.status}">{f.status}</span>
+                      <span class="badge fed-{f.role}">{fv.role}</span>
+                      <span class="badge">{fv.mode}</span>
+                      <span class="badge state-{f.status}">{fv.status}</span>
                       {f.peer_url}
                     </div>
+                    {#each fv.lines as line (line)}<div class="meta">{line}</div>{/each}
                     <div class="meta">
-                      {#if f.jurisdiction}jurisdiction {f.jurisdiction} · {/if}
-                      {#if f.role === 'home'}replication lag: acked seq {f.last_acked_seq} · {/if}
-                      linked {fmtDate(f.created_at)}{#if f.revoked_at} · revoked {fmtDate(f.revoked_at)}{/if}
+                      ligado em {fmtDate(f.created_at)}{#if f.revoked_at} · revogado em {fmtDate(f.revoked_at)}{/if}
                     </div>
+                    {#if fv.warning}<div class="error" role="alert" data-testid="erasure-lagging">{fv.warning}</div>{/if}
                   </div>
                   <div class="row-actions">
                     {#if canFederate && f.status === 'active'}
@@ -1216,6 +1246,30 @@
                     disabled={fedInviteSubmitting}
                   />
                 </label>
+                <fieldset class="fed-mode">
+                  <legend>Tipo de vínculo</legend>
+                  <label class="inline"><input type="radio" name="fed-mode" value="replica" bind:group={fedInviteMode} disabled={fedInviteSubmitting} /> Réplica (os dois servidores editam)</label>
+                  <label class="inline"><input type="radio" name="fed-mode" value="mirror" bind:group={fedInviteMode} disabled={fedInviteSubmitting} data-testid="fed-mode-mirror" /> Espelho somente leitura (só esta origem envia)</label>
+                </fieldset>
+                {#if fedInviteMode === 'mirror'}
+                  <fieldset class="fed-publish" data-testid="fed-publish">
+                    <legend>Publicação</legend>
+                    {#if !canManageVault}
+                      <p class="hint">Publicar exige também a permissão <code>vault.manage</code>.</p>
+                    {:else}
+                      <label class="inline"><input type="checkbox" bind:checked={fedPublish} disabled={fedInviteSubmitting} data-testid="fed-publish-allow" /> Permitir que o espelho publique notas para leitura pública</label>
+                      {#if fedPublish}
+                        <label class="inline"><input type="radio" name="fed-scope" value="flagged" bind:group={fedPublishScope} /> Só as notas marcadas com “Publicar”</label>
+                        <label class="inline"><input type="radio" name="fed-scope" value="all" bind:group={fedPublishScope} /> Todas as notas do livro</label>
+                        <label class="inline"><input type="radio" name="fed-scope" value="folder" bind:group={fedPublishScope} /> Uma pasta:
+                          <input class="input sm" type="text" placeholder="blog/" bind:value={fedPublishFolder} disabled={fedPublishScope !== 'folder'} aria-label="Pasta a publicar" /></label>
+                        <label class="inline"><input type="checkbox" bind:checked={fedPublishIndex} data-testid="fed-publish-index" /> Permitir indexação por buscadores (Google etc.)</label>
+                        <p class="consent-text" data-testid="fed-publish-consent-text">{publishConsentText(publishScope(fedPublishScope, fedPublishFolder) ?? 'flagged', fedPublishIndex)}</p>
+                        <label class="inline consent"><input type="checkbox" bind:checked={fedPublishConsent} data-testid="fed-publish-consent" /> Entendo e autorizo a publicação</label>
+                      {/if}
+                    {/if}
+                  </fieldset>
+                {/if}
                 <label>
                   Expires at (optional)
                   <input
@@ -1855,4 +1909,8 @@
     color: var(--color-text-dim, var(--color-muted));
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
+  .fed-mode, .fed-publish { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 8px 12px; display: grid; gap: 6px; margin: 0; }
+  .fed-mode legend, .fed-publish legend { font-size: var(--text-xs); color: var(--color-text-dim); padding: 0 4px; }
+  label.inline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .consent-text { margin: 4px 0 0; padding: 8px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--color-warning) 12%, transparent); font-size: var(--text-xs); line-height: 1.5; }
 </style>

@@ -132,6 +132,9 @@ export interface InviteCreated {
 // exactly once by the UI at creation time; the list rows still carry
 // it because it doubles as the row identifier for DELETE.
 export interface FederationInvite {
+  mode?: 'replica' | 'mirror';
+  publish?: PublishPolicy | null;
+  sever_policy?: string;
   token: string;
   vault_id: string;
   server_url_hint?: string | null;
@@ -158,6 +161,34 @@ export interface Federation {
   jurisdiction?: string | null;
   created_at: string;
   revoked_at?: string | null;
+  // ---- one-way mirrors (M2/M3, docs/SPEC-ESPELHO-SELADO.md) ----
+  /** "replica" (two-way) or "mirror" (read-only, home only sends). */
+  mode?: 'replica' | 'mirror';
+  sever_policy?: 'keep' | 'purge' | string;
+  publish?: PublishPolicy | null;
+  paused?: boolean;
+  last_contact_at?: string | null;
+  // Home side of a mirror.
+  mirror_acked_seq?: number;
+  head_seq?: number;
+  lag_seq?: number;
+  pending_deletes?: number;
+  oldest_pending_delete_at?: string | null;
+  /** Oldest pending delete is older than the erasure SLA (24 h). */
+  erasure_lagging?: boolean;
+  // Mirror side.
+  home_seq?: number;
+  promoted?: boolean;
+  last_integrity_at?: string | null;
+}
+
+/** M3: whether a mirror may serve notes publicly (/p/:slug). */
+export interface PublishPolicy {
+  allowed: boolean;
+  /** "flagged" (frontmatter publish: true), "all" or "folder:<prefix>". */
+  scope: string;
+  /** Let search engines index the pages (default off: noindex). */
+  index?: boolean;
 }
 
 // POST /api/federation/join response — this server became a follower

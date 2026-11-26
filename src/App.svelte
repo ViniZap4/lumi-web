@@ -6,18 +6,14 @@
   import { uiState } from './lib/uistate.svelte.ts';
   import { boot } from './lib/session.ts';
 
-  import LoginView from './views/LoginView.svelte';
-  import VaultsView from './views/VaultsView.svelte';
   import VaultHomeView from './views/VaultHomeView.svelte';
-  import ThemePickerModal from './components/ThemePickerModal.svelte';
-  // Settings is a full view loaded on first open (keeps the boot chunk lean).
-  type SettingsViewT = typeof import('./views/SettingsView.svelte').default;
-  let SettingsView = $state<SettingsViewT | null>(null);
-  $effect(() => {
-    if (uiState.settings && !SettingsView) {
-      void import('./views/SettingsView.svelte').then((m) => (SettingsView = m.default));
-    }
-  });
+  import { lazyComponent } from './views/vault/lazy.svelte.ts';
+  // Only the book shell is in the boot chunk: sign-in, the books list,
+  // settings and the theme picker load when first shown.
+  const LoginView = lazyComponent(() => import('./views/LoginView.svelte'));
+  const VaultsView = lazyComponent(() => import('./views/VaultsView.svelte'));
+  const SettingsView = lazyComponent(() => import('./views/SettingsView.svelte'));
+  const ThemePickerModal = lazyComponent(() => import('./components/ThemePickerModal.svelte'));
   import OfflineRescueBanner from './components/OfflineRescueBanner.svelte';
   import { editorSettings } from './lib/editor-settings.svelte.ts';
   import { setMotionLevel } from './lib/motion.ts';
@@ -83,17 +79,17 @@
   }
 </script>
 
-{#if auth.initialising}
+{#if auth.initialising || (route === 'login' && !LoginView.current) || (route === 'vaults' && !VaultsView.current)}
   <div class="boot"><span class="ui-wordmark"><span class="mark"></span>lumi</span></div>
-{:else if route === 'login'}
-  <LoginView />
-{:else if route === 'vaults'}
-  <VaultsView />
+{:else if route === 'login' && LoginView.current}
+  <LoginView.current />
+{:else if route === 'vaults' && VaultsView.current}
+  <VaultsView.current />
 {:else}
   <VaultHomeView />
 {/if}
 
-{#if uiState.accountModal && route !== 'login'}
+{#if uiState.accountModal && route !== 'login' && LoginView.current}
   <div class="modal-overlay" role="presentation" onclick={() => uiState.closeAccountModal()} onkeydown={onAccountModalKey}>
     <div
       class="modal-panel"
@@ -104,7 +100,7 @@
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (e.key === 'Escape') uiState.closeAccountModal(); e.stopPropagation(); }}
     >
-      <LoginView
+      <LoginView.current
         embedded
         presetServer={uiState.accountModal.server}
         presetUsername={uiState.accountModal.username}
@@ -115,12 +111,12 @@
   </div>
 {/if}
 
-{#if uiState.settings && route !== 'login' && SettingsView}
-  <SettingsView />
+{#if uiState.settings && route !== 'login' && SettingsView.current}
+  <SettingsView.current />
 {/if}
 
-{#if uiState.themePickerOpen}
-  <ThemePickerModal />
+{#if uiState.themePickerOpen && ThemePickerModal.current}
+  <ThemePickerModal.current />
 {/if}
 
 <OfflineRescueBanner />

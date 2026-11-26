@@ -22,7 +22,9 @@
 import { ApiClient, createClient, type RestOutcome } from './api.ts';
 import { ApiError, type SessionUser } from './types.ts';
 import { accountKey } from './books-model.ts';
-import { normalizeServerUrl } from './serverurl.ts';
+
+/** The pre-wave-2 session key (SPEC-LIVROS §2.5); only ever deleted now. */
+export const LEGACY_SESSION_KEY = 'lumi.v2.session';
 import {
   getDeviceKey,
   openDurableStore,
@@ -31,7 +33,6 @@ import {
   type DurableStore,
   type Sealed,
 } from './storage.ts';
-import { LEGACY_DEFAULT_SERVER, LEGACY_SESSION_KEY, decryptLegacySession } from './legacy-session.ts';
 
 export interface AccountMeta {
   server_url: string;
@@ -72,7 +73,6 @@ export interface AccountRegistryDeps {
   durable?: DurableStore;
   tab?: Storage | null;
   legacy?: Storage | null;
-  defaultServerUrl?: string | null;
   fetch?: typeof fetch;
   now?: () => Date;
 }
@@ -92,8 +92,7 @@ export class AccountRegistry {
   private tokens = new Map<string, string>();
   private clients = new Map<string, ApiClient>();
   private hooks: AccountHooks = {};
-  private deps: Required<Omit<AccountRegistryDeps, 'fetch' | 'defaultServerUrl'>> &
-    Pick<AccountRegistryDeps, 'fetch' | 'defaultServerUrl'>;
+  private deps: Required<Omit<AccountRegistryDeps, 'fetch'>> & Pick<AccountRegistryDeps, 'fetch'>;
   private keyP: Promise<CryptoKey> | null = null;
 
   constructor(deps: AccountRegistryDeps = {}) {
@@ -101,7 +100,6 @@ export class AccountRegistry {
       durable: deps.durable ?? openDurableStore(),
       tab: deps.tab === undefined ? safeStorage('sessionStorage') : deps.tab,
       legacy: deps.legacy === undefined ? safeStorage('localStorage') : deps.legacy,
-      defaultServerUrl: deps.defaultServerUrl,
       fetch: deps.fetch,
       now: deps.now ?? (() => new Date()),
     };
@@ -123,7 +121,7 @@ export class AccountRegistry {
 
   // ---- lifecycle -------------------------------------------------------------
 
-  /** Load remembered + tab accounts and migrate the legacy session. */
+  /** Load remembered + tab accounts and purge the legacy session. */
   async init(): Promise<void> {
     const loaded: Account[] = [];
     const add = async (s: StoredAccount) => {
@@ -151,42 +149,17 @@ export class AccountRegistry {
       await add(s);
     }
     this.list = loaded;
-    await this.migrateLegacy();
+    this.purgeLegacy();
     this.ready = true;
   }
 
-  /** §2.5: `lumi.v2.session` → account (remembered: the user had a
-   *  persistent session before). The old entry is removed once the new
-   *  one is written, or when it can't be decrypted at all. */
-  private async migrateLegacy(): Promise<void> {
-    const ls = this.deps.legacy;
-    let raw: string | null = null;
+  /** §2.5: the pre-wave-2 single session (`lumi.v2.session`, sealed
+   *  with a key derived from constants in the source) is no longer
+   *  migrated: its removal date passed. Any leftover blob is deleted
+   *  unread, so an obfuscated token never lingers on the device. */
+  private purgeLegacy(): void {
     try {
-      raw = ls?.getItem(LEGACY_SESSION_KEY) ?? null;
-    } catch {
-      return;
-    }
-    if (!raw) return;
-    try {
-      const sess = await decryptLegacySession(raw);
-      const serverUrl = normalizeServerUrl(this.deps.defaultServerUrl || LEGACY_DEFAULT_SERVER);
-      await this.add(
-        {
-          server_url: serverUrl,
-          username: sess.user.username,
-          user_id: sess.user.id,
-          display_name: sess.user.display_name,
-          added_at: this.deps.now().toISOString(),
-          expires_at: sess.expires_at ?? null,
-          remember: true,
-        },
-        sess.token,
-      );
-    } catch (e) {
-      console.warn('accounts: legacy session not migrated', e);
-    }
-    try {
-      ls?.removeItem(LEGACY_SESSION_KEY);
+      this.deps.legacy?.removeItem(LEGACY_SESSION_KEY);
     } catch {
       // ignore
     }
@@ -370,6 +343,4 @@ export class AccountRegistry {
   }
 }
 
-export const accounts = new AccountRegistry({
-  defaultServerUrl: (import.meta.env.VITE_LUMI_SERVER_URL as string | undefined) || null,
-});
+export const accounts = new AccountRegistry();

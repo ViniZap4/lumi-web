@@ -1,4 +1,4 @@
-// App boot: load accounts (+ migrate the legacy single session), load
+// App boot: load accounts (+ purge the legacy single session), load
 // the books registry, install API routing, start one feed per account
 // and refresh every account's vault list in the background.
 

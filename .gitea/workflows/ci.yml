@@ -48,6 +48,12 @@ jobs:
       - name: npm ci
         run: npm ci --no-audit
 
+      - name: npm audit (bloqueante)
+        # Bloqueia em vulnerabilidade high/critical em qualquer dependência, inclusive as de
+        # desenvolvimento (o servidor de dev do Vite também roda na máquina de quem desenvolve).
+        # Correção: npm audit fix --package-lock-only (sem --force); se pedir major, decida no PR.
+        run: npm audit --audit-level=high
+
       - name: svelte-check
         run: |
           set -eu
@@ -65,14 +71,14 @@ jobs:
           VITE_LUMI_SERVER_URL: https://lumi-api.example.ts.net
         run: npm run build
 
-      - name: npm audit (informativo)
-        continue-on-error: true
-        run: npm audit --omit=dev --audit-level=high
-
       # Painel de administração (admin/): app SvelteKit separado, com lockfile próprio.
       - name: admin — npm ci
         working-directory: admin
         run: npm ci --no-audit
+
+      - name: admin — npm audit (bloqueante)
+        working-directory: admin
+        run: npm audit --audit-level=high
 
       - name: admin — check
         working-directory: admin

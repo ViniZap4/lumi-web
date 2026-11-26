@@ -471,7 +471,13 @@ class ImageWidget extends WidgetType {
     img.referrerPolicy = 'no-referrer';
     return img;
   }
-  ignoreEvent() { return !!this.src && isRemoteURL(this.src); }
+  // Events on the click-to-load placeholder (or its fallback link) are
+  // the widget's own; a loaded image behaves like a local one (a click
+  // moves the cursor there).
+  ignoreEvent(e: Event) {
+    const t = e.target as Element | null;
+    return !!t?.closest?.('.md-remote-img');
+  }
 }
 
 class TableWidget extends WidgetType {

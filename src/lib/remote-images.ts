@@ -78,11 +78,16 @@ export async function loadRemoteImage(el: HTMLElement, fetchImpl: typeof fetch =
   if (!isRemoteURL(src) || el.dataset.state === 'loading') return 'skip';
   el.dataset.state = 'loading';
   el.setAttribute('aria-busy', 'true');
-  let url: URL;
+  let url: URL | null = null;
   try {
     url = new URL(src, window.location.href);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'skip';
   } catch {
+    // handled below
+  }
+  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) {
+    // Not loadable: leave the placeholder usable, not stuck "busy".
+    delete el.dataset.state;
+    el.removeAttribute('aria-busy');
     return 'skip';
   }
   try {

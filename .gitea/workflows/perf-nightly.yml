@@ -52,7 +52,7 @@ jobs:
       # versão fixa, com o chromium headless shell correspondente.
       - name: playwright
         run: |
-          npm i --no-save --no-audit playwright-core@1.54.2
+          npm i --no-save --no-audit playwright-core@1.55.1
           npx --no-install playwright-core install --with-deps chromium-headless-shell
 
       - name: e2e perf (avisa, não bloqueia)

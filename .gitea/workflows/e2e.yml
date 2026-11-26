@@ -27,7 +27,7 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.54.2-noble
+      image: mcr.microsoft.com/playwright:v1.55.1-noble
     timeout-minutes: 20
     env:
       GITEA_URL: ${{ vars.LAN_GIT_URL }}

@@ -8,7 +8,7 @@
 // that crashes does (exit 1), so a broken harness is visible.
 //
 //   npm run build
-//   npm i --no-save playwright-core@1.54.2 && npx playwright-core install chromium-headless-shell
+//   npm i --no-save playwright-core@1.55.1 && npx playwright-core install chromium-headless-shell
 //   node scripts/perf/nightly.mjs [--out perf-nightly] [--port 4777]
 
 import { spawn, spawnSync } from 'node:child_process';

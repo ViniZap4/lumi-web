@@ -204,6 +204,9 @@
     color: var(--color-text);
     animation: ui-fade 120ms var(--ease);
   }
+  @media (max-width: 720px) {
+    .settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  }
 
   /* Everything inside, including the section components. */
   .settings :global {
@@ -421,7 +424,6 @@
     .acct-name { font-weight: 550; }
 
     @media (max-width: 720px) {
-      .settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
       .nav { border-right: none; border-bottom: 1px solid var(--hairline); padding-bottom: var(--sp-2); }
       .sections { flex-direction: row; overflow-x: auto; gap: var(--sp-1); }
       .sec { flex: none; }

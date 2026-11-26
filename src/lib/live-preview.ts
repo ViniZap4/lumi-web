@@ -33,6 +33,7 @@ import { renderMarkdown } from './markdown.ts';
 import { isMermaidLang } from './mermaid-detect.ts';
 import { createMermaidBlock, paintMermaid, setMermaidSource } from './mermaid.ts';
 import { modName } from './platform.ts';
+import { isRemoteURL, remoteImageElement, loadRemoteImage } from './remote-images.ts';
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -66,7 +67,9 @@ export function noteHref(raw: string): string | null {
 /** In-app handler for note links (Ctrl/Cmd+click in Live Preview). */
 export const noteLinkHandler = Facet.define<(href: string, e?: MouseEvent) => void>();
 
-/** Image source safe for an <img> (CSP img-src: self data: blob: https:). */
+/** Image source safe to show. Remote (http/https) sources are returned
+ *  too, but the widget shows them as click-to-load (CSP img-src is
+ *  self data: blob:, WP0.6). */
 export function safeImageSrc(raw: string): string | null {
   const s = raw.trim().replace(/^<|>$/g, '');
   if (!s) return null;
@@ -442,6 +445,24 @@ class ImageWidget extends WidgetType {
       s.textContent = `[image: ${this.alt || 'blocked source'}]`;
       return s;
     }
+    if (isRemoteURL(this.src)) {
+      // Click-to-load (lib/remote-images.ts): never fetched on render.
+      // The placeholder sits in a wrapper so loading swaps a node inside
+      // the widget (CodeMirror ignores that), not the widget's own root.
+      const wrap = document.createElement('span');
+      wrap.className = 'cm-lp-remote-image';
+      const holder = remoteImageElement(document, this.src, this.alt);
+      wrap.append(holder);
+      const load = (e: Event) => {
+        if (!holder.isConnected) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void loadRemoteImage(holder);
+      };
+      holder.addEventListener('mousedown', load);
+      holder.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') load(e); });
+      return wrap;
+    }
     const img = document.createElement('img');
     img.className = 'cm-lp-image';
     img.src = this.src;
@@ -450,7 +471,7 @@ class ImageWidget extends WidgetType {
     img.referrerPolicy = 'no-referrer';
     return img;
   }
-  ignoreEvent() { return false; }
+  ignoreEvent() { return !!this.src && isRemoteURL(this.src); }
 }
 
 class TableWidget extends WidgetType {

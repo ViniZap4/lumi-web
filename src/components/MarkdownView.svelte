@@ -9,6 +9,7 @@
   import { tick, untrack } from 'svelte';
   import type { MdBlock } from '../lib/markdown.ts';
   import { enhanceRendered, codeTextFor } from '../lib/rendered-enhance.ts';
+  import { loadRemoteImage } from '../lib/remote-images.ts';
   import { motionAllowed } from '../lib/motion.ts';
   import { riseBlocks } from '../lib/motion-actions.ts';
 
@@ -76,6 +77,13 @@
       wrap.setAttribute('aria-pressed', String(on));
       return;
     }
+    const remote = t.closest<HTMLElement>('.md-remote-img[data-remote-src]');
+    if (remote) {
+      // Click-to-load remote image (lib/remote-images.ts, WP0.6).
+      e.preventDefault();
+      void loadRemoteImage(remote);
+      return;
+    }
     const box = t.closest<HTMLInputElement>('input[data-task]');
     if (box) {
       if (!ontoggletask) {
@@ -111,6 +119,10 @@
     if (e.key === 'Enter' && t?.matches?.('input[data-task]')) {
       e.preventDefault();
       t.click();
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && t?.matches?.('.md-remote-img[data-remote-src]')) {
+      e.preventDefault();
+      void loadRemoteImage(t);
     }
   }
 

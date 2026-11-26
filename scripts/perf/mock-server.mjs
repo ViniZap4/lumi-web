@@ -170,6 +170,11 @@ addNote('showcase', 'Showcase.md', [
 ].join('\n'));
 for (let i = 0; i < 14; i++) addNote(`log-${i}`, `journal/2026-11-${String(10 + i).padStart(2, '0')}.md`, `# Day ${i + 1}\n\n## Morning\n\nWalked the ${i % 2 ? 'north' : 'south'} bank.\n\n## Afternoon\n\n- logged depth\n- **cleaned** the gauge\n\n${'A quiet paragraph about the water and the light. '.repeat(6)}\n`);
 addNote('invalid', 'invalid.canvas', '{"nodes":[{"id":"x","type":"text","text":"broken",');
+// Extra notes for a check script: MOCK_EXTRA_NOTES=<file.json> holding
+// [{ "id", "path", "body" }] (scripts/perf/no-remote-requests.mjs).
+if (process.env.MOCK_EXTRA_NOTES) {
+  for (const n of JSON.parse(fs.readFileSync(process.env.MOCK_EXTRA_NOTES, 'utf8'))) addNote(n.id, n.path, n.body);
+}
 
 // ---- Yjs docs ------------------------------------------------------------------------------
 const docs = new Map(); // id -> {doc, awareness, conns:Set}

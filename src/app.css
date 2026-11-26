@@ -943,6 +943,29 @@ details.md-callout[open] > summary::after { transform: rotate(90deg); }
 .md-body p > img:only-child { display: block; margin: 1.3em auto; }
 .md-figure { display: block; margin: 1.5em 0; text-align: center; }
 .md-figure img { display: block; margin: 0 auto; box-shadow: 0 0 0 1px var(--md-rule); }
+/* Remote image, click-to-load (lib/remote-images.ts, WP0.6). Also used
+   by Live Preview (.cm-lp-remote-image). */
+.md-remote-img {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15em 0.6em;
+  max-width: 100%;
+  padding: 0.55em 0.85em;
+  border-radius: var(--radius);
+  border: 1px dashed var(--md-rule);
+  background: var(--md-code-bg);
+  color: var(--md-dim);
+  font-size: 0.88em;
+  line-height: 1.4;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.md-remote-img:hover, .md-remote-img:focus-visible { color: var(--md-link); border-color: currentColor; outline: none; }
+.md-remote-img-host { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.9em; opacity: 0.8; }
+.md-remote-img-alt { font-style: italic; }
+.md-remote-img[aria-busy="true"] { cursor: progress; opacity: 0.7; }
+a.md-remote-img-link { cursor: pointer; text-decoration: none; }
 .md-caption { display: block; margin-top: 0.6em; font-size: 0.84em; line-height: 1.45; color: var(--md-dim); }
 .md-body iframe { width: 100%; aspect-ratio: 16 / 9; height: auto; border: 0; border-radius: var(--radius); background: var(--md-code-bg); box-shadow: 0 0 0 1px var(--md-rule); }
 .md-body video { box-shadow: 0 0 0 1px var(--md-rule); background: var(--md-code-bg); }

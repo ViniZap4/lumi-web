@@ -18,6 +18,7 @@ import { Marked, Renderer, type Tokens, type Token } from 'marked';
 import DOMPurify from 'dompurify';
 import { isMermaidLang, mermaidKind } from './mermaid-detect.ts';
 import { tagHue } from './prose-palette.ts';
+import { isRemoteURL, remoteImageHTML, remoteImageElement } from './remote-images.ts';
 
 // Allow-list of iframe sources for media embeds. Anything else gets
 // scrubbed during sanitisation.
@@ -60,6 +61,34 @@ DOMPurify.addHook('uponSanitizeElement', (node, data) => {
   el.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
   el.setAttribute('loading', 'lazy');
   el.setAttribute('referrerpolicy', 'no-referrer');
+});
+
+// Nothing in rendered note content may make the browser fetch another
+// host by itself (WP0.6): a raw HTML <img> pointing elsewhere becomes
+// the click-to-load placeholder, and other auto-loading URL attributes
+// (video poster, audio/source src, srcset) pointing elsewhere are
+// dropped. The allow-listed embed iframes above are the one exception.
+const SRCSET_REMOTE = /(?:^|,)\s*(?:https?:)?\/\//i;
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  const el = node as Element;
+  if (typeof el.getAttribute !== 'function') return;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'iframe') return;
+  if (tag === 'img') {
+    const src = el.getAttribute('src') ?? '';
+    const srcset = el.getAttribute('srcset') ?? '';
+    if (isRemoteURL(src) || SRCSET_REMOTE.test(srcset)) {
+      const url = isRemoteURL(src) ? src : (srcset.trim().split(/\s+/)[0] ?? '');
+      el.replaceWith(remoteImageElement(el.ownerDocument, url, el.getAttribute('alt') ?? ''));
+    }
+    return;
+  }
+  for (const attr of ['src', 'poster', 'background', 'data']) {
+    const v = el.getAttribute(attr);
+    if (v && isRemoteURL(v)) el.removeAttribute(attr);
+  }
+  const set = el.getAttribute('srcset');
+  if (set && SRCSET_REMOTE.test(set)) el.removeAttribute('srcset');
 });
 
 /** Tags and attributes note HTML may never carry. Shared with the
@@ -278,6 +307,7 @@ markedInstance.use({
       return `<div class="md-table">${base.table(token)}</div>\n`;
     },
     image({ href, title, text }: Tokens.Image) {
+      if (isRemoteURL(href)) return remoteImageHTML(href, text ?? '');
       const alt = escapeHTML(text ?? '');
       const t = title ? escapeHTML(title) : '';
       const img = `<img src="${escapeHTML(href)}" alt="${alt}"${t ? ` title="${t}"` : ''} loading="lazy" decoding="async">`;

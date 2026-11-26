@@ -80,7 +80,7 @@
   import { EditorState, Compartment, Prec, type Extension } from '@codemirror/state';
   import { defaultKeymap } from '@codemirror/commands';
   import { searchKeymap } from '@codemirror/search';
-  import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+  import { lumiMarkdown, loadHTMLSupport, hasHTML } from '../lib/markdown-lang.ts';
   import { languages } from '@codemirror/language-data';
   import { syntaxHighlighting, indentUnit, codeFolding, foldGutter } from '@codemirror/language';
   import { yankFlash } from '../lib/yank-flash.ts';
@@ -312,6 +312,17 @@
   const fontC = new Compartment();
   const activeLineC = new Compartment();
   const keysC = new Compartment();
+  const langC = new Compartment();
+  // HTML highlighting inside markdown loads only once a note holds HTML
+  // (lib/markdown-lang.ts keeps lang-html out of the editor chunk).
+  let htmlWanted = false;
+  function wantHTML(): void {
+    if (htmlWanted) return;
+    htmlWanted = true;
+    void loadHTMLSupport().then((h) => {
+      if (view) view.dispatch({ effects: langC.reconfigure(lumiMarkdown(languages, h)) });
+    }, () => {});
+  }
 
   function baseKeys(s: EffectiveSettings): Extension {
     const insert = s.vim ? vimInsertKeys((v) => !!(getCM(v)?.state.vim as { insertMode?: boolean } | undefined)?.insertMode) : [];
@@ -478,7 +489,17 @@
       // Fold placeholders for vim zc/zo/za (headings, lists, code).
       codeFolding({ placeholderText: '⋯' }),
       keysC.of(baseKeys(s)),
-      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      langC.of(lumiMarkdown(languages)),
+      EditorView.updateListener.of((u) => {
+        if (htmlWanted || !u.docChanged) return;
+        // The edited line, so a tag typed one key at a time counts too.
+        u.changes.iterChangedRanges((_fa, _ta, fb, tb) => {
+          if (htmlWanted) return;
+          const a = u.state.doc.lineAt(fb);
+          const b = u.state.doc.lineAt(tb);
+          if (hasHTML(u.state.doc.sliceString(a.from, Math.min(b.to, a.from + 8192)))) wantHTML();
+        });
+      }),
       previewC.of(previewExt(s)),
       // Read-only live view (viewer, mirror): Y → editor only; no undo.
       ...(session.readOnly
@@ -509,6 +530,7 @@
       parent: container,
     });
     handlers.set(view, exHandlers);
+    if (hasHTML(initialDoc)) wantHTML();
     // After the view (so after y-codemirror's observer): remote deltas
     // are already in the doc when the flash maps them.
     stopRemoteFlash = observeRemoteEdits(session.ytext, view, () => remoteActivity.bump(session.vaultID));

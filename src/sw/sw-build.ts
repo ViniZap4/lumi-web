@@ -33,8 +33,8 @@ export interface ChunkInfo {
 }
 
 /**
- * Files reachable only through a lazy root (today: the mermaid
- * renderer and its per-diagram chunks). They are not precached, which
+ * Files reachable only through a lazy root (the mermaid renderer and
+ * its per-diagram chunks, and the code-block grammars). They are not precached, which
  * keeps installs and deploys light; the worker caches them at runtime
  * instead (see the template). A chunk an entry reaches without going
  * through a root (shared code) stays in the precache.
@@ -60,6 +60,19 @@ export function lazyOnlyFiles(chunks: readonly ChunkInfo[], isRoot: (c: ChunkInf
   if (!roots.length) return new Set();
   const eager = walk(chunks.filter((c) => c.isEntry && !isRoot(c)), true);
   return new Set([...walk(roots, false)].filter((f) => !eager.has(f)));
+}
+
+/**
+ * A module that only ever loads on demand as a code-block grammar
+ * (through @codemirror/language-data, or the editor's lazy HTML
+ * support): the 90-odd legacy modes and the lang-* packages, never
+ * lang-markdown (the editor's own language). A chunk made only of such
+ * modules is a lazy root like mermaid: runtime-cached, not precached.
+ */
+export function isLazyGrammarModule(id: string): boolean {
+  const p = id.replace(/\\/g, '/');
+  return /\/node_modules\/@codemirror\/(?:legacy-modes|lang-(?!markdown\/)[\w-]+)\//.test(p)
+    || /\/node_modules\/@lezer\/(?!common\/|lr\/|highlight\/|markdown\/)[\w-]+\//.test(p);
 }
 
 /** Build version: FNV-1a over the precache list and index.html (hashed

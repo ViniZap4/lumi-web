@@ -12,15 +12,23 @@
 // The builder (`computeLivePreview`) is split from the CodeMirror
 // glue so tests can assert "given doc + cursor, which ranges hide".
 //
-// Block widgets (tables) must come from a StateField — a ViewPlugin
-// may not replace line breaks — so the whole thing is one StateField.
-// It only rebuilds when the doc, the syntax tree, or the set of
-// "active" lines changes; plain cursor moves within a line are free.
+// Work per transaction is O(changed lines + viewport), never
+// O(document) (docs/phase3, WP0.5):
+// - Block widgets (tables, mermaid diagrams) must come from a
+//   StateField, because a ViewPlugin may not replace line breaks. That
+//   field holds ONLY the block widgets. It maps them through each
+//   change and rescans just the changed lines, falling back to a
+//   block-only scan (which skips every inline node) when the block
+//   structure did not realign after the edit.
+// - Everything else (inline marks, hidden syntax, line classes,
+//   checkboxes, bullets, images) comes from a ViewPlugin that builds
+//   decorations for the viewport only.
+// Plain cursor moves within a line are free for both layers.
 
-import { EditorState, StateField, Facet, Range, type Extension, type Text, type ChangeSpec } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
+import { EditorState, StateField, Facet, Range, type Extension, type Text, type ChangeSpec, type ChangeSet, type Transaction } from '@codemirror/state';
+import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import type { SyntaxNode } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import { renderMarkdown } from './markdown.ts';
 import { isMermaidLang } from './mermaid-detect.ts';
 import { createMermaidBlock, paintMermaid, setMermaidSource } from './mermaid.ts';
@@ -118,24 +126,78 @@ export type LPSpec =
 const HEADING_RE = /^ATXHeading([1-6])$/;
 const SETEXT_RE = /^SetextHeading([12])$/;
 
+/** Any line of [from, to] is in `active`. */
+function anyRevealed(doc: Text, active: Set<number>, from: number, to: number): boolean {
+  if (active.size === 0) return false;
+  const a = doc.lineAt(from).number;
+  const b = doc.lineAt(Math.max(from, to)).number;
+  if (b - a + 1 > active.size) {
+    for (const n of active) if (n >= a && n <= b) return true;
+    return false;
+  }
+  for (let n = a; n <= b; n++) if (active.has(n)) return true;
+  return false;
+}
+
+const FENCE_CLOSE_RE = /^\s*(`{3,}|~{3,})\s*$/;
+
+/** The block widget a Table / FencedCode node draws as, or null when it
+ *  stays source (revealed, unclosed, not mermaid). Shared by both
+ *  layers so they always agree on which ranges a block widget owns. */
+function blockWidgetFor(state: EditorState, active: Set<number>, node: SyntaxNode): LPSpec | null {
+  const doc = state.doc;
+  if (node.name === 'Table') {
+    const first = doc.lineAt(node.from);
+    const last = doc.lineAt(node.to);
+    if (anyRevealed(doc, active, first.from, last.to)) return null;
+    return {
+      type: 'widget', from: first.from, to: last.to, block: true,
+      widget: { kind: 'table', source: doc.sliceString(first.from, last.to) },
+    };
+  }
+  if (node.name === 'FencedCode') {
+    // A closed ```mermaid fence draws as a diagram unless the cursor
+    // is inside it (then the source is edited as code).
+    const info = node.getChild('CodeInfo');
+    if (!info || !isMermaidLang(doc.sliceString(info.from, info.to))) return null;
+    const first = doc.lineAt(node.from);
+    const last = doc.lineAt(node.to);
+    if (last.number <= first.number + 1 || !FENCE_CLOSE_RE.test(last.text)) return null;
+    if (anyRevealed(doc, active, first.from, last.to)) return null;
+    const source = doc.sliceString(doc.line(first.number + 1).from, doc.line(last.number - 1).to);
+    return { type: 'widget', from: first.from, to: last.to, block: true, widget: { kind: 'mermaid', source } };
+  }
+  return null;
+}
+
+export interface LPOptions {
+  /** Only build specs for [from, to] (line-aligned by the builder). */
+  from?: number;
+  to?: number;
+  /** 'all' (default) includes block widgets; 'inline' leaves them out
+   *  (the block layer draws them) and still skips the source they own. */
+  layer?: 'all' | 'inline';
+}
+
 /**
  * Walk the markdown tree and decide what to hide/style. `active` is the
  * set of revealed line numbers (defaults to the selection's lines).
+ * With `from`/`to`, only nodes overlapping that range are visited and
+ * only specs inside it are returned.
  */
-export function computeLivePreview(state: EditorState, active: Set<number> = activeLines(state)): LPSpec[] {
+export function computeLivePreview(state: EditorState, active: Set<number> = activeLines(state), opts: LPOptions = {}): LPSpec[] {
   const doc = state.doc;
   const specs: LPSpec[] = [];
+  const ranged = opts.from !== undefined || opts.to !== undefined;
+  const rFrom = ranged ? doc.lineAt(Math.max(0, Math.min(opts.from ?? 0, doc.length))).from : 0;
+  const rTo = ranged ? doc.lineAt(Math.max(0, Math.min(opts.to ?? doc.length, doc.length))).to : doc.length;
+  const withBlocks = opts.layer !== 'inline';
   const lineOf = (pos: number) => doc.lineAt(pos).number;
   /** Any line in [from, to] is revealed. */
-  const revealed = (from: number, to: number): boolean => {
-    const a = lineOf(from);
-    const b = lineOf(Math.max(from, to));
-    for (let n = a; n <= b; n++) if (active.has(n)) return true;
-    return false;
-  };
+  const revealed = (from: number, to: number): boolean => anyRevealed(doc, active, from, to);
   const eachLine = (from: number, to: number, cls: string) => {
-    const a = lineOf(from);
-    const b = lineOf(Math.max(from, to));
+    const a = lineOf(Math.max(from, rFrom));
+    const b = lineOf(Math.min(Math.max(from, to), rTo));
     for (let n = a; n <= b; n++) specs.push({ type: 'line', pos: doc.line(n).from, cls });
   };
   /** Hide a mark, swallowing one following space (`# `, `> `). */
@@ -150,6 +212,8 @@ export function computeLivePreview(state: EditorState, active: Set<number> = act
   };
 
   syntaxTree(state).iterate({
+    from: rFrom,
+    to: rTo,
     enter: (ref) => {
       const name = ref.name;
       const node = ref.node;
@@ -267,15 +331,9 @@ export function computeLivePreview(state: EditorState, active: Set<number> = act
         case 'FencedCode':
         case 'CodeBlock': {
           if (name === 'FencedCode') {
-            // A closed ```mermaid fence draws as a diagram unless the
-            // cursor is inside it (then the source is edited as code).
-            const info = node.getChild('CodeInfo');
-            const first = doc.lineAt(from);
-            const last = doc.lineAt(to);
-            if (info && isMermaidLang(doc.sliceString(info.from, info.to)) && last.number > first.number + 1
-              && /^\s*(`{3,}|~{3,})\s*$/.test(last.text) && !revealed(first.from, last.to)) {
-              const source = doc.sliceString(doc.line(first.number + 1).from, doc.line(last.number - 1).to);
-              specs.push({ type: 'widget', from: first.from, to: last.to, block: true, widget: { kind: 'mermaid', source } });
+            const block = blockWidgetFor(state, active, node);
+            if (block) {
+              if (withBlocks) specs.push(block);
               return false;
             }
           }
@@ -283,22 +341,18 @@ export function computeLivePreview(state: EditorState, active: Set<number> = act
           if (name === 'FencedCode') {
             specs.push({ type: 'line', pos: doc.lineAt(from).from, cls: 'cm-lp-fence cm-lp-fence-open' });
             const last = doc.lineAt(to);
-            if (last.number !== lineOf(from) && /^\s*(`{3,}|~{3,})\s*$/.test(last.text)) {
+            if (last.number !== lineOf(from) && FENCE_CLOSE_RE.test(last.text)) {
               specs.push({ type: 'line', pos: last.from, cls: 'cm-lp-fence cm-lp-fence-close' });
             }
           }
           return false;
         }
         case 'Table': {
-          const first = doc.lineAt(from);
-          const last = doc.lineAt(to);
-          if (revealed(first.from, last.to)) {
-            eachLine(from, to, 'cm-lp-table-src');
+          const block = blockWidgetFor(state, active, node);
+          if (block) {
+            if (withBlocks) specs.push(block);
           } else {
-            specs.push({
-              type: 'widget', from: first.from, to: last.to, block: true,
-              widget: { kind: 'table', source: doc.sliceString(first.from, last.to) },
-            });
+            eachLine(from, to, 'cm-lp-table-src');
           }
           return false;
         }
@@ -310,7 +364,35 @@ export function computeLivePreview(state: EditorState, active: Set<number> = act
       return;
     },
   });
-  return specs;
+  if (!ranged) return specs;
+  // Nodes that overlap the range can start or end outside it.
+  return specs.filter((sp) => (sp.type === 'line' ? sp.pos >= rFrom && sp.pos <= rTo : sp.to >= rFrom && sp.from <= rTo));
+}
+
+/** Container nodes the block scan descends into (tables and fences
+ *  can sit inside quotes and list items). Everything else is a leaf
+ *  block whose inline content never holds a block widget. */
+const BLOCK_CONTAINERS = new Set(['Document', 'Blockquote', 'BulletList', 'OrderedList', 'ListItem']);
+
+/** Block widgets (tables, mermaid) overlapping [from, to]. Visits only
+ *  block-level nodes, so a whole-document scan costs O(blocks), not
+ *  O(inline nodes). */
+export function scanBlockWidgets(state: EditorState, active: Set<number>, from = 0, to = state.doc.length): LPSpec[] {
+  const out: LPSpec[] = [];
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter: (ref) => {
+      const name = ref.name;
+      if (name === 'Table' || name === 'FencedCode') {
+        const w = blockWidgetFor(state, active, ref.node);
+        if (w) out.push(w);
+        return false;
+      }
+      return BLOCK_CONTAINERS.has(name) || ref.type.isAnonymous ? undefined : false;
+    },
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,12 +519,33 @@ function widgetFor(w: LPWidget): WidgetType {
 
 const hideDeco = Decoration.replace({});
 
-export function specsToDecorations(specs: LPSpec[]): DecorationSet {
+/**
+ * Specs -> DecorationSet. With `doc` (the ViewPlugin layer), replacing
+ * ranges never cross a line break, which plugins may not do: a hide is
+ * split per line and an inline widget spanning lines (an image whose
+ * alt text wraps) is left as source.
+ */
+export function specsToDecorations(specs: LPSpec[], doc?: Text): DecorationSet {
+  return Decoration.set(specsToRanges(specs, doc), true);
+}
+
+function specsToRanges(specs: LPSpec[], doc?: Text): Range<Decoration>[] {
   const ranges: Range<Decoration>[] = [];
   for (const s of specs) {
     switch (s.type) {
       case 'hide':
-        if (s.to > s.from) ranges.push(hideDeco.range(s.from, s.to));
+        if (s.to <= s.from) break;
+        if (doc) {
+          let from = s.from;
+          while (from < s.to) {
+            const line = doc.lineAt(from);
+            const to = Math.min(line.to, s.to);
+            if (to > from) ranges.push(hideDeco.range(from, to));
+            from = line.to + 1;
+          }
+        } else {
+          ranges.push(hideDeco.range(s.from, s.to));
+        }
         break;
       case 'mark': {
         if (s.to <= s.from) break;
@@ -460,43 +563,344 @@ export function specsToDecorations(specs: LPSpec[]): DecorationSet {
         ranges.push(Decoration.line({ class: s.cls }).range(s.pos));
         break;
       case 'widget':
+        if (doc && !s.block && doc.lineAt(s.from).to < s.to) break;
         ranges.push(Decoration.replace({ widget: widgetFor(s.widget), block: !!s.block }).range(s.from, s.to));
         break;
     }
   }
-  return Decoration.set(ranges, true);
+  return ranges;
 }
 
 // ---------------------------------------------------------------------------
 // Extension
 
-interface LPState {
-  key: string;
-  decos: DecorationSet;
-}
-
 function linesKey(s: Set<number>): string {
   return Array.from(s).sort((a, b) => a - b).join(',');
 }
 
-function build(state: EditorState): LPState {
-  const active = activeLines(state);
-  return { key: linesKey(active), decos: specsToDecorations(computeLivePreview(state, active)) };
+/** [from, to] of each active line, so they can be mapped later. */
+function lineSpans(state: EditorState, active: Set<number>): number[] {
+  const out: number[] = [];
+  for (const n of active) {
+    if (n > state.doc.lines) continue;
+    const l = state.doc.line(n);
+    out.push(l.from, l.to);
+  }
+  return out;
 }
 
-const livePreviewField = StateField.define<LPState>({
-  create: build,
-  update(value, tr) {
-    const treeChanged = syntaxTree(tr.startState) !== syntaxTree(tr.state);
-    if (tr.docChanged || treeChanged) return build(tr.state);
-    if (tr.selection) {
-      const key = linesKey(activeLines(tr.state));
-      if (key !== value.key) return build(tr.state);
+/** The parse covers the whole document (an unfinished parse has holes
+ *  that a later tree-only transaction fills in). */
+function treeComplete(state: EditorState, tree: Tree): boolean {
+  return tree.length >= state.doc.length;
+}
+
+interface ChainNode { name: string; from: number; to: number; head: number }
+
+/** Chain of block nodes holding (or, between blocks, following) `pos`:
+ *  every enclosing container down to the leaf block. */
+function blockChain(tree: Tree, pos: number): ChainNode[] {
+  const chain: ChainNode[] = [];
+  let node: SyntaxNode = tree.topNode;
+  for (;;) {
+    // Block children only: a list or quote mark is not part of the
+    // block structure.
+    let c = node.childAfter(pos);
+    while (c && !c.type.is('Block')) c = c.nextSibling;
+    if (!c) return chain;
+    // `head`: where a container's own decorations end (a list item's
+    // hidden mark runs up to its task marker).
+    chain.push({ name: c.name, from: c.from, to: c.to, head: c.name === 'ListItem' ? (c.getChild('Task')?.from ?? c.from) : c.from });
+    if (!BLOCK_CONTAINERS.has(c.name)) return chain;
+    // A container that starts after `pos` is followed down to its first
+    // leaf, so a split of its first child is seen too.
+    node = c;
+    pos = Math.max(pos, c.from);
+  }
+}
+
+/** After `changes`, the block structure realigned with the old tree
+ *  right after every changed range: the same containers and leaf block,
+ *  at the mapped positions. When it did not (an opened or closed fence,
+ *  an HTML block), the change reaches past the edited lines. */
+function blocksRealigned(changes: ChangeSet, oldTree: Tree, newTree: Tree): boolean {
+  let ok = true;
+  /** Same chain at old `pa` / new `pb`: names, mapped ends, and mapped
+   *  starts for blocks that start after the change. */
+  const sameChain = (pa: number, pb: number, tA: number): ChainNode[] | null => {
+    const a = blockChain(oldTree, pa);
+    const b = blockChain(newTree, pb);
+    if (a.length !== b.length) return null;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].name !== b[i].name || changes.mapPos(a[i].to, 1) !== b[i].to) return null;
+      if (a[i].from >= tA && changes.mapPos(a[i].from, 1) !== b[i].from) return null;
     }
-    return value;
+    return a;
+  };
+  changes.iterChangedRanges((_fA, tA, _fB, tB) => {
+    if (!ok) return;
+    // At the end of the change, and at the block right after the
+    // edited leaf (children re-parented under the same container).
+    const a = sameChain(tA, tB, tA);
+    if (!a) { ok = false; return; }
+    const leaf = a[a.length - 1];
+    if (leaf && leaf.from <= tA && leaf.to >= tA && leaf.to + 1 <= oldTree.length) {
+      if (!sameChain(leaf.to + 1, changes.mapPos(leaf.to + 1, 1), tA)) ok = false;
+    }
+  });
+  return ok;
+}
+
+/** Ranges whose decorations an edit at `pos` can change beyond its own
+ *  line: the leaf blocks touching `pos` (one ending exactly at `pos`
+ *  included: an edit at the end of a line can change the block it
+ *  ends, such as a setext underline), and the head of every enclosing
+ *  container (a list item's bullet or checkbox depends on its
+ *  children). */
+function contextAt(tree: Tree, pos: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (const p of pos > 0 ? [pos, pos - 1] : [pos]) {
+    const chain = blockChain(tree, p);
+    for (let i = 0; i < chain.length; i++) {
+      const n = chain[i];
+      if (n.from > pos || n.to < pos) continue;
+      if (i === chain.length - 1 && !BLOCK_CONTAINERS.has(n.name)) out.push([n.from, n.to]);
+      else out.push([n.from, n.head]);
+    }
+  }
+  return out;
+}
+
+function blockBefore(parent: SyntaxNode, pos: number): SyntaxNode | null {
+  let c = parent.childBefore(pos);
+  while (c && !c.type.is('Block')) c = c.prevSibling;
+  return c;
+}
+
+function prevBlock(node: SyntaxNode): SyntaxNode | null {
+  let c = node.prevSibling;
+  while (c && !c.type.is('Block')) c = c.prevSibling;
+  return c;
+}
+
+/**
+ * Where the old and new trees agree again before a change at old `fA`
+ * / new `fB`: the end of the nearest block, walking back from the
+ * change, that is identical (name and extent) in both trees. Blocks
+ * before the edited line can change shape, because a leaf block's parse
+ * looks at the line after it (a setext underline, a table delimiter row
+ * typed into the next list item), so that whole stretch is dirty. A
+ * container holding the change in both trees is searched first, then
+ * the walk goes on before it. Returns 0 when nothing agrees (the whole
+ * prefix is dirty) and null when the walk budget runs out.
+ */
+function agreeBefore(oldTop: SyntaxNode, newTop: SyntaxNode, fA: number, fB: number): number | null {
+  const budget = { left: 64 };
+  const walk = (o: SyntaxNode, n: SyntaxNode): number | null | undefined => {
+    let oc = blockBefore(o, fA);
+    let nc = blockBefore(n, fB);
+    if (oc && nc && oc.from === nc.from && oc.name === nc.name && BLOCK_CONTAINERS.has(oc.name) && oc.to >= fA && nc.to >= fB) {
+      const inner = walk(oc, nc);
+      if (inner !== undefined) return inner;
+      oc = prevBlock(oc);
+      nc = prevBlock(nc);
+    }
+    while (oc && nc) {
+      if (budget.left-- <= 0) return null;
+      if (oc.name === nc.name && oc.from === nc.from && oc.to === nc.to && oc.to < fA) return oc.to;
+      const of = oc.from;
+      const nf = nc.from;
+      if (of >= nf) oc = prevBlock(oc);
+      if (nf >= of) nc = prevBlock(nc);
+    }
+    return undefined; // nothing agrees in this container
+  };
+  const r = walk(oldTop, newTop);
+  return r === undefined ? 0 : r;
+}
+
+/** One decoration layer, kept in sync incrementally. */
+export interface Layer {
+  decos: DecorationSet;
+  key: string;
+  /** Active line spans (flat [from, to, ...]) for this layer's state. */
+  spans: number[];
+}
+
+interface LayerStep {
+  startState: EditorState;
+  state: EditorState;
+  changes: ChangeSet;
+  docChanged: boolean;
+  selectionSet: boolean;
+}
+
+export interface LayerKind {
+  /** Decorations for [from, to] of `state`. */
+  build(state: EditorState, active: Set<number>, from: number, to: number): Range<Decoration>[];
+  /** The extent the layer covers (the doc, or the viewport). */
+  extent(state: EditorState): [number, number];
+}
+
+export function freshLayer(kind: LayerKind, state: EditorState, active: Set<number> = activeLines(state), key = linesKey(active)): Layer {
+  const [from, to] = kind.extent(state);
+  return { decos: Decoration.set(kind.build(state, active, from, to), true), key, spans: lineSpans(state, active) };
+}
+
+/**
+ * Next state of a layer. The decorations are mapped through the change
+ * and only the dirty lines are rebuilt: the changed lines (grown to
+ * their blocks, and back to where the old and new trees agree) plus the
+ * lines that gained or lost the cursor. The whole extent is rebuilt only when asked (`force`), when
+ * the parse is unfinished or progressed on its own, or when the block
+ * structure did not realign after the edit.
+ */
+export function stepLayer(kind: LayerKind, value: Layer, u: LayerStep, force = false): Layer {
+  const oldTree = syntaxTree(u.startState);
+  const newTree = syntaxTree(u.state);
+  const treeChanged = oldTree !== newTree;
+  if (!force && !u.docChanged && !treeChanged && !u.selectionSet) return value;
+  const state = u.state;
+  const active = activeLines(state);
+  const key = linesKey(active);
+  if (!force && !u.docChanged && !treeChanged && key === value.key) return value;
+  if (force || (!u.docChanged && treeChanged)) return freshLayer(kind, state, active, key);
+  if (u.docChanged && (!treeComplete(u.startState, oldTree) || !treeComplete(state, newTree)
+    || !blocksRealigned(u.changes, oldTree, newTree))) return freshLayer(kind, state, active, key);
+
+  const doc = state.doc;
+  const dirty: number[] = [];
+  // A dirty range grows to its leaf blocks and container heads: inline
+  // nodes (a two-line emphasis) live inside one leaf block, and a table
+  // can grow or appear around the edited line.
+  const grow = (tree: Tree, from: number, to: number, map: ((p: number, assoc: number) => number) | null) => {
+    dirty.push(map ? map(from, -1) : from, map ? map(to, 1) : to);
+    for (const leaf of [...contextAt(tree, from), ...contextAt(tree, to)]) {
+      dirty.push(map ? map(leaf[0], -1) : leaf[0], map ? map(leaf[1], 1) : leaf[1]);
+    }
+  };
+  const map = (p: number, assoc: number) => u.changes.mapPos(p, assoc);
+  if (u.docChanged) {
+    let lost = false;
+    u.changes.iterChangedRanges((fA, tA, fB, tB) => {
+      grow(newTree, fB, tB, null);
+      grow(oldTree, fA, tA, map);
+      const agree = lost ? null : agreeBefore(oldTree.topNode, newTree.topNode, fA, fB);
+      if (agree === null) lost = true;
+      else if (agree < fB) dirty.push(agree, fB);
+    });
+    if (lost) return freshLayer(kind, state, active, key);
+  }
+  // Line numbers shift under a doc change, so an equal key does not
+  // mean the same lines: then compare by the mapped spans.
+  if (key !== value.key || u.docChanged) {
+    // Old spans are positions in the start state's doc.
+    for (let i = 0; i < value.spans.length; i += 2) grow(oldTree, value.spans[i], value.spans[i + 1], map);
+    const now = lineSpans(state, active);
+    for (let i = 0; i < now.length; i += 2) grow(newTree, now[i], now[i + 1], null);
+  }
+  // Line-align, clip to the (line-aligned) extent and merge.
+  const [eFrom, eTo] = kind.extent(state);
+  const eA = doc.lineAt(eFrom).from;
+  const eB = doc.lineAt(eTo).to;
+  const ranges: [number, number][] = [];
+  for (let i = 0; i < dirty.length; i += 2) {
+    const f = Math.max(doc.lineAt(Math.min(dirty[i], doc.length)).from, eA);
+    const t = Math.min(doc.lineAt(Math.min(dirty[i + 1], doc.length)).to, eB);
+    if (f <= t) ranges.push([f, t]);
+  }
+  ranges.sort((x, y) => x[0] - y[0]);
+  let decos = u.docChanged ? value.decos.map(u.changes) : value.decos;
+  if (u.docChanged) {
+    // Keep the invariant "the layer is a fresh build of its extent":
+    // drop what the change pushed outside it (cheap, since nothing else
+    // lives out there).
+    if (eA > 0) decos = decos.update({ filterFrom: 0, filterTo: eA, filter: (_f, t) => t >= eA });
+    if (eB < doc.length) decos = decos.update({ filterFrom: eB, filterTo: doc.length, filter: (f) => f <= eB });
+  }
+  let i = 0;
+  while (i < ranges.length) {
+    let [a, b] = ranges[i++];
+    while (i < ranges.length && ranges[i][0] <= b + 1) b = Math.max(b, ranges[i++][1]);
+    const add = kind.build(state, active, a, b);
+    decos = decos.update({
+      filterFrom: a,
+      filterTo: b,
+      filter: (f, t) => t < a || f > b,
+      add: add.length ? add : undefined,
+      sort: true,
+    });
+  }
+  return { decos, key, spans: u.selectionSet || u.docChanged ? lineSpans(state, active) : value.spans };
+}
+
+export const blockKind: LayerKind = {
+  build: (state, active, from, to) => specsToRanges(scanBlockWidgets(state, active, from, to)),
+  extent: (state) => [0, state.doc.length],
+};
+
+/** Inline layer over a fixed [from, to] window (tests and benchmark;
+ *  the editor uses the live viewport). */
+export function inlineKindFor(window: () => [number, number]): LayerKind {
+  return {
+    build: (state, active, from, to) => {
+      // Pieces of a split multi-line hide can fall outside the range.
+      const lo = state.doc.lineAt(from).from;
+      const hi = state.doc.lineAt(to).to;
+      return specsToRanges(computeLivePreview(state, active, { from, to, layer: 'inline' }), state.doc)
+        .filter((r) => r.to >= lo && r.from <= hi);
+    },
+    extent: (state) => {
+      const [f, t] = window();
+      return [Math.min(f, state.doc.length), Math.min(t, state.doc.length)];
+    },
+  };
+}
+
+function stepOf(tr: Transaction): LayerStep {
+  return { startState: tr.startState, state: tr.state, changes: tr.changes, docChanged: tr.docChanged, selectionSet: !!tr.selection };
+}
+
+/** `stepLayer` for one transaction. */
+export function stepLayerTr(kind: LayerKind, value: Layer, tr: Transaction, force = false): Layer {
+  return stepLayer(kind, value, stepOf(tr), force);
+}
+
+/** Block widgets (tables, mermaid). They replace line breaks, so they
+ *  must come from state, not from a plugin. */
+const blockLayerField = StateField.define<Layer>({
+  create(state) {
+    const active = activeLines(state);
+    return freshLayer(blockKind, state, active, linesKey(active));
   },
+  update: (value, tr) => stepLayerTr(blockKind, value, tr),
   provide: (f) => EditorView.decorations.from(f, (v) => v.decos),
 });
+
+function inlineKind(view: EditorView): LayerKind {
+  return inlineKindFor(() => [view.viewport.from, view.viewport.to]);
+}
+
+/** Inline marks, hidden syntax, line classes and inline widgets, built
+ *  for the viewport only and kept in sync change by change. */
+const inlineLayer = ViewPlugin.fromClass(
+  class {
+    layer: Layer;
+    kind: LayerKind;
+    constructor(view: EditorView) {
+      this.kind = inlineKind(view);
+      const active = activeLines(view.state);
+      this.layer = freshLayer(this.kind, view.state, active, linesKey(active));
+    }
+    update(u: ViewUpdate) {
+      // A new viewport rebuilds it whole (O(viewport)); edits inside the
+      // same viewport only touch their lines.
+      this.layer = stepLayer(this.kind, this.layer, u, u.viewportChanged);
+    }
+    get decos() { return this.layer.decos; }
+  },
+  { decorations: (p) => p.decos },
+);
 
 const linkClicks = EditorView.domEventHandlers({
   mousedown(e, view) {
@@ -524,7 +928,8 @@ const linkClicks = EditorView.domEventHandlers({
 // Styles live in app.css (`.cm-lp-*`), next to `.md-body`, so Live
 // Preview and the reader share one set of typographic tokens.
 
-/** The Live Preview extension (field + click handling + styles). */
+/** The Live Preview extension (block field + viewport plugin + click
+ *  handling; styles live in app.css). */
 export function livePreview(): Extension {
-  return [livePreviewField, linkClicks];
+  return [blockLayerField, inlineLayer, linkClicks];
 }

@@ -17,9 +17,12 @@
 // the better of the two runs counts, so one noisy sample cannot block.
 //
 // When the baseline was recorded on another kind of machine (different
-// CPU model or architecture), the calibration only roughly transfers:
-// the gate then blocks only above 1.25 and warns between 1.10 and 1.25.
-// Record the baseline on the CI runner to get the strict 10 % gate.
+// CPU model or architecture), the calibration only roughly transfers
+// (a pure-JS workload does not scale like jsdom/CodeMirror work across
+// architectures; measured swings reach ~50 % on a loaded machine): the
+// gate then blocks only above 2x, which still catches algorithmic
+// cliffs, and warns from 1.10. Record the baseline on the CI runner to
+// get the strict 10 % gate.
 //
 //   node scripts/perf/bench-gate.mjs              # run + gate
 //   node scripts/perf/bench-gate.mjs --update     # run + rewrite the baseline
@@ -41,7 +44,7 @@ const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
 const BASELINE = path.resolve(opt('--baseline') ?? path.join(root, 'src/bench/baseline.json'));
 const CALIBRATION = 'src/bench/calibration.bench.ts > calibration > calibration workload';
 const STRICT = 0.10;
-const LOOSE = 0.25;
+const LOOSE = 1.0; // cross-machine: block only at > 2x
 
 function fingerprint() {
   const cpu = os.cpus()[0]?.model?.trim() ?? 'unknown';
@@ -165,7 +168,7 @@ if (regressedFiles.length && !opt('--input')) {
 }
 
 console.log(`\nMicrobenchmarks vs baseline (${base.machine}, ${base.recordedAt}); this run: ${fingerprint()}`);
-console.log(`calibration: ${fmt(now.cal)} now, ${fmt(base.calibrationMs)} at baseline${sameMachine ? '' : '  [different machine: block > 25 %, warn > 10 %]'}\n`);
+console.log(`calibration: ${fmt(now.cal)} now, ${fmt(base.calibrationMs)} at baseline${sameMachine ? '' : '  [different machine: block > 100 %, warn > 10 %]'}\n`);
 for (const r of rows.sort((a, b) => a.k.localeCompare(b.k))) {
   const ratio = r.ratio != null ? `${((r.ratio - 1) * 100).toFixed(1).padStart(6)} %` : '     new';
   console.log(`${r.status.padEnd(9)} ${ratio}  ${fmt(r.v.median).padStart(11)}  ${r.k}`);

@@ -3,6 +3,7 @@
   import { installYankFlash } from '../lib/yank-flash.ts';
   import { installVimUndo } from '../lib/editor-undo.ts';
   import { motionAllowed } from '../lib/motion.ts';
+  import { zen } from '../lib/zen.svelte.ts';
 
   /** Per-editor ex handlers. Vim ex commands are registered once on
    *  the global Vim singleton; each dispatches to the editor it ran in
@@ -59,6 +60,8 @@
     Vim.defineEx('only', 'on', (cm: unknown) => target(cm)?.win('only', ''));
     Vim.defineEx('close', 'clo', (cm: unknown) => target(cm)?.win('close', ''));
     Vim.defineEx('zoom', 'zo', (cm: unknown) => target(cm)?.win('zoom', ''));
+    // Modo zen (<leader>z): a per-device shell state, not per editor.
+    Vim.defineEx('zen', 'zen', () => zen.toggle());
     // u / Ctrl-r / :undo / :redo → the session's Y.UndoManager.
     installVimUndo();
     // Neovim-style yank highlight (purely visual).

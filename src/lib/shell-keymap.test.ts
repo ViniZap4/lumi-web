@@ -96,3 +96,26 @@ describe('part 2 reader keys', () => {
     expect(m.feed(k('f'), 'reader')).toEqual({ kind: 'follow' });
   });
 });
+
+describe('ShellKeymap leader (Modo zen)', () => {
+  const key = (k: string) => ({ key: k, ctrlKey: false, metaKey: false, altKey: false });
+  it('<leader>z toggles zen, <leader>e opens the explorer', () => {
+    const km = new ShellKeymap(() => 0);
+    expect(km.feed(key('\\'), 'reader', false)).toEqual({ kind: 'pending' });
+    expect(km.pending).toBe('\\');
+    expect(km.chord).toBeNull();
+    expect(km.feed(key('z'), 'reader', false)).toEqual({ kind: 'zen' });
+    km.feed(key('\\'), 'explorer', false);
+    expect(km.feed(key('e'), 'explorer', false)).toEqual({ kind: 'floatExplorer' });
+  });
+  it('follows the configured leader; a leader that is a shell key keeps its meaning', () => {
+    const km = new ShellKeymap(() => 0);
+    km.leader = ';';
+    km.feed(key(';'), 'reader', false);
+    expect(km.feed(key('z'), 'reader', false)).toEqual({ kind: 'zen' });
+    km.leader = ',';
+    expect(km.feed(key(','), 'reader', false)).toEqual({ kind: 'settings' });
+    km.leader = ' ';
+    expect(km.feed(key(' '), 'reader', false)).toEqual({ kind: 'palette' });
+  });
+});

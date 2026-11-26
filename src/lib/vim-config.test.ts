@@ -19,8 +19,8 @@ class FakeVim implements VimApiLike {
 beforeEach(() => _resetVimConfigForTests());
 
 // lumi's pane defaults (SPEC-PARTE2): <leader>e, -, gf, K.
-const MORE_MAPS = ['map normal <F35>e :explore<CR>', 'map normal - :explore<CR>', 'map normal gf :follow<CR>', 'map normal K :hover<CR>'];
-const MORE_UNMAPS = ['unmap normal <F35>e', 'unmap normal -', 'unmap normal gf', 'unmap normal K'];
+const MORE_MAPS = ['map normal <F35>e :explore<CR>', 'map normal <F35>z :zen<CR>', 'map normal - :explore<CR>', 'map normal gf :follow<CR>', 'map normal K :hover<CR>'];
+const MORE_UNMAPS = ['unmap normal <F35>e', 'unmap normal <F35>z', 'unmap normal -', 'unmap normal gf', 'unmap normal K'];
 
 describe('planVimMappings', () => {
   it('escape sequences become insert-mode maps to <Esc>', () => {
@@ -30,6 +30,7 @@ describe('planVimMappings', () => {
       { lhs: '<F35>l', rhs: ':link<CR>', ctx: 'normal', noremap: false, source: 'default', display: '\\l' },
       { lhs: '<F35>p', rhs: ':preview split<CR>', ctx: 'normal', noremap: false, source: 'default', display: '\\p' },
       { lhs: '<F35>e', rhs: ':explore<CR>', ctx: 'normal', noremap: false, source: 'default', display: '\\e' },
+      { lhs: '<F35>z', rhs: ':zen<CR>', ctx: 'normal', noremap: false, source: 'default', display: '\\z' },
       { lhs: '-', rhs: ':explore<CR>', ctx: 'normal', noremap: false, source: 'default' },
       { lhs: 'gf', rhs: ':follow<CR>', ctx: 'normal', noremap: false, source: 'default' },
       { lhs: 'K', rhs: ':hover<CR>', ctx: 'normal', noremap: false, source: 'default' },
@@ -43,7 +44,7 @@ describe('planVimMappings', () => {
         { mode: 'normal', lhs: 'H', rhs: '^', noremap: true },
       ],
     });
-    expect(plan.map((p) => `${p.ctx}:${p.lhs}->${p.rhs}`)).toEqual(['insert:jk-><Esc>', 'normal:H->^', 'normal:<F35>l->:link<CR>', 'normal:<F35>p->:preview split<CR>', 'normal:<F35>e->:explore<CR>', 'normal:-->:explore<CR>', 'normal:gf->:follow<CR>', 'normal:K->:hover<CR>']);
+    expect(plan.map((p) => `${p.ctx}:${p.lhs}->${p.rhs}`)).toEqual(['insert:jk-><Esc>', 'normal:H->^', 'normal:<F35>l->:link<CR>', 'normal:<F35>p->:preview split<CR>', 'normal:<F35>e->:explore<CR>', 'normal:<F35>z->:zen<CR>', 'normal:-->:explore<CR>', 'normal:gf->:follow<CR>', 'normal:K->:hover<CR>']);
   });
 });
 
@@ -61,7 +62,7 @@ describe('applyVimConfig', () => {
     const v = new FakeVim();
     v.throwOn.add('jk');
     const applied = applyVimConfig(v, { ...defaultSettings(), escapeSequences: ['jk', 'jj'] });
-    expect(applied.map((a) => a.lhs)).toEqual(['jj', '<F35>l', '<F35>p', '<F35>e', '-', 'gf', 'K']);
+    expect(applied.map((a) => a.lhs)).toEqual(['jj', '<F35>l', '<F35>p', '<F35>e', '<F35>z', '-', 'gf', 'K']);
   });
 
   it('applies vimrc maps (all-mode maps without a context) and the vimrc leader', () => {

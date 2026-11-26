@@ -286,6 +286,7 @@ export function describeRhs(rhs: string): string {
     const known: Record<string, string> = {
       link: 'insert link',
       explore: 'explorer',
+      zen: 'modo zen',
       vsplit: 'split right',
       split: 'split below',
       only: 'only pane',

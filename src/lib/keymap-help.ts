@@ -141,6 +141,7 @@ export const KEYMAP: readonly KeymapSection[] = [
       ['space  :  ⌘K', 'command palette'],
       [',', 'settings'],
       ['?', 'this help'],
+      ['⟨leader⟩z  :zen', 'Modo zen: no bars; point at the top-left corner to reveal'],
     ],
   },
 ];

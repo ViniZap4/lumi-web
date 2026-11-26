@@ -55,6 +55,8 @@
   import { toasts } from '../lib/toasts.svelte.ts';
   import { canTogglePublish, isPublished } from '../lib/publish.ts';
   import ToastStack from '../components/ToastStack.svelte';
+  import ZenCorner from '../components/ZenCorner.svelte';
+  import { zen } from '../lib/zen.svelte.ts';
   import ModePill from '../components/ModePill.svelte';
   import { effectiveSettings, appliedMappings, LEADER_TOKEN } from '../lib/vim-config.ts';
   import { selectorOrder } from '../lib/books-model.ts';
@@ -702,6 +704,9 @@
         return;
       case 'hover':
         hoverKey(readerLinkTarget(), null, leafPath());
+        return;
+      case 'zen':
+        zen.toggle();
         return;
       case 'follow': {
         const l = readerLinkTarget();
@@ -2017,6 +2022,7 @@
   // ---- legend -------------------------------------------------------------------
 
   const eff = $derived(effectiveSettings(editorSettings.value));
+  $effect(() => { keymap.leader = eff.leader; });
   function vimModeLabel(m: string, sub?: string | null): string {
     if (m === 'visual') return sub === 'linewise' ? 'V-Line' : sub === 'blockwise' ? 'V-Block' : 'Visual';
     return m === 'insert' ? 'Insert' : m === 'replace' ? 'Replace' : 'Normal';
@@ -2128,6 +2134,7 @@
     { id: 'forward', title: 'Next note', keys: 'L', group: 'history forward navigate', run: () => runAction({ kind: 'historyForward' }) },
     { id: 'hover', title: editorSettings.value.hoverPreview ? 'Turn off hover link previews' : 'Turn on hover link previews', keys: 'K', group: 'preview link card', run: () => editorSettings.update({ hoverPreview: !editorSettings.value.hoverPreview }) },
     { id: 'deeplink', title: 'Copy link to this note', group: 'share url deep link lumi open', run: copyDeepLink },
+    { id: 'zen', title: zen.on ? 'Sair do modo zen' : 'Modo zen', keys: `${eff.leader}z :zen`, group: 'zen focus minimal distraction free fullscreen chrome hide bars', run: () => zen.toggle() },
     { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (hintsOpen = true) },
     { id: 'motion-full', title: 'Movimento: completo', group: 'motion animation full alive', run: () => editorSettings.update({ motion: 'full' }) },
     { id: 'motion-soft', title: 'Movimento: suave', group: 'motion animation soft calm', run: () => editorSettings.update({ motion: 'soft' }) },
@@ -2148,6 +2155,7 @@
   /** `:` lines typed in the palette (reader / home): the pane ex
    *  commands. true = handled. */
   function runExLine(line: string): boolean {
+    if (/^\s*zen\s*$/.test(line)) { zen.toggle(); return true; }
     const m = /^\s*(vs|vsp|vspl|vspli|vsplit|sp|spl|spli|split|on|onl|only|zo|zoo|zoom|clo|clos|close|q|quit|exp|expl|explo|explor|explore|Ex|books?)\b\s*(.*)$/.exec(line);
     if (!m) return false;
     const cmd = m[1];
@@ -2367,6 +2375,7 @@
   </footer>
 
   <ToastStack />
+  <ZenCorner />
 
   {#if paletteMode}
     <CommandPalette

@@ -88,4 +88,18 @@ describe('ZenCorner', () => {
     document.body.dispatchEvent(e);
     expect(z.revealed).toBe(false);
   });
+
+  it('a touch tap in the corner reveals; a tap elsewhere starts the hide', () => {
+    const { z } = setup(true);
+    const tap = (x: number, y: number) => {
+      const e = new MouseEvent('pointerdown', { clientX: x, clientY: y, bubbles: true });
+      Object.defineProperty(e, 'pointerType', { value: 'touch' });
+      document.body.dispatchEvent(e);
+    };
+    tap(10, 10);
+    expect(z.revealed).toBe(true);
+    tap(400, 300);
+    vi.advanceTimersByTime(HIDE_DELAY_MS);
+    expect(z.revealed).toBe(false);
+  });
 });

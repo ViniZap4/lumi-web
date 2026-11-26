@@ -15,7 +15,7 @@
   import type { EditorView } from '@codemirror/view';
   import type * as Y from 'yjs';
   import MarkdownView from './MarkdownView.svelte';
-  import { renderBlocks } from '../lib/markdown.ts';
+  import { renderBlocks, createDocRenderCache } from '../lib/markdown.ts';
   import { normalizeAnchors, measureAnchors, lineToOffset, offsetToLine, ScrollLeader, debounce, PREVIEW_DEBOUNCE_MS, type Anchor } from '../lib/scroll-sync.ts';
   import { PREVIEW_RATIO_MIN, PREVIEW_RATIO_MAX, clampRatio } from '../lib/editor-settings.ts';
   import { headingTarget, findRanges, nextMatchIndex, type PreviewAction } from '../lib/preview-keys.ts';
@@ -42,7 +42,10 @@
   const { enabled, ytext, editorView, ratio, prose = 'sans', onratio, ontoggletask, onlink, focused = null, onnarrow, children }: Props = $props();
 
   let text = $state(untrack(() => (enabled ? ytext.toString() : '')));
-  const blocks = $derived(enabled ? renderBlocks(text) : []);
+  // Per-document cache: a one-block edit re-lexes and re-renders that
+  // block only (lib/markdown.ts DocRenderCache).
+  const docCache = createDocRenderCache();
+  const blocks = $derived(enabled ? renderBlocks(text, { cache: docCache }) : []);
   // Fresh text the moment the preview is switched on.
   $effect(() => {
     if (enabled) untrack(() => (text = ytext.toString()));

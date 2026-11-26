@@ -131,6 +131,7 @@ interface FootnoteScan {
 }
 
 function scanFootnotes(src: string): FootnoteScan {
+  if (!src.includes('[^')) return { src, defs: new Map(), order: [] };
   const lines = src.split('\n');
   const code = codeLines(lines);
   const defs = new Map<string, { text: string; line: number }>();
@@ -314,6 +315,9 @@ markedInstance.use({
 export interface RenderOptions {
   /** Absolute base URL for relative image / link resolution. Optional. */
   baseURL?: string;
+  /** Per-document state for a view that keeps re-rendering one note
+   *  (see DocRenderCache). Without it, blocks go through a shared LRU. */
+  cache?: DocRenderCache;
 }
 
 export interface MdBlock {
@@ -326,7 +330,9 @@ export interface MdBlock {
   html: string;
 }
 
-// Sanitised HTML per block source (+ render context). Bounded.
+// Shared HTML per block source (+ render context) for callers without a
+// document cache: hover cards, kanban cards, canvas nodes, table
+// widgets. Small snippets, so a small LRU is enough.
 const blockCache = new Map<string, string>();
 const CACHE_MAX = 800;
 
@@ -341,6 +347,146 @@ function cacheGet(k: string): string | undefined {
 function cacheSet(k: string, v: string): void {
   blockCache.set(k, v);
   if (blockCache.size > CACHE_MAX) blockCache.delete(blockCache.keys().next().value as string);
+}
+
+/**
+ * Per-document render state for a view that re-renders one note as it
+ * changes (reader, split preview). It replaces the shared LRU for that
+ * note, which stopped hitting at all once a note had more top-level
+ * blocks than the LRU held (a sequential scan over a smaller LRU):
+ * - two-generation block cache: the HTML of the previous render is
+ *   this render's lookup table, so its size tracks the note;
+ * - incremental lexing: only the blocks around the edit are lexed
+ *   again, from the blank line before the change to the second token
+ *   after it where the old and new token streams realign; anything it
+ *   cannot prove falls back to a full lex.
+ */
+export class DocRenderCache {
+  /** Lexer input of the previous render (after embeds and footnotes). */
+  text = '';
+  tokens: Token[] = [];
+  /** Start offset of each token in `text`. */
+  starts: number[] = [];
+  /** Footnote order the tokens were lexed with (inline lexing reads it). */
+  order = '';
+  /** The previous text may have had reference definitions. */
+  defs = false;
+  html = new Map<string, string>();
+  /** Full lexes vs incremental ones (tests and benchmarks). */
+  stats = { full: 0, incremental: 0 };
+}
+
+export function createDocRenderCache(): DocRenderCache {
+  return new DocRenderCache();
+}
+
+/** Reference definitions (`[x]: url`, also inside quotes and lists)
+ *  register document-wide links that inline lexing reads, so their
+ *  lexing is not local. Any `]:` at all (footnote definitions are
+ *  already blanked) means a full lex: cheap to test, never wrong. */
+const mayHaveRefDefs = (text: string) => text.includes(']:');
+
+/** Blocks that always end at a blank line, so the blank line after one
+ *  is a hard boundary. A list, indented code or an HTML block can run
+ *  on past it. */
+const CLOSED_BEFORE_BLANK = new Set(['paragraph', 'heading', 'hr', 'blockquote', 'table']);
+
+function fullLex(cache: DocRenderCache | undefined, text: string): Token[] {
+  const tokens = markedInstance.lexer(text) as Token[];
+  if (cache) {
+    cache.stats.full++;
+    cache.tokens = tokens;
+    cache.starts = offsetsOf(tokens);
+  }
+  return tokens;
+}
+
+function offsetsOf(tokens: readonly Token[], base = 0): number[] {
+  const out: number[] = new Array(tokens.length);
+  let off = base;
+  for (let i = 0; i < tokens.length; i++) {
+    out[i] = off;
+    off += (tokens[i].raw ?? '').length;
+  }
+  return out;
+}
+
+/** Lex `text`, reusing the previous token stream of `cache` around the
+ *  edit when that is provably equal to a full lex. */
+function lexWithCache(cache: DocRenderCache, text: string, order: string): Token[] {
+  const prev = cache.text;
+  const old = cache.tokens;
+  const starts = cache.starts;
+  const defs = mayHaveRefDefs(text);
+  const canReuse = old.length > 0 && order === cache.order && !defs && !cache.defs && joinedLength(old) === prev.length;
+  cache.text = text;
+  cache.order = order;
+  cache.defs = defs;
+  if (!canReuse) return fullLex(cache, text);
+  if (prev === text) return old;
+
+  // Common prefix / suffix of the old and new source.
+  const max = Math.min(prev.length, text.length);
+  let p = 0;
+  while (p < max && prev.charCodeAt(p) === text.charCodeAt(p)) p++;
+  let s = 0;
+  while (s < max - p && prev.charCodeAt(prev.length - 1 - s) === text.charCodeAt(text.length - 1 - s)) s++;
+  const delta = text.length - prev.length;
+  const end = (i: number) => starts[i] + (old[i].raw ?? '').length;
+
+  // Start: the first token touched by the change, backed off to a token
+  // that follows a hard blank-line boundary (or the start), strictly
+  // before the change.
+  let i = 0;
+  while (i < old.length && end(i) < p) i++;
+  let k = Math.min(i, old.length - 1);
+  const hardStart = (x: number) => x === 0 || (old[x - 1].type === 'space' && end(x - 1) < p
+    && (x === 1 || (CLOSED_BEFORE_BLANK.has(old[x - 2].type) || isClosedFence(old[x - 2]))));
+  while (k > 0 && !hardStart(k)) k--;
+  // End: the first blank line wholly inside the unchanged suffix, plus
+  // the token after it; both must come back identical.
+  const suffixFrom = prev.length - s;
+  let j = i;
+  while (j < old.length && !(starts[j] >= suffixFrom && old[j].type === 'space')) j++;
+  let sliceEndOld: number;
+  let verify = 0;
+  if (j + 1 < old.length) {
+    sliceEndOld = end(j + 1);
+    verify = 2;
+  } else {
+    j = old.length - 1;
+    sliceEndOld = prev.length;
+  }
+  const from = starts[k];
+  const to = sliceEndOld + delta;
+  if (to < from || to > text.length) return fullLex(cache, text);
+  const fresh = markedInstance.lexer(text.slice(from, to)) as Token[];
+  if (verify) {
+    const n = fresh.length;
+    if (n < 2 || fresh[n - 2].raw !== old[j].raw || fresh[n - 1].raw !== old[j + 1].raw) return fullLex(cache, text);
+  }
+  if (joinedLength(fresh) !== to - from) return fullLex(cache, text);
+  const tail = old.slice(j + 1 + (verify ? 0 : 1));
+  const tokens = old.slice(0, k).concat(verify ? fresh.slice(0, -1) : fresh, tail);
+  cache.tokens = tokens;
+  cache.starts = starts.slice(0, k).concat(
+    offsetsOf(verify ? fresh.slice(0, -1) : fresh, from),
+    starts.slice(j + 1 + (verify ? 0 : 1)).map((x) => x + delta),
+  );
+  cache.stats.incremental++;
+  return tokens;
+}
+
+/** A fenced code block (an unclosed fence runs to the end, so one
+ *  followed by anything is closed). */
+function isClosedFence(t: Token): boolean {
+  return t.type === 'code' && (t as Tokens.Code).codeBlockStyle !== 'indented';
+}
+
+function joinedLength(tokens: readonly Token[]): number {
+  let n = 0;
+  for (const t of tokens) n += (t.raw ?? '').length;
+  return n;
 }
 
 let renderCount = 0;
@@ -364,9 +510,15 @@ export function renderBlocks(src: string, opts: RenderOptions = {}): MdBlock[] {
   const text = liftMediaEmbeds(src.replace(/\r\n?/g, '\n'));
   const fn = scanFootnotes(text);
   footnoteOrder = fn.order;
-  const tokens = markedInstance.lexer(fn.src);
-  const links = (tokens as unknown as { links: Record<string, unknown> }).links ?? {};
-  const ctx = fn.order.join('\u0001') + '\u0002' + Object.keys(links).join('\u0001') + '\u0002' + (opts.baseURL ?? '');
+  const doc = opts.cache;
+  const orderKey = fn.order.join('\u0001');
+  const tokens = doc ? lexWithCache(doc, fn.src, orderKey) : fullLex(undefined, fn.src);
+  // Incremental lexing only runs without reference definitions, so an
+  // empty links map is exact there.
+  const links = (tokens as unknown as { links?: Record<string, unknown> }).links ?? {};
+  const ctx = orderKey + '\u0002' + Object.keys(links).join('\u0001') + '\u0002' + (opts.baseURL ?? '');
+  const prevHTML = doc?.html;
+  const nextHTML = doc ? new Map<string, string>() : null;
 
   const out: MdBlock[] = [];
   const seen = new Map<string, number>();
@@ -377,15 +529,16 @@ export function renderBlocks(src: string, opts: RenderOptions = {}): MdBlock[] {
     line += countNL(raw);
     if (tok.type === 'space' || tok.type === 'def') continue;
     const ck = raw + '\u0000' + ctx;
-    let html = cacheGet(ck);
+    let html = nextHTML ? (nextHTML.get(ck) ?? prevHTML!.get(ck)) : cacheGet(ck);
     if (html === undefined) {
       renderCount++;
       const list = [tok] as unknown as Token[] & { links: unknown };
       list.links = links;
       html = sanitize(markedInstance.parser(list as unknown as Token[]));
       if (opts.baseURL) html = resolveRelativeURLs(html, opts.baseURL);
-      cacheSet(ck, html);
+      if (!nextHTML) cacheSet(ck, html);
     }
+    nextHTML?.set(ck, html);
     if (!html.trim()) continue;
     const n = (seen.get(raw) ?? 0) + 1;
     seen.set(raw, n);
@@ -409,6 +562,7 @@ export function renderBlocks(src: string, opts: RenderOptions = {}): MdBlock[] {
     out.push({ key: 'footnotes', line: Math.max(firstLine, out.length ? out[out.length - 1].line : 0), endLine: line + 1, html });
   }
   footnoteOrder = [];
+  if (doc && nextHTML) doc.html = nextHTML;
   return out;
 }
 

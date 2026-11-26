@@ -28,6 +28,7 @@
   import NoteStage from './vault/NoteStage.svelte';
   import StatusBar from './vault/StatusBar.svelte';
   import ToastStack from '../components/ToastStack.svelte';
+  import ZenCorner from '../components/ZenCorner.svelte';
   import CommandPalette from '../components/CommandPalette.svelte';
   import ContextMenu from '../components/ContextMenu.svelte';
   import HintOverlay from '../components/HintOverlay.svelte';
@@ -111,6 +112,7 @@
   <StatusBar />
 
   <ToastStack />
+  <ZenCorner />
 
   {#if cmd.paletteMode}
     <CommandPalette

@@ -7,6 +7,7 @@ import { books } from '../../lib/books.svelte.ts';
 import { uiState } from '../../lib/uistate.svelte.ts';
 import { editorSettings } from '../../lib/editor-settings.svelte.ts';
 import { structuredFocus } from '../../lib/structured-mode.svelte.ts';
+import { zen } from '../../lib/zen.svelte.ts';
 import type { PaletteCommand } from '../../lib/palette.ts';
 import type { Workspace } from './workspace.svelte.ts';
 
@@ -76,6 +77,7 @@ export function paletteCommands(ws: Workspace): PaletteCommand[] {
     { id: 'forward', title: 'Next note', keys: 'L', group: 'history forward navigate', run: () => ws.cmd.runAction({ kind: 'historyForward' }) },
     { id: 'hover', title: s.hoverPreview ? 'Turn off hover link previews' : 'Turn on hover link previews', keys: 'K', group: 'preview link card', run: () => editorSettings.update({ hoverPreview: !editorSettings.value.hoverPreview }) },
     { id: 'deeplink', title: 'Copy link to this note', group: 'share url deep link lumi open', run: () => ws.copyDeepLink() },
+    { id: 'zen', title: zen.on ? 'Sair do modo zen' : 'Modo zen', keys: `${ws.cmd.eff.leader}z :zen`, group: 'zen focus minimal distraction free fullscreen chrome hide bars', run: () => zen.toggle() },
     { id: 'hints', title: 'Hint mode (click by keyboard)', keys: 'F', group: 'navigate vimium labels', run: () => (ws.cmd.hintsOpen = true) },
     { id: 'motion-full', title: 'Movimento: completo', group: 'motion animation full alive', run: () => editorSettings.update({ motion: 'full' }) },
     { id: 'motion-soft', title: 'Movimento: suave', group: 'motion animation soft calm', run: () => editorSettings.update({ motion: 'soft' }) },

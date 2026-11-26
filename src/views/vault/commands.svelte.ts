@@ -19,6 +19,7 @@ import { menuFor, type MenuItem } from '../../lib/context-actions.ts';
 import { normalizePath, type Entry, type NoteEntry } from '../../lib/notetree.ts';
 import type { NoteSummary } from '../../lib/types.ts';
 import type { PaletteCommand } from '../../lib/palette.ts';
+import { zen } from '../../lib/zen.svelte.ts';
 import { paletteCommands } from './palette-commands.ts';
 import type { Workspace } from './workspace.svelte.ts';
 
@@ -122,6 +123,10 @@ export class CommandController {
   constructor(private readonly ws: Workspace) {}
 
   install(): void {
+    // The shell arms the configured vim leader (`<leader>z` = Modo zen).
+    $effect(() => {
+      this.keymap.leader = this.eff.leader;
+    });
     // The Ctrl-w prefix expires like vim's other pending keys.
     $effect(() => {
       if (!this.panePending) return;
@@ -450,6 +455,9 @@ export class CommandController {
       case 'hover':
         ws.hover.key(ws.readerLinkTarget(), null, ws.leafPath());
         return;
+      case 'zen':
+        zen.toggle();
+        return;
       case 'follow': {
         const l = ws.readerLinkTarget();
         if (!l) return ws.flash('no link to follow — Tab to one, or f for hints', 'warn');
@@ -508,6 +516,10 @@ export class CommandController {
   /** `:` lines typed in the palette (reader / home): the pane ex
    *  commands. true = handled. */
   runExLine = (line: string): boolean => {
+    if (/^\s*zen\s*$/.test(line)) {
+      zen.toggle();
+      return true;
+    }
     const m = EX_LINE.exec(line);
     if (!m) return false;
     const pn = this.ws.panes;

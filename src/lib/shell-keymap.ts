@@ -54,6 +54,8 @@ export type ShellAction =
   | { kind: 'hover' }
   /** Reader `gf`: follow the focused link in this pane (§3). */
   | { kind: 'follow' }
+  /** `<leader>z` (and `:zen`): toggle Modo zen. */
+  | { kind: 'zen' }
   /** First key of a chord (`g`, `z`) or a count digit: consumed. */
   | { kind: 'pending' };
 
@@ -64,9 +66,15 @@ export type KeyLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKe
 /** ms a `g`/`z` prefix stays armed (Apple: 0.8 s). */
 export const CHORD_TIMEOUT_MS = 800;
 export const MAX_COUNT = 9999;
+/** Printable keys the shell binds on their own (never a shell leader). */
+const SHELL_BOUND = new Set(Array.from('0123456789gzjkGhlHL~: ?,[]ieRF-/nNardyp.fqubK'));
 
 export class ShellKeymap {
-  private prefix: 'g' | 'z' | null = null;
+  private prefix: 'g' | 'z' | 'leader' | null = null;
+  /** The vim leader as configured (`\` by default). A leader that is
+   *  already a shell key (Space = palette, `,` = settings…) is not
+   *  armed here, so those keys keep their meaning. */
+  leader = '\\';
   private prefixAt = 0;
   private count: number | null = null;
 
@@ -76,13 +84,13 @@ export class ShellKeymap {
   get pending(): string | null {
     if (this.prefix && this.now() - this.prefixAt >= CHORD_TIMEOUT_MS) this.prefix = null;
     const c = this.count != null ? String(this.count) : '';
-    const p = this.prefix ?? '';
+    const p = this.prefix === 'leader' ? this.leader : (this.prefix ?? '');
     return c || p ? c + p : null;
   }
 
   /** The armed chord prefix (legend context), ignoring counts. */
   get chord(): 'g' | 'z' | null {
-    return this.pending != null ? this.prefix : null;
+    return this.pending != null && this.prefix !== 'leader' ? this.prefix : null;
   }
 
   reset(): void {
@@ -146,12 +154,24 @@ export class ShellKeymap {
           if (ch === 'e') { this.count = null; return { kind: 'bottom' }; }
           if (ch === 'b') { this.count = null; return { kind: 'picker' }; }
           if (ch === 'f' && context === 'reader') { this.count = null; return { kind: 'follow' }; }
+        } else if (p === 'leader') {
+          this.count = null;
+          if (ch === 'z') return { kind: 'zen' };
+          if (ch === 'e') return { kind: 'floatExplorer' };
+          return null;
         } else {
           if (ch === 'h') { this.count = null; return { kind: 'home' }; }
           if (ch === 'p') { this.count = null; return { kind: 'togglePreview' }; }
         }
       }
       // Unknown second key: fall through and treat it on its own.
+    }
+
+    // The vim leader (single printable key other than Space).
+    if (ch === this.leader && !SHELL_BOUND.has(ch)) {
+      this.prefix = 'leader';
+      this.prefixAt = this.now();
+      return { kind: 'pending' };
     }
 
     // Count prefix (no digit is bound on its own; `0` only extends).

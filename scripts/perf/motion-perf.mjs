@@ -2,13 +2,17 @@
 // long tasks (> 50 ms) during it, and typing latency (keydown → next
 // frame) in the editor's insert mode.
 //
-//   node scripts/perf/motion-perf.mjs <base> [--json out.json]
+//   node scripts/perf/motion-perf.mjs <base> [--cpu 4] [--json out.json]
+//
+// `--cpu N` throttles the CPU N× through CDP after sign-in (the
+// PERF-BUDGETS reference runs 4×).
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 
 const args = process.argv.slice(2);
 const BASE = args[0];
 const jsonOut = args.includes('--json') ? args[args.indexOf('--json') + 1] : null;
+const cpu = args.includes('--cpu') ? Number(args[args.indexOf('--cpu') + 1]) : 1;
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME || undefined, args: process.env.GPU ? ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist'] : [] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
@@ -43,6 +47,7 @@ await page.waitForSelector('[data-testid=floating-explorer]', { timeout: 15000 }
 await wait(800);
 await press('Escape');
 await wait(500);
+if (cpu > 1) await (await ctx.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: cpu });
 
 const pct = (xs, p) => {
   if (!xs.length) return 0;

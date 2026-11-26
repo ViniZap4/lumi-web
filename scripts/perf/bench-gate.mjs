@@ -1,0 +1,182 @@
+// Microbenchmark gate (docs/PERF-BUDGETS.md in the umbrella repo).
+//
+// Runs `vitest bench` (src/**/*.bench.ts), then compares each
+// benchmark's median against src/bench/baseline.json.
+//
+// Machines differ, so every median is divided by the calibration
+// benchmark (src/bench/calibration.bench.ts) measured in the same run:
+// the gate compares "how many calibration units" a benchmark costs, not
+// milliseconds.
+//
+// Verdicts per benchmark (ratio = normalised now / normalised baseline):
+//   - ratio > 1.10 + noise          regression; blocks
+//   - ratio < 0.90                  improvement; suggests a baseline update
+//   - no baseline entry             new; reported, never blocks
+// `noise` is the two runs' relative margins of error added together.
+// A regression is re-measured once (its file plus the calibration) and
+// the better of the two runs counts, so one noisy sample cannot block.
+//
+// When the baseline was recorded on another kind of machine (different
+// CPU model or architecture), the calibration only roughly transfers:
+// the gate then blocks only above 1.25 and warns between 1.10 and 1.25.
+// Record the baseline on the CI runner to get the strict 10 % gate.
+//
+//   node scripts/perf/bench-gate.mjs              # run + gate
+//   node scripts/perf/bench-gate.mjs --update     # run + rewrite the baseline
+//   node scripts/perf/bench-gate.mjs --input r.json [--warn]
+//   node scripts/perf/bench-gate.mjs --out r.json  # also keep the raw vitest JSON
+
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '../..');
+const args = process.argv.slice(2);
+const flag = (n) => args.includes(n);
+const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
+
+const BASELINE = path.resolve(opt('--baseline') ?? path.join(root, 'src/bench/baseline.json'));
+const CALIBRATION = 'src/bench/calibration.bench.ts > calibration > calibration workload';
+const STRICT = 0.10;
+const LOOSE = 0.25;
+
+function fingerprint() {
+  const cpu = os.cpus()[0]?.model?.trim() ?? 'unknown';
+  return `${process.platform}/${process.arch}/${cpu}`;
+}
+
+function runVitest(files = []) {
+  const out = path.join(os.tmpdir(), `lumi-bench-${process.pid}-${Date.now()}.json`);
+  const r = spawnSync('npx', ['--no-install', 'vitest', 'bench', '--run', '--outputJson', out, ...files], {
+    cwd: root,
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, FORCE_COLOR: '0' },
+  });
+  if (r.status !== 0 || !fs.existsSync(out)) {
+    console.error(`bench-gate: vitest bench failed (exit ${r.status})`);
+    process.exit(2);
+  }
+  const json = JSON.parse(fs.readFileSync(out, 'utf8'));
+  fs.rmSync(out, { force: true });
+  return json;
+}
+
+/** Flattens a vitest bench report into { key: {median, rme, file} }. */
+function flatten(report) {
+  const out = {};
+  for (const f of report.files ?? []) {
+    const rel = path.relative(root, f.filepath).split(path.sep).join('/');
+    for (const g of f.groups ?? []) {
+      // fullName is "<file> > <describe...>"; rebuild it with the relative path.
+      const group = g.fullName.includes(' > ') ? g.fullName.slice(g.fullName.indexOf(' > ') + 3) : '';
+      for (const b of g.benchmarks ?? []) {
+        const key = [rel, group, b.name].filter(Boolean).join(' > ');
+        out[key] = { median: b.median ?? b.mean, rme: b.rme ?? 0, file: rel };
+      }
+    }
+  }
+  return out;
+}
+
+function normalise(flat) {
+  const cal = flat[CALIBRATION]?.median;
+  if (!cal) {
+    console.error(`bench-gate: calibration benchmark missing (${CALIBRATION})`);
+    process.exit(2);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(flat)) out[k] = { ...v, norm: v.median / cal };
+  return { cal, benches: out };
+}
+
+const fmt = (ms) => (ms >= 10 ? ms.toFixed(1) : ms >= 1 ? ms.toFixed(2) : ms.toFixed(4)) + ' ms';
+
+const raw = opt('--input') ? JSON.parse(fs.readFileSync(opt('--input'), 'utf8')) : runVitest();
+if (opt('--out')) fs.writeFileSync(opt('--out'), JSON.stringify(raw, null, 2) + '\n');
+const now = normalise(flatten(raw));
+
+if (flag('--update')) {
+  // Best of two runs, like the gate's re-measure, so a busy machine
+  // does not record a slow baseline that later hides regressions.
+  if (!opt('--input')) {
+    const second = normalise(flatten(runVitest()));
+    for (const [k, v] of Object.entries(second.benches)) {
+      if (!now.benches[k] || v.norm < now.benches[k].norm) now.benches[k] = v;
+    }
+  }
+  const benches = Object.fromEntries(
+    Object.entries(now.benches)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => [k, { median: +v.median.toFixed(6), norm: +v.norm.toFixed(6), rme: +v.rme.toFixed(2) }]),
+  );
+  const doc = {
+    $comment: 'Generated by `npm run bench:baseline` (scripts/perf/bench-gate.mjs). Medians in ms; norm = median / calibration median. Regenerate on the CI runner for the strict gate; a regression over 10 % needs the owner\'s approval in the PR.',
+    machine: fingerprint(),
+    node: process.version,
+    recordedAt: new Date().toISOString().slice(0, 10),
+    calibrationMs: +now.cal.toFixed(6),
+    benches,
+  };
+  fs.writeFileSync(BASELINE, JSON.stringify(doc, null, 2) + '\n');
+  console.log(`bench-gate: baseline written (${Object.keys(benches).length} benchmarks, ${doc.machine})`);
+  process.exit(0);
+}
+
+if (!fs.existsSync(BASELINE)) {
+  console.log(`::warning::bench-gate: no baseline at ${path.relative(root, BASELINE)}; run npm run bench:baseline`);
+  process.exit(0);
+}
+const base = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+const sameMachine = base.machine === fingerprint();
+const blockAt = sameMachine ? STRICT : LOOSE;
+
+function verdicts(cur) {
+  const rows = [];
+  for (const [k, v] of Object.entries(cur.benches)) {
+    if (k === CALIBRATION) continue;
+    const b = base.benches?.[k];
+    if (!b) {
+      rows.push({ k, v, status: 'new' });
+      continue;
+    }
+    const ratio = v.norm / b.norm;
+    const noise = (v.rme + (b.rme ?? 0)) / 100;
+    let status = 'ok';
+    if (ratio > 1 + blockAt + noise) status = 'regressed';
+    else if (ratio > 1 + STRICT + noise) status = 'warn';
+    else if (ratio < 1 - STRICT) status = 'improved';
+    rows.push({ k, v, b, ratio, status });
+  }
+  return rows;
+}
+
+let rows = verdicts(now);
+const regressedFiles = [...new Set(rows.filter((r) => r.status === 'regressed').map((r) => r.v.file))];
+if (regressedFiles.length && !opt('--input')) {
+  console.log(`\nbench-gate: re-measuring ${regressedFiles.join(', ')} to rule out noise\n`);
+  const again = normalise(flatten(runVitest(['src/bench/calibration.bench.ts', ...regressedFiles])));
+  for (const [k, v] of Object.entries(again.benches)) {
+    if (now.benches[k] && v.norm < now.benches[k].norm) now.benches[k] = v;
+  }
+  rows = verdicts(now);
+}
+
+console.log(`\nMicrobenchmarks vs baseline (${base.machine}, ${base.recordedAt}); this run: ${fingerprint()}`);
+console.log(`calibration: ${fmt(now.cal)} now, ${fmt(base.calibrationMs)} at baseline${sameMachine ? '' : '  [different machine: block > 25 %, warn > 10 %]'}\n`);
+for (const r of rows.sort((a, b) => a.k.localeCompare(b.k))) {
+  const ratio = r.ratio != null ? `${((r.ratio - 1) * 100).toFixed(1).padStart(6)} %` : '     new';
+  console.log(`${r.status.padEnd(9)} ${ratio}  ${fmt(r.v.median).padStart(11)}  ${r.k}`);
+}
+
+const bad = rows.filter((r) => r.status === 'regressed');
+for (const r of rows.filter((r) => r.status === 'warn')) console.log(`::warning::bench-gate: ${r.k} is ${((r.ratio - 1) * 100).toFixed(1)} % slower (normalised)`);
+if (rows.some((r) => r.status === 'improved' || r.status === 'new')) console.log('\nbench-gate: new or faster benchmarks; lock them in with `npm run bench:baseline` and commit src/bench/baseline.json');
+if (bad.length && !flag('--warn')) {
+  for (const r of bad) console.log(`::error::bench-gate: ${r.k} regressed ${((r.ratio - 1) * 100).toFixed(1)} % (normalised median, gate ${blockAt * 100} %)`);
+  console.log('\nA slower benchmark needs the owner\'s approval in the PR (PERF-BUDGETS.md); if approved, regenerate the baseline.');
+  process.exit(1);
+}
+console.log('\nbench-gate: ok');

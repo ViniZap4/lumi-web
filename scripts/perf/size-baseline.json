@@ -3,56 +3,56 @@
   "gzipLevel": 9,
   "metrics": {
     "shell.js": {
-      "raw": 642107,
-      "gz": 214449
+      "raw": 419281,
+      "gz": 139549
     },
     "entry.css": {
-      "raw": 46752,
-      "gz": 10228
+      "raw": 47414,
+      "gz": 10386
     },
     "shell.css": {
-      "raw": 155172,
-      "gz": 29175
+      "raw": 106458,
+      "gz": 21201
     },
     "editor.js": {
-      "raw": 852349,
-      "gz": 286317
+      "raw": 795486,
+      "gz": 260393
     }
   },
   "totals": {
-    "jsGz": 2432561,
-    "jsChunks": 194
+    "jsGz": 1803580,
+    "jsChunks": 213
   },
   "shellFiles": [
     "assets/App.js",
-    "assets/canvas-view.js",
     "assets/index.js",
+    "assets/structured-mode.svelte.js",
     "assets/theme.svelte.js"
   ],
   "chunks": {
     "App": {
-      "raw": 456638,
-      "gz": 147011,
+      "raw": 337388,
+      "gz": 107672,
       "files": 1
     },
     "canvas-view": {
-      "raw": 14600,
-      "gz": 5887,
+      "raw": 11250,
+      "gz": 4481,
       "files": 1
     },
     "chunk-2Q5K7J3B": {
       "raw": 195,
-      "gz": 162,
+      "gz": 161,
       "files": 1
     },
     "chunk-5VM5RSS4": {
       "raw": 368,
-      "gz": 272,
+      "gz": 271,
       "files": 1
     },
     "chunk-HFQBQIA3": {
       "raw": 1885,
-      "gz": 833,
+      "gz": 831,
       "files": 1
     },
     "chunk-JWPE2WC7": {
@@ -61,28 +61,23 @@
       "files": 1
     },
     "chunk-KQLB2F66": {
-      "raw": 10467,
-      "gz": 4346,
-      "files": 1
-    },
-    "chunk-KS47KZWR": {
-      "raw": 5601,
-      "gz": 2564,
+      "raw": 10462,
+      "gz": 4338,
       "files": 1
     },
     "chunk-OY52VR5R": {
       "raw": 15732,
-      "gz": 4404,
+      "gz": 4406,
       "files": 1
     },
     "chunk-TU62E6Q5": {
       "raw": 508,
-      "gz": 356,
+      "gz": 355,
       "files": 1
     },
     "chunk-XXDRQBXY": {
       "raw": 232,
-      "gz": 208,
+      "gz": 207,
       "files": 1
     },
     "cynefin-EF2NZ3EQ": {
@@ -90,19 +85,19 @@
       "gz": 138144,
       "files": 1
     },
-    "cytoscape.esm": {
-      "raw": 450317,
-      "gz": 143053,
-      "files": 1
-    },
     "d3-scale": {
       "raw": 41334,
       "gz": 14941,
       "files": 1
     },
+    "federation.svelte": {
+      "raw": 4101,
+      "gz": 1486,
+      "files": 1
+    },
     "flowDiagram-MALGAFMO": {
-      "raw": 65055,
-      "gz": 20714,
+      "raw": 65051,
+      "gz": 20707,
       "files": 1
     },
     "graph": {
@@ -110,29 +105,59 @@
       "gz": 8269,
       "files": 1
     },
+    "html": {
+      "raw": 534,
+      "gz": 363,
+      "files": 1
+    },
     "index": {
-      "raw": 533775,
-      "gz": 172204,
+      "raw": 533795,
+      "gz": 172247,
       "files": 5
     },
     "index.html": {
-      "raw": 30731,
-      "gz": 12308,
+      "raw": 45174,
+      "gz": 17537,
+      "files": 1
+    },
+    "KanbanMini": {
+      "raw": 5961,
+      "gz": 2550,
+      "files": 1
+    },
+    "keymap-help": {
+      "raw": 3922,
+      "gz": 1796,
       "files": 1
     },
     "live-text": {
-      "raw": 737,
-      "gz": 432,
+      "raw": 734,
+      "gz": 427,
+      "files": 1
+    },
+    "markdown": {
+      "raw": 89431,
+      "gz": 30797,
+      "files": 1
+    },
+    "MarkdownView": {
+      "raw": 5727,
+      "gz": 2514,
+      "files": 1
+    },
+    "mermaid": {
+      "raw": 15554,
+      "gz": 6117,
       "files": 1
     },
     "mermaid-render": {
-      "raw": 640959,
-      "gz": 151795,
+      "raw": 640076,
+      "gz": 151424,
       "files": 1
     },
     "node_modules/@codemirror/lang-angular/dist/index.js": {
-      "raw": 5095,
-      "gz": 2371,
+      "raw": 5092,
+      "gz": 2376,
       "files": 1
     },
     "node_modules/@codemirror/lang-cpp/dist/index.js": {
@@ -142,17 +167,17 @@
     },
     "node_modules/@codemirror/lang-css/dist/index.js": {
       "raw": 25837,
-      "gz": 11351,
+      "gz": 11350,
       "files": 1
     },
     "node_modules/@codemirror/lang-go/dist/index.js": {
       "raw": 30826,
-      "gz": 12340,
+      "gz": 12339,
       "files": 1
     },
     "node_modules/@codemirror/lang-html/dist/index.js": {
-      "raw": 28687,
-      "gz": 11388,
+      "raw": 28684,
+      "gz": 11390,
       "files": 1
     },
     "node_modules/@codemirror/lang-java/dist/index.js": {
@@ -162,37 +187,32 @@
     },
     "node_modules/@codemirror/lang-javascript/dist/index.js": {
       "raw": 86621,
-      "gz": 33531,
+      "gz": 33530,
       "files": 1
     },
     "node_modules/@codemirror/lang-jinja/dist/index.js": {
-      "raw": 20947,
-      "gz": 9128,
+      "raw": 20944,
+      "gz": 9131,
       "files": 1
     },
     "node_modules/@codemirror/lang-json/dist/index.js": {
       "raw": 2423,
-      "gz": 1479,
+      "gz": 1475,
       "files": 1
     },
     "node_modules/@codemirror/lang-less/dist/index.js": {
-      "raw": 16310,
-      "gz": 7227,
+      "raw": 16309,
+      "gz": 7233,
       "files": 1
     },
     "node_modules/@codemirror/lang-liquid/dist/index.js": {
-      "raw": 21216,
-      "gz": 9491,
-      "files": 1
-    },
-    "node_modules/@codemirror/lang-markdown/dist/index.js": {
-      "raw": 44191,
-      "gz": 15306,
+      "raw": 21213,
+      "gz": 9496,
       "files": 1
     },
     "node_modules/@codemirror/lang-php/dist/index.js": {
-      "raw": 97892,
-      "gz": 27919,
+      "raw": 97889,
+      "gz": 27923,
       "files": 1
     },
     "node_modules/@codemirror/lang-python/dist/index.js": {
@@ -206,8 +226,8 @@
       "files": 1
     },
     "node_modules/@codemirror/lang-sass/dist/index.js": {
-      "raw": 23055,
-      "gz": 10000,
+      "raw": 23054,
+      "gz": 10006,
       "files": 1
     },
     "node_modules/@codemirror/lang-sql/dist/index.js": {
@@ -216,8 +236,8 @@
       "files": 1
     },
     "node_modules/@codemirror/lang-vue/dist/index.js": {
-      "raw": 3430,
-      "gz": 1708,
+      "raw": 3427,
+      "gz": 1713,
       "files": 1
     },
     "node_modules/@codemirror/lang-wast/dist/index.js": {
@@ -226,7 +246,7 @@
       "files": 1
     },
     "node_modules/@codemirror/lang-xml/dist/index.js": {
-      "raw": 14671,
+      "raw": 14670,
       "gz": 5863,
       "files": 1
     },
@@ -711,18 +731,18 @@
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-S7VZAUFO.mjs": {
-      "raw": 1846,
-      "gz": 915,
+      "raw": 1877,
+      "gz": 927,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-YGSQEFNW.mjs": {
-      "raw": 151861,
-      "gz": 42676,
+      "raw": 27105,
+      "gz": 8747,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-APKKGZFW.mjs": {
-      "raw": 42714,
-      "gz": 13864,
+      "raw": 42745,
+      "gz": 13879,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/bpmnIcons-APHXDYXF.mjs": {
@@ -731,188 +751,193 @@
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-KJ2TOQU5.mjs": {
-      "raw": 65855,
-      "gz": 18683,
+      "raw": 65886,
+      "gz": 18697,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-L25IHNXF.mjs": {
-      "raw": 49911,
-      "gz": 15866,
-      "files": 1
-    },
-    "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
-      "raw": 81734,
-      "gz": 22314,
+      "raw": 49942,
+      "gz": 15884,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-L36ESFBY.mjs": {
-      "raw": 10134,
-      "gz": 3625,
+      "raw": 10165,
+      "gz": 3640,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/dagre-SPEB5RXH.mjs": {
-      "raw": 46157,
-      "gz": 16436,
+      "raw": 46188,
+      "gz": 16450,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/diagram-3B7GL73J.mjs": {
-      "raw": 81155,
-      "gz": 25015,
+      "raw": 81186,
+      "gz": 25028,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/diagram-DNEMPZML.mjs": {
-      "raw": 4315,
-      "gz": 1895,
+      "raw": 4346,
+      "gz": 1909,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/diagram-L3MUGCDN.mjs": {
-      "raw": 6111,
-      "gz": 2629,
+      "raw": 6142,
+      "gz": 2644,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/diagram-LA4NIPWU.mjs": {
-      "raw": 16340,
-      "gz": 5829,
+      "raw": 16371,
+      "gz": 5844,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/diagram-MHCOC4E2.mjs": {
-      "raw": 11029,
-      "gz": 4306,
+      "raw": 11060,
+      "gz": 4321,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/diagram-XPFHEONP.mjs": {
-      "raw": 8254,
-      "gz": 3689,
+      "raw": 8285,
+      "gz": 3704,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-UZSYDL2S.mjs": {
-      "raw": 2042,
-      "gz": 904,
-      "files": 1
-    },
-    "node_modules/mermaid/dist/chunks/mermaid.core/elk-XV6XMXQE.mjs": {
-      "raw": 1513007,
-      "gz": 460322,
+      "raw": 2073,
+      "gz": 915,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-EYBAPDEH.mjs": {
-      "raw": 30716,
-      "gz": 10476,
+      "raw": 30747,
+      "gz": 10490,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-23REXITY.mjs": {
-      "raw": 53188,
-      "gz": 18123,
+      "raw": 53219,
+      "gz": 18138,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-STJD7YCW.mjs": {
-      "raw": 29454,
-      "gz": 8672,
+      "raw": 29485,
+      "gz": 8687,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-KBXO4MBG.mjs": {
-      "raw": 618,
-      "gz": 423,
+      "raw": 649,
+      "gz": 436,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-M35NCXHK.mjs": {
-      "raw": 17506,
-      "gz": 6617,
+      "raw": 17537,
+      "gz": 6632,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-OPLOXDXO.mjs": {
-      "raw": 23577,
-      "gz": 8301,
+      "raw": 23608,
+      "gz": 8312,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-BZKZHSQY.mjs": {
-      "raw": 20332,
-      "gz": 7147,
+      "raw": 20363,
+      "gz": 7161,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-I2QAS2VK.mjs": {
-      "raw": 22798,
-      "gz": 7560,
+      "raw": 22829,
+      "gz": 7574,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-FD4XPPHP.mjs": {
-      "raw": 1993,
-      "gz": 949,
+      "raw": 2024,
+      "gz": 960,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-J4AKIIQI.mjs": {
-      "raw": 5122,
-      "gz": 2173,
+      "raw": 5153,
+      "gz": 2186,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-XTYBLID2.mjs": {
-      "raw": 33986,
-      "gz": 9823,
+      "raw": 34017,
+      "gz": 9834,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-MRQ6NCDL.mjs": {
-      "raw": 1643,
-      "gz": 777,
+      "raw": 1674,
+      "gz": 793,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-Y7LWUY3S.mjs": {
-      "raw": 31082,
-      "gz": 9660,
+      "raw": 31113,
+      "gz": 9675,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-WGJFYUXA.mjs": {
-      "raw": 39949,
-      "gz": 14956,
+      "raw": 39980,
+      "gz": 14972,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-5NDRBG5M.mjs": {
-      "raw": 118962,
-      "gz": 31604,
+      "raw": 118993,
+      "gz": 31618,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
-      "raw": 973,
-      "gz": 543,
+      "raw": 1004,
+      "gz": 557,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-FJ4FJNEA.mjs": {
-      "raw": 41786,
-      "gz": 13859,
+      "raw": 41817,
+      "gz": 13873,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-UMQ2AFYF.mjs": {
-      "raw": 123315,
-      "gz": 44942,
+      "raw": 128921,
+      "gz": 47149,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-OMPLPG4O.mjs": {
-      "raw": 551,
-      "gz": 371,
+      "raw": 582,
+      "gz": 388,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-SEUHKTQE.mjs": {
-      "raw": 30892,
-      "gz": 10131,
+      "raw": 30923,
+      "gz": 10146,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/usecaseDiagram-AFA6YXN4.mjs": {
-      "raw": 189940,
-      "gz": 50501,
+      "raw": 189971,
+      "gz": 50519,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-NNMJR3RB.mjs": {
-      "raw": 42023,
-      "gz": 15574,
+      "raw": 42054,
+      "gz": 15589,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-S7YFUSEH.mjs": {
-      "raw": 25539,
-      "gz": 6744,
+      "raw": 25570,
+      "gz": 6758,
       "files": 1
     },
     "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-GGNKY7IX.mjs": {
-      "raw": 43569,
-      "gz": 12118,
+      "raw": 43600,
+      "gz": 12129,
+      "files": 1
+    },
+    "NoteViewHost": {
+      "raw": 1015,
+      "gz": 629,
+      "files": 1
+    },
+    "publish": {
+      "raw": 938,
+      "gz": 584,
+      "files": 1
+    },
+    "select": {
+      "raw": 1523,
+      "gz": 811,
       "files": 1
     },
     "simple-mode": {
@@ -921,58 +946,128 @@
       "files": 1
     },
     "src/components/canvas/CanvasView.svelte": {
-      "raw": 30603,
-      "gz": 10943,
+      "raw": 31245,
+      "gz": 11308,
+      "files": 1
+    },
+    "src/components/explorer/FxNotePreview.svelte": {
+      "raw": 2491,
+      "gz": 1142,
+      "files": 1
+    },
+    "src/components/HelpOverlay.svelte": {
+      "raw": 2711,
+      "gz": 1374,
+      "files": 1
+    },
+    "src/components/HoverCard.svelte": {
+      "raw": 7512,
+      "gz": 3058,
       "files": 1
     },
     "src/components/kanban/KanbanBoard.svelte": {
-      "raw": 25322,
-      "gz": 8857,
+      "raw": 25701,
+      "gz": 9034,
       "files": 1
     },
     "src/components/NoteEditor.svelte": {
-      "raw": 45405,
-      "gz": 15692,
+      "raw": 51617,
+      "gz": 18001,
+      "files": 1
+    },
+    "src/components/NotePane.svelte": {
+      "raw": 12713,
+      "gz": 5005,
       "files": 1
     },
     "src/components/StructuredPaneView.svelte": {
-      "raw": 6153,
-      "gz": 2647,
+      "raw": 6317,
+      "gz": 2720,
+      "files": 1
+    },
+    "src/components/ThemePickerModal.svelte": {
+      "raw": 4362,
+      "gz": 1724,
+      "files": 1
+    },
+    "src/components/VaultCreateModal.svelte": {
+      "raw": 3262,
+      "gz": 1667,
+      "files": 1
+    },
+    "src/components/VaultSettingsModal.svelte": {
+      "raw": 50332,
+      "gz": 14762,
       "files": 1
     },
     "src/lib/code-highlight.ts": {
       "raw": 838,
-      "gz": 513,
+      "gz": 515,
       "files": 1
     },
     "src/lib/editor-session.svelte.ts": {
-      "raw": 25444,
-      "gz": 8584,
+      "raw": 25482,
+      "gz": 8594,
       "files": 1
     },
     "src/lib/live-text-y.ts": {
-      "raw": 801,
-      "gz": 487,
+      "raw": 770,
+      "gz": 474,
+      "files": 1
+    },
+    "src/lib/markdown-lang.ts": {
+      "raw": 43472,
+      "gz": 15026,
       "files": 1
     },
     "src/lib/vimrc-editor.ts": {
-      "raw": 4421,
-      "gz": 2008,
+      "raw": 4423,
+      "gz": 2009,
       "files": 1
     },
     "src/public/PublicReader.svelte": {
-      "raw": 4477,
-      "gz": 2060,
+      "raw": 4712,
+      "gz": 2180,
+      "files": 1
+    },
+    "src/views/LoginView.svelte": {
+      "raw": 9825,
+      "gz": 3782,
       "files": 1
     },
     "src/views/SettingsView.svelte": {
-      "raw": 37931,
-      "gz": 11489,
+      "raw": 35067,
+      "gz": 11946,
+      "files": 1
+    },
+    "src/views/vault/PrimaryNote.svelte": {
+      "raw": 31321,
+      "gz": 11015,
+      "files": 1
+    },
+    "src/views/VaultsView.svelte": {
+      "raw": 15044,
+      "gz": 5609,
+      "files": 1
+    },
+    "structured-mode.svelte": {
+      "raw": 3308,
+      "gz": 1556,
+      "files": 1
+    },
+    "text-diff": {
+      "raw": 2142,
+      "gz": 1055,
+      "files": 1
+    },
+    "textstats": {
+      "raw": 172,
+      "gz": 164,
       "files": 1
     },
     "theme.svelte": {
-      "raw": 140138,
-      "gz": 49243,
+      "raw": 33411,
+      "gz": 12784,
       "files": 1
     },
     "yjs": {

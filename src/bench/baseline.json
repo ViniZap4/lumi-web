@@ -3,102 +3,207 @@
   "machine": "darwin/arm64/Apple M2",
   "node": "v26.13.1",
   "recordedAt": "2026-11-26",
-  "calibrationMs": 1.641083,
+  "calibrationMs": 1.616249,
   "benches": {
     "src/bench/calibration.bench.ts > calibration > calibration workload": {
-      "median": 1.641083,
+      "median": 1.616249,
       "norm": 1,
-      "rme": 0.3
+      "rme": 0.27
     },
     "src/bench/canvas.bench.ts > canvas 100 nodes > parseCanvas": {
-      "median": 0.122125,
-      "norm": 0.075478,
-      "rme": 0.89
+      "median": 0.121542,
+      "norm": 0.0752,
+      "rme": 0.37
     },
     "src/bench/canvas.bench.ts > canvas 1000 nodes > parseCanvas": {
-      "median": 1.279083,
-      "norm": 0.790523,
-      "rme": 0.53
+      "median": 1.279042,
+      "norm": 0.790071,
+      "rme": 0.4
     },
     "src/bench/kanban.bench.ts > kanban 480 cards > parseKanban": {
-      "median": 0.120541,
-      "norm": 0.073452,
+      "median": 0.115708,
+      "norm": 0.071473,
       "rme": 0.45
     },
     "src/bench/kanban.bench.ts > kanban 80 cards > parseKanban": {
-      "median": 0.02225,
-      "norm": 0.013751,
-      "rme": 2.43
+      "median": 0.021542,
+      "norm": 0.013307,
+      "rme": 0.9
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview cursor to another line, 10 KB block-dense > after: incremental layers": {
+      "median": 0.029125,
+      "norm": 0.01802,
+      "rme": 0.34
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview cursor to another line, 10 KB block-dense > before: full rebuild": {
+      "median": 0.488375,
+      "norm": 0.301672,
+      "rme": 0.78
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview cursor to another line, 100 KB block-dense > after: incremental layers": {
+      "median": 0.033459,
+      "norm": 0.020668,
+      "rme": 0.35
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview cursor to another line, 100 KB block-dense > before: full rebuild": {
+      "median": 5.555167,
+      "norm": 3.431455,
+      "rme": 1.13
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview cursor to another line, 300 KB block-dense > after: incremental layers": {
+      "median": 0.039541,
+      "norm": 0.024425,
+      "rme": 0.37
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview cursor to another line, 300 KB block-dense > before: full rebuild": {
+      "median": 19.152438,
+      "norm": 11.849927,
+      "rme": 1.83
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 10 KB block-dense > after: block layer + viewport inline layer, stepped through the change": {
+      "median": 0.0385,
+      "norm": 0.023782,
+      "rme": 0.37
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 10 KB block-dense > before: full rebuild (computeLivePreview + specsToDecorations)": {
+      "median": 0.486563,
+      "norm": 0.301044,
+      "rme": 0.78
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 10 KB block-dense > context: CodeMirror reparse of one keystroke (paid with or without Live Preview)": {
+      "median": 0.358375,
+      "norm": 0.221732,
+      "rme": 3.42
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 100 KB block-dense > after: block layer + viewport inline layer, stepped through the change": {
+      "median": 0.044542,
+      "norm": 0.027559,
+      "rme": 0.37
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 100 KB block-dense > before: full rebuild (computeLivePreview + specsToDecorations)": {
+      "median": 5.441458,
+      "norm": 3.366719,
+      "rme": 1.1
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 100 KB block-dense > context: CodeMirror reparse of one keystroke (paid with or without Live Preview)": {
+      "median": 1.006125,
+      "norm": 0.621489,
+      "rme": 5.29
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 300 KB block-dense > after: block layer + viewport inline layer, stepped through the change": {
+      "median": 0.057792,
+      "norm": 0.035757,
+      "rme": 0.35
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 300 KB block-dense > before: full rebuild (computeLivePreview + specsToDecorations)": {
+      "median": 19.133291,
+      "norm": 11.83808,
+      "rme": 1.69
+    },
+    "src/bench/live-preview-incremental.bench.ts > live preview keystroke, 300 KB block-dense > context: CodeMirror reparse of one keystroke (paid with or without Live Preview)": {
+      "median": 3.36425,
+      "norm": 2.078114,
+      "rme": 5.5
     },
     "src/bench/live-preview.bench.ts > live preview dense 100 KB > full rebuild (computeLivePreview + specsToDecorations)": {
-      "median": 4.381437,
-      "norm": 2.707898,
-      "rme": 0.69
+      "median": 4.322416,
+      "norm": 2.67435,
+      "rme": 0.63
     },
     "src/bench/live-preview.bench.ts > live preview dense 100 KB > keystroke (EditorView dispatch, one char)": {
-      "median": 6.284416,
-      "norm": 3.884013,
-      "rme": 3.34
+      "median": 1.107792,
+      "norm": 0.684289,
+      "rme": 5.83
     },
     "src/bench/live-preview.bench.ts > live preview prose 100 KB > full rebuild (computeLivePreview + specsToDecorations)": {
-      "median": 1.180917,
-      "norm": 0.729852,
-      "rme": 0.48
+      "median": 1.205,
+      "norm": 0.745553,
+      "rme": 0.43
     },
     "src/bench/live-preview.bench.ts > live preview prose 100 KB > keystroke (EditorView dispatch, one char)": {
-      "median": 1.724645,
-      "norm": 1.065898,
-      "rme": 1.58
+      "median": 0.40425,
+      "norm": 0.250116,
+      "rme": 4.08
     },
     "src/bench/live-preview.bench.ts > live preview prose 20 KB > full rebuild (computeLivePreview + specsToDecorations)": {
-      "median": 0.196042,
-      "norm": 0.121162,
-      "rme": 0.38
+      "median": 0.187625,
+      "norm": 0.116087,
+      "rme": 2.17
     },
     "src/bench/live-preview.bench.ts > live preview prose 20 KB > keystroke (EditorView dispatch, one char)": {
-      "median": 0.411417,
-      "norm": 0.254272,
-      "rme": 5.76
+      "median": 0.235937,
+      "norm": 0.145739,
+      "rme": 2.01
     },
     "src/bench/live-preview.bench.ts > live preview prose 200 KB > full rebuild (computeLivePreview + specsToDecorations)": {
-      "median": 2.543209,
-      "norm": 1.571802,
-      "rme": 0.49
+      "median": 2.541979,
+      "norm": 1.572764,
+      "rme": 0.64
     },
     "src/bench/live-preview.bench.ts > live preview prose 200 KB > keystroke (EditorView dispatch, one char)": {
-      "median": 3.242146,
-      "norm": 2.003772,
-      "rme": 1.29
+      "median": 0.424416,
+      "norm": 0.262593,
+      "rme": 4.28
     },
     "src/bench/markdown.bench.ts > markdown dense 100 KB > renderBlocks after a one-block edit": {
-      "median": 342.219875,
-      "norm": 208.532884,
-      "rme": 6.38
+      "median": 346.842395,
+      "norm": 214.246315,
+      "rme": 1.65
     },
     "src/bench/markdown.bench.ts > markdown dense 100 KB > renderMarkdown, unchanged source": {
-      "median": 353.22925,
-      "norm": 218.309367,
-      "rme": 5.51
+      "median": 347.832104,
+      "norm": 214.857663,
+      "rme": 3.57
     },
     "src/bench/markdown.bench.ts > markdown prose 10 KB > renderBlocks after a one-block edit": {
-      "median": 0.882083,
-      "norm": 0.5375,
-      "rme": 3.13
+      "median": 0.868334,
+      "norm": 0.536374,
+      "rme": 1.66
     },
     "src/bench/markdown.bench.ts > markdown prose 10 KB > renderMarkdown, unchanged source": {
-      "median": 0.819291,
-      "norm": 0.499238,
-      "rme": 2.46
+      "median": 0.796333,
+      "norm": 0.491899,
+      "rme": 1.57
     },
     "src/bench/markdown.bench.ts > markdown prose 100 KB > renderBlocks after a one-block edit": {
-      "median": 7.219229,
-      "norm": 4.399063,
-      "rme": 2.14
+      "median": 7.139,
+      "norm": 4.409797,
+      "rme": 1.2
     },
     "src/bench/markdown.bench.ts > markdown prose 100 KB > renderMarkdown, unchanged source": {
-      "median": 7.151271,
-      "norm": 4.357652,
-      "rme": 1.98
+      "median": 7.077271,
+      "norm": 4.371666,
+      "rme": 0.98
+    },
+    "src/bench/preview-doc-cache.bench.ts > preview one-block edit, 10 KB block-dense > after: per-document cache + incremental lex": {
+      "median": 0.237875,
+      "norm": 0.147177,
+      "rme": 2.88
+    },
+    "src/bench/preview-doc-cache.bench.ts > preview one-block edit, 10 KB block-dense > before: shared LRU (no document cache)": {
+      "median": 1.133416,
+      "norm": 0.700117,
+      "rme": 3.23
+    },
+    "src/bench/preview-doc-cache.bench.ts > preview one-block edit, 100 KB block-dense > after: per-document cache + incremental lex": {
+      "median": 1.497667,
+      "norm": 0.925117,
+      "rme": 2.81
+    },
+    "src/bench/preview-doc-cache.bench.ts > preview one-block edit, 100 KB block-dense > before: shared LRU (no document cache)": {
+      "median": 297.907958,
+      "norm": 184.019264,
+      "rme": 4.28
+    },
+    "src/bench/preview-doc-cache.bench.ts > preview one-block edit, 300 KB block-dense > after: per-document cache + incremental lex": {
+      "median": 4.30648,
+      "norm": 2.664489,
+      "rme": 1.96
+    },
+    "src/bench/preview-doc-cache.bench.ts > preview one-block edit, 300 KB block-dense > before: shared LRU (no document cache)": {
+      "median": 876.548834,
+      "norm": 542.3351,
+      "rme": 3.36
     }
   }
 }

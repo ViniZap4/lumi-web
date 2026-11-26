@@ -20,7 +20,8 @@
   import { registerStructuredViews } from '../lib/structured-views.ts';
   import { Workspace } from './vault/workspace.svelte.ts';
   import { provideWorkspace } from './vault/context.ts';
-  import { lazyComponent } from './vault/lazy.svelte.ts';
+  import { lazyComponent, whenIdle } from './vault/lazy.svelte.ts';
+  import { loadHoverCard, preloadBookChunks } from './vault/chunks.ts';
   import TopBar from './vault/TopBar.svelte';
   import BookBanners from './vault/BookBanners.svelte';
   import BookHome from './vault/BookHome.svelte';
@@ -38,7 +39,7 @@
   const VaultSettingsModal = lazyComponent(() => import('../components/VaultSettingsModal.svelte'));
   const VaultCreateModal = lazyComponent(() => import('../components/VaultCreateModal.svelte'));
   const HelpOverlay = lazyComponent(() => import('../components/HelpOverlay.svelte'));
-  const HoverCard = lazyComponent(() => import('../components/HoverCard.svelte'));
+  const HoverCard = lazyComponent(loadHoverCard);
 
   const ws = provideWorkspace(new Workspace());
   ws.install();
@@ -61,7 +62,9 @@
     } catch {
       /* jsdom */
     }
+    const cancelPreload = whenIdle(preloadBookChunks);
     return () => {
+      cancelPreload();
       offClick();
       window.removeEventListener('keydown', cmd.handleKey);
       window.removeEventListener('focusin', onFocusIn);

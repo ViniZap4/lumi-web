@@ -39,9 +39,10 @@
   import FxPromptBar from './explorer/FxPromptBar.svelte';
   import { FxController } from './explorer/fx-controller.svelte.ts';
   import { lazyComponent } from '../views/vault/lazy.svelte.ts';
+  import { loadFxNotePreview } from '../views/vault/chunks.ts';
 
   // The note preview renders markdown / mini canvases: a lazy chunk.
-  const FxNotePreview = lazyComponent(() => import('./explorer/FxNotePreview.svelte'));
+  const FxNotePreview = lazyComponent(loadFxNotePreview);
 
   interface Props {
     vaultID: string;

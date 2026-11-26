@@ -13,10 +13,11 @@
   import PaneTree from '../../components/PaneTree.svelte';
   import TocRail from '../../components/TocRail.svelte';
   import { lazyComponent } from './lazy.svelte.ts';
+  import { loadPrimaryNote, loadNotePane } from './chunks.ts';
   import { useWorkspace } from './context.ts';
 
-  const PrimaryNote = lazyComponent(() => import('./PrimaryNote.svelte'));
-  const NotePane = lazyComponent(() => import('../../components/NotePane.svelte'));
+  const PrimaryNote = lazyComponent(loadPrimaryNote);
+  const NotePane = lazyComponent(loadNotePane);
 
   const ws = useWorkspace();
   const { panes: pn, edit: ed, cmd } = ws;

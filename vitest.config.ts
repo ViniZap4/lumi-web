@@ -27,5 +27,11 @@ export default defineConfig({
     css: false,
     clearMocks: true,
     setupFiles: ['src/test/setup.ts'],
+    // Microbenchmarks (docs/PERF-BUDGETS.md): `npm run bench`, gated by
+    // scripts/perf/bench-gate.mjs against src/bench/baseline.json. Any
+    // WP may add `src/**/*.bench.ts`; the gate picks new ones up.
+    benchmark: {
+      include: ['src/**/*.bench.ts'],
+    },
   },
 })

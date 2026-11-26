@@ -1,0 +1,63 @@
+# Desempenho noturno do lumi-web (docs/PERF-BUDGETS.md, camada "avisa"):
+# build de produção + mock-server + scripts Playwright headless de
+# scripts/perf (motion 1× e 4× CPU, canvas, pan de canvas 4×). Estouros
+# de orçamento viram avisos; o job nunca bloqueia nada (continue-on-error).
+name: perf-nightly
+
+on:
+  schedule:
+    - cron: '17 5 * * *'   # 02:17 em Brasília
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: node:22.23.5-bookworm
+    timeout-minutes: 45
+    env:
+      GITEA_URL: ${{ vars.LAN_GIT_URL }}
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+    steps:
+      - name: checkout
+        env:
+          TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          [ -n "$GITEA_URL" ] || { echo "::error::defina a variável de organização LAN_GIT_URL"; exit 1; }
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git config --global "http.$GITEA_URL/.extraheader" "AUTHORIZATION: basic $auth"
+          git config --global --add safe.directory "$PWD"
+          git init -q .
+          git remote add origin "$GITEA_URL/${{ github.repository }}.git"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q FETCH_HEAD
+          git config --global --unset-all "http.$GITEA_URL/.extraheader"
+          git log --oneline -1
+
+      - name: npm ci
+        run: npm ci --no-audit
+
+      - name: build
+        run: npm run build
+
+      # playwright-core fica fora do package.json (só o job noturno precisa);
+      # versão fixa, com o chromium headless shell correspondente.
+      - name: playwright
+        run: |
+          npm i --no-save --no-audit playwright-core@1.54.2
+          npx --no-install playwright-core install --with-deps chromium-headless-shell
+
+      - name: e2e perf (avisa, não bloqueia)
+        run: node scripts/perf/nightly.mjs --out perf-nightly
+
+      - name: resumo
+        if: always()
+        run: cat perf-nightly/summary.json 2>/dev/null || true

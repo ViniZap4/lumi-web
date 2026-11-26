@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# nightly perf output (scripts/perf/nightly.mjs)
+perf-nightly

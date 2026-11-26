@@ -1,0 +1,984 @@
+{
+  "generatedBy": "scripts/perf/size-gate.mjs",
+  "gzipLevel": 9,
+  "metrics": {
+    "shell.js": {
+      "raw": 642107,
+      "gz": 214449
+    },
+    "entry.css": {
+      "raw": 46752,
+      "gz": 10228
+    },
+    "shell.css": {
+      "raw": 155172,
+      "gz": 29175
+    },
+    "editor.js": {
+      "raw": 852349,
+      "gz": 286317
+    }
+  },
+  "totals": {
+    "jsGz": 2432561,
+    "jsChunks": 194
+  },
+  "shellFiles": [
+    "assets/App.js",
+    "assets/canvas-view.js",
+    "assets/index.js",
+    "assets/theme.svelte.js"
+  ],
+  "chunks": {
+    "App": {
+      "raw": 456638,
+      "gz": 147011,
+      "files": 1
+    },
+    "canvas-view": {
+      "raw": 14600,
+      "gz": 5887,
+      "files": 1
+    },
+    "chunk-2Q5K7J3B": {
+      "raw": 195,
+      "gz": 162,
+      "files": 1
+    },
+    "chunk-5VM5RSS4": {
+      "raw": 368,
+      "gz": 272,
+      "files": 1
+    },
+    "chunk-HFQBQIA3": {
+      "raw": 1885,
+      "gz": 833,
+      "files": 1
+    },
+    "chunk-JWPE2WC7": {
+      "raw": 229,
+      "gz": 171,
+      "files": 1
+    },
+    "chunk-KQLB2F66": {
+      "raw": 10467,
+      "gz": 4346,
+      "files": 1
+    },
+    "chunk-KS47KZWR": {
+      "raw": 5601,
+      "gz": 2564,
+      "files": 1
+    },
+    "chunk-OY52VR5R": {
+      "raw": 15732,
+      "gz": 4404,
+      "files": 1
+    },
+    "chunk-TU62E6Q5": {
+      "raw": 508,
+      "gz": 356,
+      "files": 1
+    },
+    "chunk-XXDRQBXY": {
+      "raw": 232,
+      "gz": 208,
+      "files": 1
+    },
+    "cynefin-EF2NZ3EQ": {
+      "raw": 654413,
+      "gz": 138144,
+      "files": 1
+    },
+    "cytoscape.esm": {
+      "raw": 450317,
+      "gz": 143053,
+      "files": 1
+    },
+    "d3-scale": {
+      "raw": 41334,
+      "gz": 14941,
+      "files": 1
+    },
+    "flowDiagram-MALGAFMO": {
+      "raw": 65055,
+      "gz": 20714,
+      "files": 1
+    },
+    "graph": {
+      "raw": 23890,
+      "gz": 8269,
+      "files": 1
+    },
+    "index": {
+      "raw": 533775,
+      "gz": 172204,
+      "files": 5
+    },
+    "index.html": {
+      "raw": 30731,
+      "gz": 12308,
+      "files": 1
+    },
+    "live-text": {
+      "raw": 737,
+      "gz": 432,
+      "files": 1
+    },
+    "mermaid-render": {
+      "raw": 640959,
+      "gz": 151795,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-angular/dist/index.js": {
+      "raw": 5095,
+      "gz": 2371,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-cpp/dist/index.js": {
+      "raw": 100553,
+      "gz": 32461,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-css/dist/index.js": {
+      "raw": 25837,
+      "gz": 11351,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-go/dist/index.js": {
+      "raw": 30826,
+      "gz": 12340,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-html/dist/index.js": {
+      "raw": 28687,
+      "gz": 11388,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-java/dist/index.js": {
+      "raw": 40732,
+      "gz": 16134,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-javascript/dist/index.js": {
+      "raw": 86621,
+      "gz": 33531,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-jinja/dist/index.js": {
+      "raw": 20947,
+      "gz": 9128,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-json/dist/index.js": {
+      "raw": 2423,
+      "gz": 1479,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-less/dist/index.js": {
+      "raw": 16310,
+      "gz": 7227,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-liquid/dist/index.js": {
+      "raw": 21216,
+      "gz": 9491,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-markdown/dist/index.js": {
+      "raw": 44191,
+      "gz": 15306,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-php/dist/index.js": {
+      "raw": 97892,
+      "gz": 27919,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-python/dist/index.js": {
+      "raw": 45134,
+      "gz": 18641,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-rust/dist/index.js": {
+      "raw": 70809,
+      "gz": 25037,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-sass/dist/index.js": {
+      "raw": 23055,
+      "gz": 10000,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-sql/dist/index.js": {
+      "raw": 32329,
+      "gz": 12969,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-vue/dist/index.js": {
+      "raw": 3430,
+      "gz": 1708,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-wast/dist/index.js": {
+      "raw": 2632,
+      "gz": 1464,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-xml/dist/index.js": {
+      "raw": 14671,
+      "gz": 5863,
+      "files": 1
+    },
+    "node_modules/@codemirror/lang-yaml/dist/index.js": {
+      "raw": 12699,
+      "gz": 5494,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/apl.js": {
+      "raw": 2301,
+      "gz": 1197,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/asciiarmor.js": {
+      "raw": 786,
+      "gz": 404,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/asn1.js": {
+      "raw": 3981,
+      "gz": 1922,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/asterisk.js": {
+      "raw": 4480,
+      "gz": 1781,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/brainfuck.js": {
+      "raw": 606,
+      "gz": 325,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/clike.js": {
+      "raw": 22302,
+      "gz": 7788,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/clojure.js": {
+      "raw": 10815,
+      "gz": 3956,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/cmake.js": {
+      "raw": 783,
+      "gz": 461,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/cobol.js": {
+      "raw": 6201,
+      "gz": 2913,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/coffeescript.js": {
+      "raw": 3868,
+      "gz": 1673,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/commonlisp.js": {
+      "raw": 2323,
+      "gz": 1092,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/crystal.js": {
+      "raw": 5130,
+      "gz": 2049,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/css.js": {
+      "raw": 27132,
+      "gz": 8483,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/cypher.js": {
+      "raw": 3561,
+      "gz": 1521,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/d.js": {
+      "raw": 3719,
+      "gz": 1668,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/diff.js": {
+      "raw": 309,
+      "gz": 236,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/dockerfile.js": {
+      "raw": 1949,
+      "gz": 666,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/dtd.js": {
+      "raw": 2059,
+      "gz": 872,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/dylan.js": {
+      "raw": 4051,
+      "gz": 1644,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/ebnf.js": {
+      "raw": 1986,
+      "gz": 804,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/ecl.js": {
+      "raw": 5128,
+      "gz": 2285,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/eiffel.js": {
+      "raw": 1807,
+      "gz": 913,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/elm.js": {
+      "raw": 1891,
+      "gz": 807,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/erlang.js": {
+      "raw": 8095,
+      "gz": 2863,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/factor.js": {
+      "raw": 1672,
+      "gz": 614,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/fcl.js": {
+      "raw": 2075,
+      "gz": 947,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/forth.js": {
+      "raw": 2544,
+      "gz": 1311,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/fortran.js": {
+      "raw": 4652,
+      "gz": 2001,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/gas.js": {
+      "raw": 4567,
+      "gz": 1279,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/gherkin.js": {
+      "raw": 10159,
+      "gz": 4963,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/groovy.js": {
+      "raw": 4139,
+      "gz": 1755,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/haskell.js": {
+      "raw": 4166,
+      "gz": 1865,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/haxe.js": {
+      "raw": 7893,
+      "gz": 2917,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/http.js": {
+      "raw": 848,
+      "gz": 415,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/idl.js": {
+      "raw": 11634,
+      "gz": 4538,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/javascript.js": {
+      "raw": 17082,
+      "gz": 5715,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/julia.js": {
+      "raw": 5385,
+      "gz": 2124,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/livescript.js": {
+      "raw": 4087,
+      "gz": 1621,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/lua.js": {
+      "raw": 3395,
+      "gz": 1421,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/mathematica.js": {
+      "raw": 1916,
+      "gz": 813,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/mbox.js": {
+      "raw": 1397,
+      "gz": 653,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/mirc.js": {
+      "raw": 5920,
+      "gz": 2658,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/mllike.js": {
+      "raw": 4788,
+      "gz": 1535,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/modelica.js": {
+      "raw": 2788,
+      "gz": 1278,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/mscgen.js": {
+      "raw": 3510,
+      "gz": 966,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/mumps.js": {
+      "raw": 2069,
+      "gz": 975,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/nginx.js": {
+      "raw": 7341,
+      "gz": 2733,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/nsis.js": {
+      "raw": 6807,
+      "gz": 2957,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/ntriples.js": {
+      "raw": 2102,
+      "gz": 737,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/octave.js": {
+      "raw": 2306,
+      "gz": 1088,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/oz.js": {
+      "raw": 2896,
+      "gz": 1275,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/pascal.js": {
+      "raw": 2301,
+      "gz": 1188,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/perl.js": {
+      "raw": 9753,
+      "gz": 3399,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/pig.js": {
+      "raw": 2534,
+      "gz": 1354,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/powershell.js": {
+      "raw": 7769,
+      "gz": 3300,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/properties.js": {
+      "raw": 667,
+      "gz": 344,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/protobuf.js": {
+      "raw": 864,
+      "gz": 517,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/pug.js": {
+      "raw": 6674,
+      "gz": 1936,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/puppet.js": {
+      "raw": 2543,
+      "gz": 1190,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/python.js": {
+      "raw": 6475,
+      "gz": 2714,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/q.js": {
+      "raw": 4032,
+      "gz": 1664,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/r.js": {
+      "raw": 2942,
+      "gz": 1361,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/rpm.js": {
+      "raw": 1622,
+      "gz": 815,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/ruby.js": {
+      "raw": 5164,
+      "gz": 2132,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/sas.js": {
+      "raw": 9334,
+      "gz": 4069,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/scheme.js": {
+      "raw": 6368,
+      "gz": 2385,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/shell.js": {
+      "raw": 2571,
+      "gz": 1206,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/sieve.js": {
+      "raw": 1618,
+      "gz": 773,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/smalltalk.js": {
+      "raw": 2007,
+      "gz": 850,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/solr.js": {
+      "raw": 866,
+      "gz": 451,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/sparql.js": {
+      "raw": 3545,
+      "gz": 1612,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/spreadsheet.js": {
+      "raw": 1138,
+      "gz": 538,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/sql.js": {
+      "raw": 37052,
+      "gz": 10903,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/stex.js": {
+      "raw": 3124,
+      "gz": 1199,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/stylus.js": {
+      "raw": 25798,
+      "gz": 8587,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/swift.js": {
+      "raw": 3955,
+      "gz": 1783,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/tcl.js": {
+      "raw": 2356,
+      "gz": 1222,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/textile.js": {
+      "raw": 6801,
+      "gz": 2430,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/tiddlywiki.js": {
+      "raw": 2781,
+      "gz": 1063,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/tiki.js": {
+      "raw": 3249,
+      "gz": 1259,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/toml.js": {
+      "raw": 1138,
+      "gz": 537,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/troff.js": {
+      "raw": 960,
+      "gz": 439,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/ttcn-cfg.js": {
+      "raw": 4050,
+      "gz": 1687,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/ttcn.js": {
+      "raw": 4800,
+      "gz": 2103,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/turtle.js": {
+      "raw": 1977,
+      "gz": 896,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/vb.js": {
+      "raw": 3904,
+      "gz": 1776,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/vbscript.js": {
+      "raw": 5815,
+      "gz": 2544,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/velocity.js": {
+      "raw": 2671,
+      "gz": 1103,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/verilog.js": {
+      "raw": 8244,
+      "gz": 3466,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/vhdl.js": {
+      "raw": 3348,
+      "gz": 1510,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/webidl.js": {
+      "raw": 2517,
+      "gz": 1239,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/xquery.js": {
+      "raw": 6624,
+      "gz": 2553,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/yacas.js": {
+      "raw": 2154,
+      "gz": 1088,
+      "files": 1
+    },
+    "node_modules/@codemirror/legacy-modes/mode/z80.js": {
+      "raw": 1751,
+      "gz": 806,
+      "files": 1
+    },
+    "node_modules/katex/dist/katex.mjs": {
+      "raw": 261719,
+      "gz": 77082,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-S7VZAUFO.mjs": {
+      "raw": 1846,
+      "gz": 915,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-YGSQEFNW.mjs": {
+      "raw": 151861,
+      "gz": 42676,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-APKKGZFW.mjs": {
+      "raw": 42714,
+      "gz": 13864,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/bpmnIcons-APHXDYXF.mjs": {
+      "raw": 5213,
+      "gz": 1162,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-KJ2TOQU5.mjs": {
+      "raw": 65855,
+      "gz": 18683,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-L25IHNXF.mjs": {
+      "raw": 49911,
+      "gz": 15866,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
+      "raw": 81734,
+      "gz": 22314,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-L36ESFBY.mjs": {
+      "raw": 10134,
+      "gz": 3625,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/dagre-SPEB5RXH.mjs": {
+      "raw": 46157,
+      "gz": 16436,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/diagram-3B7GL73J.mjs": {
+      "raw": 81155,
+      "gz": 25015,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/diagram-DNEMPZML.mjs": {
+      "raw": 4315,
+      "gz": 1895,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/diagram-L3MUGCDN.mjs": {
+      "raw": 6111,
+      "gz": 2629,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/diagram-LA4NIPWU.mjs": {
+      "raw": 16340,
+      "gz": 5829,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/diagram-MHCOC4E2.mjs": {
+      "raw": 11029,
+      "gz": 4306,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/diagram-XPFHEONP.mjs": {
+      "raw": 8254,
+      "gz": 3689,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-UZSYDL2S.mjs": {
+      "raw": 2042,
+      "gz": 904,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/elk-XV6XMXQE.mjs": {
+      "raw": 1513007,
+      "gz": 460322,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-EYBAPDEH.mjs": {
+      "raw": 30716,
+      "gz": 10476,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-23REXITY.mjs": {
+      "raw": 53188,
+      "gz": 18123,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-STJD7YCW.mjs": {
+      "raw": 29454,
+      "gz": 8672,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-KBXO4MBG.mjs": {
+      "raw": 618,
+      "gz": 423,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-M35NCXHK.mjs": {
+      "raw": 17506,
+      "gz": 6617,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-OPLOXDXO.mjs": {
+      "raw": 23577,
+      "gz": 8301,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-BZKZHSQY.mjs": {
+      "raw": 20332,
+      "gz": 7147,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-I2QAS2VK.mjs": {
+      "raw": 22798,
+      "gz": 7560,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-FD4XPPHP.mjs": {
+      "raw": 1993,
+      "gz": 949,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-J4AKIIQI.mjs": {
+      "raw": 5122,
+      "gz": 2173,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-XTYBLID2.mjs": {
+      "raw": 33986,
+      "gz": 9823,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-MRQ6NCDL.mjs": {
+      "raw": 1643,
+      "gz": 777,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-Y7LWUY3S.mjs": {
+      "raw": 31082,
+      "gz": 9660,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-WGJFYUXA.mjs": {
+      "raw": 39949,
+      "gz": 14956,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-5NDRBG5M.mjs": {
+      "raw": 118962,
+      "gz": 31604,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
+      "raw": 973,
+      "gz": 543,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-FJ4FJNEA.mjs": {
+      "raw": 41786,
+      "gz": 13859,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-UMQ2AFYF.mjs": {
+      "raw": 123315,
+      "gz": 44942,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-OMPLPG4O.mjs": {
+      "raw": 551,
+      "gz": 371,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-SEUHKTQE.mjs": {
+      "raw": 30892,
+      "gz": 10131,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/usecaseDiagram-AFA6YXN4.mjs": {
+      "raw": 189940,
+      "gz": 50501,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-NNMJR3RB.mjs": {
+      "raw": 42023,
+      "gz": 15574,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-S7YFUSEH.mjs": {
+      "raw": 25539,
+      "gz": 6744,
+      "files": 1
+    },
+    "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-GGNKY7IX.mjs": {
+      "raw": 43569,
+      "gz": 12118,
+      "files": 1
+    },
+    "simple-mode": {
+      "raw": 2277,
+      "gz": 1093,
+      "files": 1
+    },
+    "src/components/canvas/CanvasView.svelte": {
+      "raw": 30603,
+      "gz": 10943,
+      "files": 1
+    },
+    "src/components/kanban/KanbanBoard.svelte": {
+      "raw": 25322,
+      "gz": 8857,
+      "files": 1
+    },
+    "src/components/NoteEditor.svelte": {
+      "raw": 45405,
+      "gz": 15692,
+      "files": 1
+    },
+    "src/components/StructuredPaneView.svelte": {
+      "raw": 6153,
+      "gz": 2647,
+      "files": 1
+    },
+    "src/lib/code-highlight.ts": {
+      "raw": 838,
+      "gz": 513,
+      "files": 1
+    },
+    "src/lib/editor-session.svelte.ts": {
+      "raw": 25444,
+      "gz": 8584,
+      "files": 1
+    },
+    "src/lib/live-text-y.ts": {
+      "raw": 801,
+      "gz": 487,
+      "files": 1
+    },
+    "src/lib/vimrc-editor.ts": {
+      "raw": 4421,
+      "gz": 2008,
+      "files": 1
+    },
+    "src/public/PublicReader.svelte": {
+      "raw": 4477,
+      "gz": 2060,
+      "files": 1
+    },
+    "src/views/SettingsView.svelte": {
+      "raw": 37931,
+      "gz": 11489,
+      "files": 1
+    },
+    "theme.svelte": {
+      "raw": 140138,
+      "gz": 49243,
+      "files": 1
+    },
+    "yjs": {
+      "raw": 87833,
+      "gz": 26845,
+      "files": 1
+    }
+  }
+}

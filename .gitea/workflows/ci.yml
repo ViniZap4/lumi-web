@@ -69,7 +69,17 @@ jobs:
       - name: build
         env:
           VITE_LUMI_SERVER_URL: https://lumi-api.example.ts.net
-        run: npm run build
+        # --manifest feeds the bundle gate; the Docker image builds without it.
+        run: npm run build -- --manifest
+
+      # Orçamentos de desempenho (docs/PERF-BUDGETS.md no guarda-chuva):
+      # bloqueia > 10 % sobre a baseline commitada; orçamentos absolutos
+      # com enforce=true também bloqueiam.
+      - name: perf — bundle gate
+        run: npm run perf:size:check
+
+      - name: perf — microbench gate
+        run: npm run bench:gate
 
       # Painel de administração (admin/): app SvelteKit separado, com lockfile próprio.
       - name: admin — npm ci

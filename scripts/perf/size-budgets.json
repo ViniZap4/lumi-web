@@ -1,0 +1,8 @@
+{
+  "$comment": "Absolute bundle budgets in gzip bytes (1 KB = 1024 B), from docs/PERF-BUDGETS.md (umbrella). enforce=false only warns; flip it to true in the PR that meets the budget. Tighten maxGz at each wave exit: shell.js 184320 (180 KB, wave 0) -> 143360 (140 KB, wave 1) -> 112640 (110 KB, end of Phase 3).",
+  "budgets": {
+    "shell.js": { "maxGz": 184320, "enforce": false, "note": "wave 0 exit; WP 0.8 (web decomposition) turns enforce on" },
+    "entry.css": { "maxGz": 18432, "enforce": true, "note": "entry CSS before first paint" },
+    "editor.js": { "maxGz": 225280, "enforce": false, "note": "editor increment over the shell; WP 0.5 drops the eager html/css/js grammars" }
+  }
+}

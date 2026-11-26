@@ -133,17 +133,21 @@ test.describe('reduced motion', () => {
   });
 });
 
+// Ambient loops that do not stop at idle today (found when this harness
+// landed, 2026-11-26): the wordmark's `mark-turn` loop and the home
+// blooms. PHASE3-PROPOSAL principle 1 / C15 cut or idle-stop them. Any
+// other animation still running fails the gate, and a KNOWN entry that
+// no longer shows up fails too, so this list only shrinks.
+const IDLE_KNOWN: Record<'home' | 'note', string[]> = {
+  home: ['mark-turn', 'ambient-drift-a', 'ambient-drift-b'],
+  note: ['mark-turn'],
+};
+
 test.describe('idle', () => {
   test.use({ viewport: { width: 1440, height: 900 }, contextOptions: { reducedMotion: 'no-preference' } });
 
   for (const where of ['home', 'note'] as const) {
     test(`no animation is running after 60 s idle · ${where}`, async ({ context, page }) => {
-      // Ratchet: today the wordmark's 60 s `mark-turn` loop and the home
-      // ambient blooms never stop (principle 1 / C15 cut or idle-stop
-      // them). Marked as an expected failure so the gate is visible
-      // now; when the design work lands this turns red, and the line
-      // below must go.
-      test.fail(true, 'known: ambient loops do not stop after 60 s idle (PHASE3-PROPOSAL §1.1, C15)');
       await seed(context, { motion: 'full' });
       await page.clock.install({ time: FIXED_NOW });
       await page.goto('/');
@@ -154,19 +158,34 @@ test.describe('idle', () => {
         await page.locator('[data-testid=md-body]').first().waitFor();
       }
       await page.mouse.move(2, 2);
+      // The fake clock drives timers and Date (idle timeouts), but not
+      // the document timeline: CSS/WAAPI animations only advance in real
+      // time. Run the animation timeline 100x through CDP so the next
+      // ~0.7 s of real time is ~70 s of animation time, and one-shot
+      // entrances have really finished before we look.
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Animation.enable');
+      await cdp.send('Animation.setPlaybackRate', { playbackRate: 100 });
       await page.clock.runFor(61_000);
-      // Let the compositor catch up with the fast-forwarded timers.
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(700);
       const running = await page.evaluate(() =>
         document
           .getAnimations()
           .filter((a) => a.playState === 'running')
           .map((a) => {
             const el = (a.effect as KeyframeEffect | null)?.target as Element | null;
-            return `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.constructor.name} on ${el?.tagName.toLowerCase() ?? '?'}.${el ? [...el.classList].join('.') : ''}`;
+            const name = String((a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id ?? a.constructor.name);
+            return { name, target: `${el?.tagName.toLowerCase() ?? '?'}.${el ? [...el.classList].join('.') : ''}` };
           }),
       );
-      expect(running, `animations still running after 60 s idle`).toEqual([]);
+      const known = IDLE_KNOWN[where];
+      for (const r of running.filter((r) => known.includes(r.name))) {
+        test.info().annotations.push({ type: 'known idle loop', description: `${r.name} on ${r.target}` });
+      }
+      const unexpected = running.filter((r) => !known.includes(r.name)).map((r) => `${r.name} on ${r.target}`);
+      expect(unexpected, 'animations still running after 60 s idle').toEqual([]);
+      const gone = known.filter((k) => !running.some((r) => r.name === k));
+      expect(gone, 'these loops now stop at idle: remove them from IDLE_KNOWN').toEqual([]);
     });
   }
 });

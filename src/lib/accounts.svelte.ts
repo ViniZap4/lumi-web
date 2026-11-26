@@ -22,9 +22,6 @@
 import { ApiClient, createClient, type RestOutcome } from './api.ts';
 import { ApiError, type SessionUser } from './types.ts';
 import { accountKey } from './books-model.ts';
-
-/** The pre-wave-2 session key (SPEC-LIVROS §2.5); only ever deleted now. */
-export const LEGACY_SESSION_KEY = 'lumi.v2.session';
 import {
   getDeviceKey,
   openDurableStore,
@@ -33,6 +30,9 @@ import {
   type DurableStore,
   type Sealed,
 } from './storage.ts';
+
+/** The pre-wave-2 session key (SPEC-LIVROS §2.5); only ever deleted now. */
+export const LEGACY_SESSION_KEY = 'lumi.v2.session';
 
 export interface AccountMeta {
   server_url: string;

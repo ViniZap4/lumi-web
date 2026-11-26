@@ -20,6 +20,7 @@
   import { PREVIEW_RATIO_MIN, PREVIEW_RATIO_MAX, clampRatio } from '../lib/editor-settings.ts';
   import { headingTarget, findRanges, nextMatchIndex, type PreviewAction } from '../lib/preview-keys.ts';
   import { motionAllowed } from '../lib/motion.ts';
+  import { clearFindHighlights, paintFindHighlights } from '../lib/find-highlight.ts';
 
   interface Props {
     /** Preview showing. Off → the editor alone, full width (the editor
@@ -322,23 +323,8 @@
     findInput?.select();
   }
 
-  function clearHighlights(): void {
-    try {
-      const hl = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights;
-      hl?.delete('lumi-find');
-      hl?.delete('lumi-find-current');
-    } catch { /* unsupported */ }
-  }
-
   function paint(): void {
-    clearHighlights();
-    const g = globalThis as { CSS?: { highlights?: Map<string, unknown> }; Highlight?: new (...r: Range[]) => unknown };
-    try {
-      if (g.CSS?.highlights && g.Highlight && ranges.length) {
-        g.CSS.highlights.set('lumi-find', new g.Highlight(...ranges));
-        if (matchIdx >= 0) g.CSS.highlights.set('lumi-find-current', new g.Highlight(ranges[matchIdx]));
-      }
-    } catch { /* unsupported */ }
+    paintFindHighlights(ranges, matchIdx);
     findInfo = findQuery ? (ranges.length ? `${matchIdx + 1}/${ranges.length}` : 'no match') : '';
   }
 
@@ -416,7 +402,7 @@
     }
   }
 
-  $effect(() => () => clearHighlights());
+  $effect(() => () => clearFindHighlights());
 </script>
 
 <div

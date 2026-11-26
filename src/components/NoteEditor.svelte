@@ -1,73 +1,7 @@
-<script lang="ts" module>
-  import { Vim } from '@replit/codemirror-vim';
-  import { installYankFlash } from '../lib/yank-flash.ts';
-  import { installVimUndo } from '../lib/editor-undo.ts';
-  import { motionAllowed } from '../lib/motion.ts';
-
-  /** Per-editor ex handlers. Vim ex commands are registered once on
-   *  the global Vim singleton; each dispatches to the editor it ran in
-   *  (the engine passes that editor's adapter, `cm.cm6` is its view),
-   *  so with several panes `:q` closes the right one. */
-  export interface ExHandlers {
-    exit(): void;
-    /** `:q` — the view decides: close the pane, or leave the editor. */
-    quit(): void;
-    settings(): void;
-    toggleMode(): void;
-    link(): void;
-    split(): void;
-    explore(): void;
-    follow(): void;
-    hover(): void;
-    /** `:vsplit [note]` / `:split [note]` / `:only` / `:close`. */
-    win(cmd: 'vsplit' | 'split' | 'only' | 'close' | 'zoom', arg: string): void;
-  }
-  const handlers = new WeakMap<object, ExHandlers>();
-  let lastFocused: ExHandlers | null = null;
-  function target(cm: unknown): ExHandlers | null {
-    const v = (cm as { cm6?: object } | null)?.cm6;
-    return (v && handlers.get(v)) || lastFocused;
-  }
-  type ExParams = { args?: string[]; argString?: string };
-  const argOf = (p: ExParams | undefined) => (p?.argString ?? p?.args?.join(' ') ?? '').trim();
-
-  let vimExRegistered = false;
-  function registerVimEx(): void {
-    if (vimExRegistered) return;
-    vimExRegistered = true;
-    // Edits are already persisted live; :w / :wq / :x just exit or no-op.
-    Vim.defineEx('quit', 'q', (cm: unknown) => target(cm)?.quit());
-    Vim.defineEx('wq', 'wq', (cm: unknown) => target(cm)?.exit());
-    Vim.defineEx('xit', 'x', (cm: unknown) => target(cm)?.exit());
-    Vim.defineEx('write', 'w', () => {});
-    // :settings opens the editor settings; :preview flips live/source.
-    Vim.defineEx('settings', 'settings', (cm: unknown) => target(cm)?.settings());
-    // `:preview split` toggles the side-by-side preview (Source mode).
-    Vim.defineEx('preview', 'preview', (cm: unknown, params: ExParams) => {
-      if (params?.args?.[0] === 'split') target(cm)?.split();
-      else target(cm)?.toggleMode();
-    });
-    // :link (and the default <leader>l) opens the markdown link helper.
-    Vim.defineEx('link', 'link', (cm: unknown) => target(cm)?.link());
-    // Panes (SPEC-PARTE2 §2–4): :explore (- and <leader>e), :follow (gf),
-    // :hover (K), :vsplit / :split [note], :only, :close.
-    Vim.defineEx('explore', 'exp', (cm: unknown) => target(cm)?.explore());
-    Vim.defineEx('follow', 'fol', (cm: unknown) => target(cm)?.follow());
-    Vim.defineEx('hover', 'hov', (cm: unknown) => target(cm)?.hover());
-    Vim.defineEx('vsplit', 'vs', (cm: unknown, p: ExParams) => target(cm)?.win('vsplit', argOf(p)));
-    Vim.defineEx('split', 'sp', (cm: unknown, p: ExParams) => target(cm)?.win('split', argOf(p)));
-    Vim.defineEx('only', 'on', (cm: unknown) => target(cm)?.win('only', ''));
-    Vim.defineEx('close', 'clo', (cm: unknown) => target(cm)?.win('close', ''));
-    Vim.defineEx('zoom', 'zo', (cm: unknown) => target(cm)?.win('zoom', ''));
-    // u / Ctrl-r / :undo / :redo → the session's Y.UndoManager.
-    installVimUndo();
-    // Neovim-style yank highlight (purely visual).
-    installYankFlash(Vim as never, () => !motionAllowed());
-  }
-</script>
-
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import { registerVimEx, bindExHandlers, focusExHandlers, releaseExHandlers, type ExHandlers } from '../lib/editor-ex.ts';
+  import { EDITOR_THEME } from '../lib/editor-theme.ts';
   import {
     EditorView,
     keymap,
@@ -88,7 +22,7 @@
   import { remoteActivity } from '../lib/remote-activity.svelte.ts';
   import { editorKeymap, vimInsertKeys } from '../lib/editor-keys.ts';
   import { yUndoExtension, yUndoKeymap } from '../lib/editor-undo.ts';
-  import { vim, getCM } from '@replit/codemirror-vim';
+  import { Vim, vim, getCM } from '@replit/codemirror-vim';
   import { yCollab } from 'y-codemirror.next';
   import { readOnlyYSync } from '../lib/read-only-sync.ts';
   import { remoteCaretGlide } from '../lib/remote-caret-glide.ts';
@@ -158,150 +92,6 @@
 
   let container: HTMLDivElement | null = $state(null);
 
-  // Editor chrome. Colours are theme tokens (see app.css for the Live
-  // Preview prose styles); layout keeps the text in a centred writing
-  // column with the gutter hugging it, while the scrollbar stays at
-  // the pane edge.
-  const mono = 'var(--font-mono)';
-  const EDITOR_THEME = {
-    '&': {
-      height: '100%',
-      fontFamily: 'var(--editor-font, var(--prose-font))',
-      background: 'transparent',
-      color: 'var(--color-text)',
-    },
-    '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': {
-      fontFamily: 'inherit',
-      lineHeight: 'var(--editor-leading, var(--prose-leading))',
-      padding: '0 var(--editor-pad-x, 24px)',
-      overscrollBehavior: 'contain',
-    },
-    // Centre content (and the gutter beside it): the free space goes
-    // to the gutter's left margin and the content's right margin.
-    '.cm-content': {
-      maxWidth: 'var(--editor-measure, none)',
-      marginInline: 'auto',
-      padding: 'var(--editor-pad-top, 40px) 0 40vh',
-      caretColor: 'var(--color-primary)',
-    },
-    '.cm-gutters ~ .cm-content': { marginLeft: '0' },
-    '.cm-line': { padding: '0 1px' },
-    '.cm-gutters': {
-      marginLeft: 'auto',
-      paddingTop: 'var(--editor-pad-top, 40px)',
-      background: 'transparent',
-      color: 'var(--md-marker)',
-      border: 'none',
-      fontFamily: mono,
-      fontSize: '0.74em',
-      fontVariantNumeric: 'tabular-nums',
-    },
-    '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 6px', minWidth: '28px', opacity: '0.75' },
-    '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--color-text)' },
-    '.cm-lineNumbers .cm-activeLineGutter': { opacity: '1' },
-    '.cm-foldGutter .cm-gutterElement': { padding: '0 6px 0 2px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-    '.cm-fold-marker': { display: 'inline-flex', color: 'var(--md-marker)', opacity: '0', cursor: 'pointer', transition: 'opacity 120ms, transform 120ms' },
-    '.cm-fold-marker[data-open="true"]': { transform: 'rotate(90deg)' },
-    '.cm-fold-marker[data-open="false"]': { opacity: '1', color: 'var(--color-primary)' },
-    '.cm-gutters:hover .cm-fold-marker': { opacity: '1' },
-    '.cm-foldPlaceholder': {
-      margin: '0 0.35em',
-      padding: '0 0.5em',
-      border: '1px solid var(--md-rule)',
-      borderRadius: '999px',
-      background: 'var(--md-inline-bg)',
-      color: 'var(--md-dim)',
-      fontFamily: mono,
-      fontSize: '0.8em',
-      cursor: 'pointer',
-    },
-    // Translucent bands only, so the selection layer (drawn beneath the
-    // text) is never covered.
-    '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--color-text) 3.5%, transparent)', borderRadius: '3px' },
-    '.cm-cursor, .cm-dropCursor': { borderLeft: '2px solid var(--color-primary)' },
-    '.cm-fat-cursor': { background: 'color-mix(in srgb, var(--color-primary) 80%, transparent) !important', color: 'var(--color-background) !important', borderRadius: '1px' },
-    '&:not(.cm-focused) .cm-fat-cursor': { background: 'none !important', outline: '1px solid var(--color-primary) !important' },
-    '.cm-selectionLayer .cm-selectionBackground': { background: 'var(--editor-selection-blur) !important' },
-    '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { background: 'var(--editor-selection) !important' },
-    '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' },
-    '.cm-searchMatch': {
-      backgroundColor: 'color-mix(in srgb, var(--color-warning) 26%, transparent)',
-      outline: '1px solid color-mix(in srgb, var(--color-warning) 55%, transparent)',
-      borderRadius: '2px',
-    },
-    '.cm-searchMatch.cm-searchMatch-selected, .cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--color-primary) 34%, transparent)', outlineColor: 'var(--color-primary)' },
-    '&.cm-focused .cm-matchingBracket': { backgroundColor: 'color-mix(in srgb, var(--color-accent) 22%, transparent)', outline: '1px solid color-mix(in srgb, var(--color-accent) 50%, transparent)' },
-    '&.cm-focused .cm-nonmatchingBracket': { backgroundColor: 'color-mix(in srgb, var(--color-error) 22%, transparent)' },
-    '.cm-yank-flash': {
-      backgroundColor: 'color-mix(in srgb, var(--color-accent) 38%, transparent)',
-      borderRadius: '2px',
-      animation: 'cm-yank-fade 220ms ease-out forwards',
-    },
-    '@keyframes cm-yank-fade': {
-      from: { backgroundColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)' },
-      to: { backgroundColor: 'color-mix(in srgb, var(--color-accent) 0%, transparent)' },
-    },
-    // Collaborators (y-codemirror): a 2px caret in their colour with a
-    // glowing head; the name tag shows while they move/type and fades
-    // after ~2.5 s idle, the caret dims when idle (app.css keyframes —
-    // every move re-creates the widget, restarting both). Hover any
-    // caret to see the name again.
-    '.cm-ySelection': { borderRadius: '2px', mixBlendMode: 'normal' },
-    '.cm-ySelectionCaret': {
-      borderLeftWidth: '2px',
-      borderRightWidth: '0',
-      marginRight: '0',
-      animation: 'peer-caret-in var(--spring-glide-ms) var(--spring-glide) both, peer-caret-idle 12s linear forwards',
-      // A box, so the glide (a transform, lib/remote-caret-glide.ts) applies.
-      display: 'inline-block',
-    },
-    // Gliding from its previous spot: no re-grow on arrival (that is for
-    // a caret that appears); the name tag still pops.
-    '.cm-ySelectionCaret.cm-ySelectionCaret-glide': { animation: 'peer-caret-idle 12s linear forwards' },
-    '.cm-ySelectionCaretDot': {
-      width: '6px',
-      height: '6px',
-      top: '-4px',
-      left: '-4px',
-      boxShadow: '0 0 0 2px var(--color-background)',
-    },
-    '.cm-ySelectionInfo': {
-      fontFamily: 'var(--font-sans)',
-      fontSize: '10.5px',
-      fontWeight: '650',
-      letterSpacing: '0.01em',
-      lineHeight: '1.5',
-      padding: '1px 6px',
-      borderRadius: '5px 5px 5px 1px',
-      top: '-1.55em',
-      left: '-2px',
-      // Dark ink on the collaborator's (always mid/light) colour: legible
-      // in light and dark themes alike.
-      color: 'rgb(14 16 26)',
-      boxShadow: '0 2px 8px -2px rgb(0 0 0 / 0.35)',
-      opacity: '1',
-      transformOrigin: 'bottom left',
-      animation: 'peer-label-in var(--spring-bouncy-ms) var(--spring-bouncy) both, peer-label 3.2s linear 0.4s forwards',
-    },
-    '.cm-ySelectionCaret:hover > .cm-ySelectionInfo': { opacity: '1', animation: 'none' },
-    '.cm-panels': {
-      background: 'color-mix(in srgb, var(--color-overlay-bg) 70%, var(--color-background))',
-      color: 'var(--color-text)',
-      fontFamily: mono,
-      fontSize: '13px',
-    },
-    '.cm-panels-bottom': { borderTop: '1px solid var(--hairline)' },
-    '.cm-vim-panel': { padding: '0 var(--editor-pad-x, 24px)', minHeight: '30px', alignItems: 'center' },
-    '.cm-vim-panel input': { color: 'var(--color-text)', background: 'transparent', font: 'inherit' },
-    '.cm-tooltip': {
-      background: 'var(--color-background)',
-      border: '1px solid var(--hairline)',
-      borderRadius: 'var(--radius)',
-      boxShadow: 'var(--shadow-pop)',
-      overflow: 'hidden',
-    },
-  };
   let view: EditorView | null = null;
 
   const vimC = new Compartment();
@@ -495,7 +285,7 @@
       }),
       EditorView.domEventHandlers({
         focus: () => {
-          lastFocused = exHandlers;
+          focusExHandlers(exHandlers);
           onfocus?.();
           return false;
         },
@@ -508,11 +298,10 @@
       state: EditorState.create({ doc: initialDoc, extensions }),
       parent: container,
     });
-    handlers.set(view, exHandlers);
+    bindExHandlers(view, exHandlers);
     // After the view (so after y-codemirror's observer): remote deltas
     // are already in the doc when the flash maps them.
     stopRemoteFlash = observeRemoteEdits(session.ytext, view, () => remoteActivity.bump(session.vaultID));
-    lastFocused = exHandlers;
     watchVim();
     emitStats();
     if (initialLine != null) {
@@ -688,7 +477,7 @@
   let stopRemoteFlash: (() => void) | null = null;
 
   function destroyEditor(): void {
-    if (lastFocused === exHandlers) lastFocused = null;
+    releaseExHandlers(exHandlers);
     stopRemoteFlash?.();
     stopRemoteFlash = null;
     if (statsTimer) {

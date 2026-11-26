@@ -350,10 +350,25 @@ server.on('upgrade', (req, socket, head) => {
         syncProtocol.readSyncMessage(dec, enc, d.doc, ws);
         if (encoding.length(enc) > 1) send(enc);
       } else if (type === 1) {
-        awarenessProtocol.applyAwarenessUpdate(d.awareness, decoding.readVarUint8Array(dec), ws);
+        const upd = decoding.readVarUint8Array(dec);
+        // Remember which awareness clients this socket owns (first varUint
+        // is the count, then clientID/clock/state triples).
+        const ad = decoding.createDecoder(upd);
+        for (let n = decoding.readVarUint(ad); n > 0; n--) {
+          owned.add(decoding.readVarUint(ad));
+          decoding.readVarUint(ad);
+          decoding.readVarString(ad);
+        }
+        awarenessProtocol.applyAwarenessUpdate(d.awareness, upd, ws);
       }
     });
-    ws.on('close', () => d.conns.delete(ws));
+    // Drop the socket's presence at once (as y-websocket's server does),
+    // so a closed tab is not a "peer" for the next 30 s.
+    const owned = new Set();
+    ws.on('close', () => {
+      d.conns.delete(ws);
+      if (owned.size) awarenessProtocol.removeAwarenessStates(d.awareness, [...owned], null);
+    });
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, 0);
     syncProtocol.writeSyncStep1(enc, d.doc);

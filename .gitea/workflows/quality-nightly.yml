@@ -1,0 +1,71 @@
+# Qualidade noturna do lumi-web (Phase 3, WP 0.10):
+# - matriz visual completa: 12 temas × 3 larguras (390/1024/1440) × 2
+#   esquemas de cor, e axe em todos os 12 temas (contraste dos temas
+#   escuros/identitários aparece aqui);
+# - testes de propriedade (fast-check) dos parsers de kanban e canvas com
+#   20 000 execuções cada (no PR, `npm test` roda poucas centenas).
+# Sem referências Linux da matriz no repo, a comparação visual é pulada
+# (aviso) e o job ainda falha em axe, em travamentos e em propriedades.
+name: quality-nightly
+
+on:
+  schedule:
+    - cron: '29 5 * * *'   # 02:29 em Brasília
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-nightly
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.54.2-noble
+    timeout-minutes: 60
+    env:
+      GITEA_URL: ${{ vars.LAN_GIT_URL }}
+      CI: "true"
+      E2E_MATRIX: full
+      NPM_CONFIG_FUND: "false"
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+    steps:
+      - name: checkout
+        env:
+          TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          [ -n "$GITEA_URL" ] || { echo "::error::defina a variável de organização LAN_GIT_URL"; exit 1; }
+          command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git >/dev/null; }
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git config --global "http.$GITEA_URL/.extraheader" "AUTHORIZATION: basic $auth"
+          git config --global --add safe.directory "$PWD"
+          git init -q .
+          git remote add origin "$GITEA_URL/${{ github.repository }}.git"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q FETCH_HEAD
+          git config --global --unset-all "http.$GITEA_URL/.extraheader"
+          git log --oneline -1
+
+      - name: npm ci
+        run: npm ci --no-audit
+
+      - name: propriedades (fast-check, 20 000 execuções)
+        run: npm run test:props
+
+      - name: build
+        run: npm run build
+
+      - name: playwright (matriz completa)
+        run: |
+          set -eu
+          extra=""
+          if [ ! -d e2e/__snapshots__/linux/matrix ]; then
+            echo "::warning::sem referências visuais Linux da matriz; comparação visual pulada (axe e travamentos continuam valendo)"
+            extra="--ignore-snapshots"
+          fi
+          npx playwright test --project matrix $extra

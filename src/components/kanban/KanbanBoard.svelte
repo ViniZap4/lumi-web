@@ -77,16 +77,29 @@
   let filterOpen = $state(false);
   const needle = $derived(filter.trim().toLowerCase());
 
+  // Card HTML memo (two generations): each pass looks up the previous
+  // pass's map, so a board edit or a filter keystroke renders only the
+  // cards whose text changed, and the memo never outgrows the board.
+  let cardHTML = new Map<string, string>();
   const lanesVM = $derived.by((): LaneVM[] => {
     const keys = keysOf(board);
-    return board.lanes.map((lane, li) => ({
+    const prev = cardHTML;
+    const next = new Map<string, string>();
+    const html = (text: string): string => {
+      let h = next.get(text) ?? prev.get(text);
+      if (h === undefined) h = renderMarkdown(text);
+      next.set(text, h);
+      return h;
+    };
+    const vm = board.lanes.map((lane, li) => ({
       key: keys.lanes[li],
       lane,
       total: lane.cards.length,
-      cards: lane.cards
-        .map((card, ci) => ({ key: keys.cards[li][ci], card, html: renderMarkdown(card.text) }))
-        .filter((c) => !needle || c.card.text.toLowerCase().includes(needle)),
+      cards: lane.cards.flatMap((card, ci) =>
+        !needle || card.text.toLowerCase().includes(needle) ? [{ key: keys.cards[li][ci], card, html: html(card.text) }] : []),
     }));
+    cardHTML = next;
+    return vm;
   });
   const shape = $derived(lanesVM.map((l) => l.cards.length));
 

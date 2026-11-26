@@ -1,0 +1,75 @@
+# Harness de qualidade headless do lumi-web (Phase 3, WP 0.10): Playwright
+# contra o mock-server (scripts/perf/mock-server.mjs) servindo o build de
+# produção. No PR: snapshots visuais em 2 temas, movimento (Reduzir
+# movimento: 0 transforms, só opacidade ≤ 100 ms; ocioso) e axe (0
+# serious/critical). Matriz completa: quality-nightly.yml.
+#
+# A imagem é a oficial do Playwright na MESMA versão do @playwright/test:
+# navegadores e fontes fixos, então as referências Linux gravadas com
+# `npm run e2e:linux` batem pixel a pixel. Sem referências Linux no repo,
+# a etapa visual é pulada (aviso) e movimento + axe continuam bloqueando.
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.54.2-noble
+    timeout-minutes: 20
+    env:
+      GITEA_URL: ${{ vars.LAN_GIT_URL }}
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+    steps:
+      - name: checkout
+        env:
+          TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -eu
+          [ -n "$GITEA_URL" ] || { echo "::error::defina a variável de organização LAN_GIT_URL"; exit 1; }
+          command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git >/dev/null; }
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git config --global "http.$GITEA_URL/.extraheader" "AUTHORIZATION: basic $auth"
+          git config --global --add safe.directory "$PWD"
+          git init -q .
+          git remote add origin "$GITEA_URL/${{ github.repository }}.git"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q FETCH_HEAD
+          git config --global --unset-all "http.$GITEA_URL/.extraheader"
+          git log --oneline -1
+          node --version
+
+      - name: npm ci
+        run: npm ci --no-audit
+
+      - name: build
+        run: npm run build
+
+      - name: playwright (smoke)
+        run: |
+          set -eu
+          extra=""
+          if [ ! -d e2e/__snapshots__/linux/smoke ]; then
+            echo "::warning::sem referências visuais Linux (e2e/__snapshots__/linux/smoke); etapa visual pulada. Grave com: npm run e2e:linux"
+            extra="--ignore-snapshots"
+          fi
+          npx playwright test --project smoke $extra
+
+      - name: relatório
+        if: failure()
+        run: ls -R e2e/.results 2>/dev/null | head -100 || true

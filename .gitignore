@@ -25,3 +25,9 @@ dist-ssr
 
 # nightly perf output (scripts/perf/nightly.mjs)
 perf-nightly
+
+# Playwright quality harness (playwright.config.ts): run output, and the
+# nightly matrix's local baselines (only Linux CI references are canonical).
+e2e/.results
+e2e/.report
+e2e/__snapshots__/*/matrix

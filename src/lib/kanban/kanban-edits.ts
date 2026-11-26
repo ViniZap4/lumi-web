@@ -85,6 +85,18 @@ function cardInsertion(
     const l = lineAt(at);
     if (/^\*\*Complete\*\*[ \t]*$/.test(l.s)) at = l.end;
   }
+  // Indented lines with no card above them (and blank lines before
+  // more of them) would become the new card's continuation lines,
+  // changing its text. Land after them (found by the fast-check
+  // property tests).
+  for (let p = at; p < lane.end; ) {
+    const l = lineAt(p);
+    if (/^[ \t]+\S/.test(l.s)) {
+      at = l.end;
+      blank = true;
+    } else if (!/^[ \t]*$/.test(l.s)) break;
+    p = l.end;
+  }
   const atEOFNoBreak = at === t.length && t.length > 0 && !t.endsWith('\n');
   return { at, before: (atEOFNoBreak ? eol : '') + (blank ? '' : eol), after: atEOFNoBreak ? '' : eol };
 }

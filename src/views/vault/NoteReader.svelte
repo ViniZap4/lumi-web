@@ -9,7 +9,7 @@
   import { toasts } from '../../lib/toasts.svelte.ts';
   import { editorSettings } from '../../lib/editor-settings.svelte.ts';
   import { keyLabel } from '../../lib/platform.ts';
-  import { renderBlocks, taskToggle, startsWithTitle } from '../../lib/markdown.ts';
+  import { renderBlocks, createDocRenderCache, taskToggle, startsWithTitle } from '../../lib/markdown.ts';
   import { toggleTaskHeadless } from '../../lib/editor-boot.ts';
   import { canTogglePublish, isPublished } from '../../lib/publish.ts';
   import { countWords, readingTime } from '../../lib/textstats.ts';
@@ -22,9 +22,10 @@
   const ws = useWorkspace();
   const { panes: pn, edit: ed, explorer: ex } = ws;
 
-  // Sanitised preview HTML, recomputed on every content change (the
-  // block cache in lib/markdown keeps unchanged blocks).
-  const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
+  // Sanitised preview HTML. Per-document cache: a one-block edit
+  // re-lexes and re-renders that block only (lib/markdown.ts DocRenderCache).
+  const docCache = createDocRenderCache();
+  const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '', { cache: docCache }) : []);
   const readingWords = $derived(notes.content ? countWords(notes.content.body ?? '') : 0);
   const readingMinutes = $derived(readingTime(readingWords));
   /** The body opens with `# <title>`: don't print the title twice. */

@@ -6,7 +6,7 @@
   import { uiState } from '../../lib/uistate.svelte.ts';
   import { editorSettings } from '../../lib/editor-settings.svelte.ts';
   import { keyLabel } from '../../lib/platform.ts';
-  import { renderBlocks, taskToggle } from '../../lib/markdown.ts';
+  import { renderBlocks, createDocRenderCache, taskToggle } from '../../lib/markdown.ts';
   import { MARKDOWN_VIEW } from '../../lib/note-views.ts';
   import type { EditorSession } from '../../lib/editor-session.svelte.ts';
   import MarkdownView from '../../components/MarkdownView.svelte';
@@ -21,7 +21,10 @@
   const ws = useWorkspace();
   const { panes: pn, edit: ed, cmd } = ws;
 
-  const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '') : []);
+  // Per-document cache: a one-block edit re-lexes and re-renders that
+  // block only (lib/markdown.ts DocRenderCache).
+  const docCache = createDocRenderCache();
+  const previewBlocks = $derived(notes.content ? renderBlocks(notes.content.body ?? '', { cache: docCache }) : []);
   const ownsEdge = $derived(!pn.multi || pn.activeLeafId === pn.primaryLeaf);
 
   /** Split preview: the editor owns the doc — dispatch the 1-char

@@ -123,6 +123,20 @@
   const groups = $derived(nodes.filter((n) => n.type === 'group') as GroupNode[]);
   const cards = $derived(nodes.filter((n) => n.type !== 'group'));
 
+  // Rendered text-node HTML by source. Every edit re-parses the canvas
+  // into new node objects; unchanged text skips the markdown renderer.
+  // Bounded by the node count (cleared when it outgrows it).
+  const textHTML = new Map<string, string>();
+  function textNodeHTML(text: string): string {
+    let html = textHTML.get(text);
+    if (html === undefined) {
+      if (textHTML.size > 2 * nodes.length + 64) textHTML.clear();
+      html = renderMarkdown(text);
+      textHTML.set(text, html);
+    }
+    return html;
+  }
+
   const MAX_BYTES = 4 * 1024 * 1024;
   function commit(op: CanvasOp): boolean {
     if (!editable) {
@@ -148,6 +162,36 @@
   let w = $state(0);
   let h = $state(0);
   let view = $state<Viewport>({ x: 0, y: 0, zoom: 1 });
+
+  // Viewport culling (WP0.5): a big canvas mounts only the cards near
+  // the viewport. The window is the visible world rect grown by one
+  // viewport on each side, snapped to half-viewport steps, so a pan
+  // re-filters only when it crosses a step, never per frame (the key is
+  // a string, so an unchanged window does not invalidate anything).
+  // Selected and edited cards always stay mounted.
+  const CULL_MIN = 120;
+  const cullKey = $derived.by((): string => {
+    if (cards.length < CULL_MIN || w <= 0 || h <= 0) return '';
+    const z = view.zoom || 1;
+    const vw = w / z;
+    const vh = h / z;
+    const x0 = -view.x / z;
+    const y0 = -view.y / z;
+    const sx = vw / 2;
+    const sy = vh / 2;
+    const l = Math.floor((x0 - vw) / sx) * sx;
+    const t = Math.floor((y0 - vh) / sy) * sy;
+    const r = Math.ceil((x0 + 2 * vw) / sx) * sx;
+    const b = Math.ceil((y0 + 2 * vh) / sy) * sy;
+    return `${l} ${t} ${r} ${b}`;
+  });
+  const shownCards = $derived.by((): CanvasNode[] => {
+    if (!cullKey) return cards;
+    const [l, t, r, b] = cullKey.split(' ').map(Number);
+    const keep = new Set(selected);
+    if (editing) keep.add(editing.id);
+    return cards.filter((n) => keep.has(n.id) || (n.x < r && n.x + n.width > l && n.y < b && n.y + n.height > t));
+  });
   // The opening reveal staggers node pops; after it, spawns are instant.
   let opening = $state(true);
   $effect(() => {
@@ -887,7 +931,7 @@
       {/if}
     {/each}
 
-    {#each cards as n, ni (n.id)}
+    {#each shownCards as n, ni (n.id)}
       {@const c = colorCSS(n.color)}
       {@const sel = selected.includes(n.id)}
       <div
@@ -902,7 +946,7 @@
             <textarea class="cv-text-edit" bind:value={editing.draft} use:focusEl oninput={onTyping} onkeydown={onEditKey} onblur={finishEdit} aria-label="Text node"></textarea>
           {:else}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div class="cv-body cv-scrollable lumi-prose compact md-body" onclick={onTextClick}>{@html renderMarkdown((n as TextNode).text)}</div>
+            <div class="cv-body cv-scrollable lumi-prose compact md-body" onclick={onTextClick}>{@html textNodeHTML((n as TextNode).text)}</div>
           {/if}
         {:else if n.type === 'file'}
           {@const f = (n as FileNode).file}

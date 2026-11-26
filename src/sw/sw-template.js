@@ -7,13 +7,14 @@
  * headers) and never sees note content — that lives in IndexedDB.
  *
  *   install   precache index.html + every built asset (hashed names)
- *             except the lazy diagram renderer (mermaid)
+ *             except the lazy chunks (mermaid, code-block grammars)
  *   activate  drop caches of older builds, take control
  *   navigate  network first (a deploy is picked up at once when
  *             online), cached index.html when the network fails
- *   assets    cache first for the precached build files; the mermaid
+ *   assets    cache first for the precached build files; the lazy
  *             chunks are cached on first use (cache first, bounded,
- *             per build) so a diagram type seen once works offline;
+ *             per build) so a diagram type or code language seen once
+ *             works offline;
  *             network for everything else
  *
  * No skipWaiting on install: a new build waits until every tab of the

@@ -9,7 +9,7 @@
   import { notes } from '../lib/notes.svelte.ts';
   import { books } from '../lib/books.svelte.ts';
   import { loadNote, peekNote } from '../lib/note-content.ts';
-  import { renderBlocks, startsWithTitle, taskToggle } from '../lib/markdown.ts';
+  import { renderBlocks, startsWithTitle, taskToggle, createDocRenderCache } from '../lib/markdown.ts';
   import { dirOf } from '../lib/notetree.ts';
   import { editorSettings } from '../lib/editor-settings.svelte.ts';
   import { acquireEditorSession, editorPool, toggleTaskHeadless } from '../lib/editor-boot.ts';
@@ -74,7 +74,8 @@
   const title = $derived(meta?.title ?? content?.id ?? p.leaf.note);
   const folder = $derived(path ? dirOf(path) : '');
   const body = $derived(content?.body ?? '');
-  const blocks = $derived(content ? renderBlocks(body) : []);
+  const docCache = createDocRenderCache();
+  const blocks = $derived(content ? renderBlocks(body, { cache: docCache }) : []);
   const titleInBody = $derived(!!content && startsWithTitle(body, title));
   const match = $derived({ path, kind: content?.kind ?? meta?.kind ?? null, frontmatter: content?.frontmatter ?? null, body });
   const views = $derived(viewsFor(match));

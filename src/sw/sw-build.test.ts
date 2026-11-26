@@ -157,3 +157,24 @@ describe('registerServiceWorker', () => {
     warn.mockRestore();
   });
 });
+
+describe('lazy code-block grammars', async () => {
+  const { isLazyGrammarModule } = await import('./sw-build.ts');
+  it('legacy modes and lang-* (not lang-markdown) are lazy roots', () => {
+    expect(isLazyGrammarModule('/w/node_modules/@codemirror/legacy-modes/mode/shell.js')).toBe(true);
+    expect(isLazyGrammarModule('/w/node_modules/@codemirror/lang-javascript/dist/index.js')).toBe(true);
+    expect(isLazyGrammarModule('/w/node_modules/@codemirror/lang-html/dist/index.js')).toBe(true);
+    expect(isLazyGrammarModule('/w/node_modules/@lezer/javascript/dist/index.js')).toBe(true);
+  });
+  it('the editor core stays precached', () => {
+    for (const id of [
+      '/w/node_modules/@codemirror/lang-markdown/dist/index.js',
+      '/w/node_modules/@lezer/markdown/dist/index.js',
+      '/w/node_modules/@lezer/common/dist/index.js',
+      '/w/node_modules/@lezer/lr/dist/index.js',
+      '/w/node_modules/@lezer/highlight/dist/index.js',
+      '/w/node_modules/@codemirror/language-data/dist/index.js',
+      '/w/src/lib/markdown-lang.ts',
+    ]) expect(isLazyGrammarModule(id)).toBe(false);
+  });
+});

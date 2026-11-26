@@ -4,9 +4,8 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { AccountRegistry, TAB_ACCOUNTS_KEY, type AccountMeta } from './accounts.svelte.ts';
+import { AccountRegistry, TAB_ACCOUNTS_KEY, LEGACY_SESSION_KEY, type AccountMeta } from './accounts.svelte.ts';
 import { IndexedDBStore, MemoryStore, getDeviceKey } from './storage.ts';
-import { LEGACY_SESSION_KEY, encryptLegacySessionForTest } from './legacy-session.ts';
 import { ApiError } from './types.ts';
 
 class MemStorage implements Storage {
@@ -32,7 +31,7 @@ let durable: MemoryStore;
 let tab: MemStorage;
 let local: MemStorage;
 const mk = (extra: Partial<ConstructorParameters<typeof AccountRegistry>[0]> = {}) =>
-  new AccountRegistry({ durable, tab, legacy: local, defaultServerUrl: 'https://lumi.work.com/', ...extra });
+  new AccountRegistry({ durable, tab, legacy: local, ...extra });
 
 beforeEach(() => {
   durable = new MemoryStore();
@@ -40,34 +39,8 @@ beforeEach(() => {
   local = new MemStorage();
 });
 
-describe('legacy lumi.v2.session migration (§2.5)', () => {
-  it('preserves the session, re-seals it with the device key and deletes the fixed-key blob', async () => {
-    local.setItem(LEGACY_SESSION_KEY, await encryptLegacySessionForTest({
-      token: 'legacy-token-123',
-      expires_at: '2026-12-31T00:00:00Z',
-      user: { id: 'u1', username: 'ana', display_name: 'Ana' },
-    }));
-    const reg = mk();
-    await reg.init();
-
-    expect(reg.list).toHaveLength(1);
-    const a = reg.list[0];
-    expect(a).toMatchObject({
-      key: 'https://lumi.work.com#ana', server_url: 'https://lumi.work.com', username: 'ana',
-      user_id: 'u1', status: 'ok', remember: true, expires_at: '2026-12-31T00:00:00Z',
-    });
-    expect(reg.tokenFor(a.key)).toBe('legacy-token-123');
-    // Old entry gone; new record sealed, token never in plaintext.
-    expect(local.getItem(LEGACY_SESSION_KEY)).toBeNull();
-    expect(dumpAll(durable, tab, local)).not.toContain('legacy-token-123');
-
-    // Survives a "reload" (new registry over the same storage).
-    const again = mk();
-    await again.init();
-    expect(again.tokenFor('https://lumi.work.com#ana')).toBe('legacy-token-123');
-  });
-
-  it('drops an undecryptable legacy blob without creating an account', async () => {
+describe('legacy lumi.v2.session (§2.5, no longer migrated)', () => {
+  it('deletes the fixed-key blob unread and creates no account', async () => {
     local.setItem(LEGACY_SESSION_KEY, '{"iv":"AAAA","ct":"BBBB"}');
     const reg = mk();
     await reg.init();
@@ -75,13 +48,11 @@ describe('legacy lumi.v2.session migration (§2.5)', () => {
     expect(local.getItem(LEGACY_SESSION_KEY)).toBeNull();
   });
 
-  it('falls back to the pre-wave-2 default server when no VITE_LUMI_SERVER_URL is set', async () => {
-    local.setItem(LEGACY_SESSION_KEY, await encryptLegacySessionForTest({
-      token: 't', expires_at: '', user: { id: 'u', username: 'bo', display_name: '' },
-    }));
-    const reg = mk({ defaultServerUrl: null });
+  it('a device without the blob boots normally', async () => {
+    const reg = mk();
     await reg.init();
-    expect(reg.list[0].server_url).toBe('http://localhost:8080');
+    expect(reg.ready).toBe(true);
+    expect(local.getItem(LEGACY_SESSION_KEY)).toBeNull();
   });
 });
 

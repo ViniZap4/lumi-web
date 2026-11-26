@@ -45,6 +45,18 @@ async function key(k: string, o: Partial<KeyboardEventInit> = {}): Promise<void>
   await settle();
 }
 
+/** The note preview is a lazy chunk: poll for it instead of a fixed sleep. */
+async function waitForEl(sel: string, ms = 3000): Promise<Element | null> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const el = target.querySelector(sel);
+    if (el) return el;
+    await new Promise((r) => setTimeout(r, 10));
+    await settle();
+  }
+  return target.querySelector(sel);
+}
+
 const rows = () => Array.from(target.querySelectorAll('[data-testid="col-fx-cur"] [role="option"] .name')).map((e) => e.textContent);
 const cursor = () => target.querySelector('[data-testid="col-fx-cur"] [aria-selected="true"] .name')?.textContent ?? null;
 
@@ -146,9 +158,7 @@ describe('floating explorer', () => {
 
   it('the note preview is rendered through the sanitizer', async () => {
     await open('sites');
-    await new Promise((r) => setTimeout(r, 150));
-    await settle();
-    const md = target.querySelector('.fx-preview .md-body');
+    const md = await waitForEl('.fx-preview .md-body');
     expect(md?.textContent).toContain('body of sites');
     expect(md?.innerHTML).not.toContain('<script');
   });
@@ -156,9 +166,7 @@ describe('floating explorer', () => {
   it('a canvas previews as a mini canvas (not raw JSON); kind icon + "· canvas" when titles collide', async () => {
     notes.list = [...notes.list, { ...note('map', 'trip/map.canvas', 'Plan'), kind: 'canvas' }];
     await open('map');
-    await new Promise((r) => setTimeout(r, 150));
-    await settle();
-    const mini = target.querySelector('.fx-preview [data-testid="canvas-mini"]');
+    const mini = await waitForEl('.fx-preview [data-testid="canvas-mini"]');
     expect(mini).not.toBeNull();
     expect(target.querySelector('.fx-preview')!.textContent).not.toContain('"nodes"');
     expect(mini!.querySelectorAll('.cm-card')).toHaveLength(2);
@@ -175,9 +183,7 @@ describe('floating explorer', () => {
   it('a kanban note previews as a mini board', async () => {
     notes.list = [...notes.list, note('board', 'trip/board.md', 'Board')];
     await open('board');
-    await new Promise((r) => setTimeout(r, 150));
-    await settle();
-    const mini = target.querySelector('.fx-preview [data-testid="kanban-mini"]');
+    const mini = await waitForEl('.fx-preview [data-testid="kanban-mini"]');
     expect(mini).not.toBeNull();
     expect(Array.from(mini!.querySelectorAll('.km-title')).map((e) => e.textContent)).toEqual(['Todo', 'Done']);
     expect(mini!.textContent).toContain('pack');

@@ -1,38 +1,25 @@
 <script lang="ts">
-  // Tabbed settings modal for the active vault. Two sections today:
-  // Members (list, role change, remove) and Invites (list, create,
-  // revoke). Roles are read-only here — the dropdown surfaces them
-  // for member-role changes and invite creation, but custom-role
-  // CRUD is a later polish slice.
+  // Tabbed settings modal for the active book: Members, Invites, Roles,
+  // Sharing and Federation. State and actions live in
+  // vault-settings/settings.svelte.ts; each tab is a component. This
+  // file owns the dialog, the tab strip and the keyboard.
   //
-  // Capability gating: we read the current user's row from the
-  // members list and pre-hide affordances they can't use. The server
-  // is the source of truth either way (it will reject without the
-  // capability), so this is purely UX.
-
+  // Capability gating: affordances the current user cannot use are
+  // hidden. The server is the source of truth either way (it rejects
+  // without the capability), so this is purely UX.
   import { onMount, onDestroy, tick } from 'svelte';
   import { captureFocus, focusables, isTextTarget, newChord, rovingKey, trapTab } from '../lib/list-keys.ts';
-  import { auth } from '../lib/auth.svelte.ts';
   import { vaults } from '../lib/vaults.svelte.ts';
-  import {
-    vaultMembers,
-    type CreateInviteInput,
-    type CreateRoleInput,
-    type UpdateRoleInput,
-  } from '../lib/vaultmembers.svelte.ts';
-  import { federation, validateMemberKey } from '../lib/federation.svelte.ts';
-  import { federationRowView } from '../lib/federation-view.ts';
-  import { publishConsentText, publishScope } from '../lib/publish.ts';
-  import {
-    ApiError,
-    type Federation,
-    type FederationInvite,
-    type FederatedMember,
-    type Invite,
-    type RemoteMember,
-    type RemoteRole,
-  } from '../lib/types.ts';
-  import { CAPABILITY_CATALOGUE, hasCapability } from '../lib/capabilities.ts';
+  import { vaultMembers } from '../lib/vaultmembers.svelte.ts';
+  import { federation } from '../lib/federation.svelte.ts';
+  import { VaultSettingsController } from './vault-settings/settings.svelte.ts';
+  import { isInviteActive } from './vault-settings/format.ts';
+  import MembersTab from './vault-settings/MembersTab.svelte';
+  import InvitesTab from './vault-settings/InvitesTab.svelte';
+  import RolesTab from './vault-settings/RolesTab.svelte';
+  import SharingTab from './vault-settings/SharingTab.svelte';
+  import FederationTab from './vault-settings/FederationTab.svelte';
+  import SettingsConfirms from './vault-settings/SettingsConfirms.svelte';
 
   interface Props { onclose: () => void; }
   const { onclose }: Props = $props();
@@ -40,123 +27,18 @@
   type Tab = 'members' | 'invites' | 'roles' | 'sharing' | 'federation';
   let tab = $state<Tab>('members');
 
-  // ---- capability gates (UX only — server still enforces) ----
-  //
-  // Use the wildcard-aware hasCapability so an Admin (role granted `*`)
-  // sees every affordance. Previous slice used raw .includes() with
-  // misspelled namespace strings — neither one worked for admins.
-  let myCaps = $derived(vaultMembers.capabilitiesOf(auth.user?.id));
-  let canManageMembers = $derived(hasCapability(myCaps, 'members.manage'));
-  let canInvite = $derived(hasCapability(myCaps, 'members.invite'));
-  let canManageRoles = $derived(hasCapability(myCaps, 'roles.manage'));
-  let canExport = $derived(hasCapability(myCaps, 'vault.export'));
-  let canFederate = $derived(hasCapability(myCaps, 'vault.federate'));
-  let canManageVault = $derived(hasCapability(myCaps, 'vault.manage'));
+  const s = new VaultSettingsController();
+  s.install();
 
-  // ---- ownership (v3 Phase O) ----
-  //
-  // The owner badge + guards compare member user_ids to the vault DTO's
-  // owner_user_id; the transfer section only renders for the owner.
-  let ownerID = $derived(vaults.selectedOwnerID);
-  let iAmOwner = $derived(vaults.isOwner(auth.user?.id));
-  let transferCandidates = $derived(
-    vaultMembers.members.filter((m) => m.user_id !== ownerID),
-  );
-
-  // ---- per-row error feedback ----
-  let rowError = $state<string | null>(null);
-  let pendingRemove = $state<RemoteMember | null>(null);
-  let pendingDeleteRole = $state<RemoteRole | null>(null);
-
-  // ---- transfer-ownership state ----
-  let transferTargetID = $state<string>('');
-  let pendingTransfer = $state<RemoteMember | null>(null);
-  let transferSubmitting = $state(false);
-  let transferError = $state<string | null>(null);
-
-  // ---- send-a-copy state ----
-  let copyUsername = $state('');
-  let copySubmitting = $state(false);
-  let copyError = $state<string | null>(null);
-  let copySent = $state<{ name: string; slug: string; recipient: string } | null>(null);
-
-  // ---- role-editor state (used by Roles tab) ----
-  let roleEditorOpen = $state(false);
-  let editingRoleID = $state<string | null>(null); // null = creating
-  let roleEditorName = $state('');
-  let roleEditorCaps = $state<Set<string>>(new Set());
-  let roleEditorSubmitting = $state(false);
-  let roleEditorError = $state<string | null>(null);
-
-  // Group catalogue entries for the editor UI.
-  const capabilityGroups = (() => {
-    const groups: Record<string, typeof CAPABILITY_CATALOGUE> = {};
-    for (const c of CAPABILITY_CATALOGUE) {
-      (groups[c.group] ||= []).push(c);
+  const tabLabel = (t: Tab): string => {
+    switch (t) {
+      case 'members': return `Members (${vaultMembers.members.length})`;
+      case 'invites': return `Invites (${vaultMembers.invites.filter(isInviteActive).length})`;
+      case 'roles': return `Roles (${vaultMembers.roles.length})`;
+      case 'sharing': return 'Sharing';
+      case 'federation': return `Federation (${federation.federations.length})`;
     }
-    return Object.entries(groups);
-  })();
-
-  // ---- federation state (v3 F-phases) ----
-  let fedRowError = $state<string | null>(null);
-  let pendingRevokeFederation = $state<Federation | null>(null);
-  let fedRevokeSubmitting = $state(false);
-  let pendingRemoveFedMember = $state<FederatedMember | null>(null);
-
-  // Federation-invite create form. Both fields optional: hint pins the
-  // invite to one server URL, blank expiry defers to the server.
-  let fedInviteOpen = $state(false);
-  let fedInviteServerHint = $state('');
-  let fedInviteExpiresAt = $state('');
-  let fedInviteSubmitting = $state(false);
-  let fedInviteError = $state<string | null>(null);
-  // M2/M3: a one-way mirror, optionally allowed to publish publicly.
-  let fedInviteMode = $state<'replica' | 'mirror'>('replica');
-  let fedPublish = $state(false);
-  let fedPublishScope = $state<'flagged' | 'all' | 'folder'>('flagged');
-  let fedPublishFolder = $state('');
-  let fedPublishIndex = $state(false);
-  let fedPublishConsent = $state(false);
-  // The raw token — held in memory only, shown ONCE after creation.
-  let lastFedInviteToken = $state<string | null>(null);
-  let fedTokenCopiedAt = $state(0);
-
-  // Federated-member add form.
-  let fedMemberKey = $state('');
-  let fedMemberRoleID = $state('');
-  let fedMemberSubmitting = $state(false);
-  let fedMemberError = $state<string | null>(null);
-
-  // ---- create-invite form state ----
-  let createOpen = $state(false);
-  let inviteRoleID = $state<string>('');
-  let inviteMaxUses = $state<number>(1);
-  let inviteExpiresAt = $state<string>(defaultExpiresAtInputValue());
-  let inviteEmailHint = $state('');
-  let inviteSubmitting = $state(false);
-  let inviteError = $state<string | null>(null);
-  let lastCreatedURL = $state<string | null>(null);
-  let copiedAt = $state<number>(0);
-
-  function defaultExpiresAtInputValue(): string {
-    // 7 days from now, formatted for <input type="datetime-local">
-    // which expects local time without a Z suffix.
-    const d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  // Pre-select the first role for the invite form once roles load.
-  $effect(() => {
-    if (!inviteRoleID && vaultMembers.roles.length > 0) {
-      inviteRoleID = vaultMembers.roles[0].id;
-    }
-  });
-  $effect(() => {
-    if (!fedMemberRoleID && vaultMembers.roles.length > 0) {
-      fedMemberRoleID = vaultMembers.roles[0].id;
-    }
-  });
+  };
 
   // Hydrate when the modal mounts.
   onMount(() => {
@@ -228,502 +110,9 @@
   }
 
   function handleKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (pendingRemove) {
-        pendingRemove = null;
-        return;
-      }
-      if (pendingTransfer) {
-        pendingTransfer = null;
-        return;
-      }
-      if (pendingDeleteRole) {
-        pendingDeleteRole = null;
-        return;
-      }
-      if (pendingRevokeFederation) {
-        pendingRevokeFederation = null;
-        return;
-      }
-      if (pendingRemoveFedMember) {
-        pendingRemoveFedMember = null;
-        return;
-      }
-      if (roleEditorOpen) {
-        closeRoleEditor();
-        return;
-      }
-      if (createOpen) {
-        createOpen = false;
-        return;
-      }
-      if (fedInviteOpen) {
-        fedInviteOpen = false;
-        return;
-      }
-      onclose();
-    }
-  }
-
-  // ---- member actions ----
-
-  // Friendly text for member-mutation failures. The server can now
-  // return 409 owner_protected when a remove / role-change targets the
-  // vault owner (v3 Phase O) — surface that clearly instead of the
-  // raw code.
-  function memberErrorText(e: unknown): string {
-    if (e instanceof ApiError) {
-      if (e.code === 'owner_protected') {
-        return 'The vault owner can’t be removed or demoted below Admin. Transfer ownership first.';
-      }
-      return e.detail ?? e.code;
-    }
-    return (e as Error).message;
-  }
-
-  async function onChangeRole(m: RemoteMember, e: Event): Promise<void> {
-    const select = e.target as HTMLSelectElement;
-    const newRoleID = select.value;
-    if (newRoleID === m.role_id) return;
-    rowError = null;
-    try {
-      await vaultMembers.changeRole(m.user_id, newRoleID);
-    } catch (e) {
-      // Reset the <select> so it matches the rolled-back model.
-      select.value = m.role_id;
-      rowError = memberErrorText(e);
-    }
-  }
-
-  async function confirmRemove(): Promise<void> {
-    if (!pendingRemove) return;
-    rowError = null;
-    try {
-      await vaultMembers.removeMember(pendingRemove.user_id);
-      pendingRemove = null;
-    } catch (e) {
-      rowError = memberErrorText(e);
-    }
-  }
-
-  // ---- transfer-ownership actions (v3 Phase O) ----
-
-  function transferErrorText(e: unknown): string {
-    if (e instanceof ApiError) {
-      if (e.status === 403) return 'Only the vault owner can transfer ownership.';
-      switch (e.code) {
-        case 'user_id_required':
-          return 'Pick a member to transfer ownership to.';
-        case 'validation':
-          return 'That user isn’t a member of this vault.';
-        default:
-          return e.detail ?? e.code;
-      }
-    }
-    return (e as Error).message;
-  }
-
-  function openTransferConfirm(): void {
-    transferError = null;
-    const target = transferCandidates.find((m) => m.user_id === transferTargetID);
-    if (!target) {
-      transferError = 'Pick a member to transfer ownership to.';
-      return;
-    }
-    pendingTransfer = target;
-  }
-
-  async function confirmTransfer(): Promise<void> {
-    if (!pendingTransfer || !vaults.selectedID || transferSubmitting) return;
-    transferSubmitting = true;
-    transferError = null;
-    try {
-      await vaults.transferOwnership(vaults.selectedID, pendingTransfer.user_id);
-      // The new owner gains an untouchable Admin-equivalent grant, so
-      // the member list's roles/caps may have changed server-side.
-      await vaultMembers.refresh();
-      pendingTransfer = null;
-      transferTargetID = '';
-    } catch (e) {
-      pendingTransfer = null;
-      transferError = transferErrorText(e);
-    } finally {
-      transferSubmitting = false;
-    }
-  }
-
-  // ---- send-a-copy actions (v3 Phase O) ----
-
-  function copyErrorText(e: unknown, recipient: string): string {
-    if (e instanceof ApiError) {
-      switch (e.code) {
-        case 'recipient_not_found':
-          return `No user named “@${recipient}” on this server.`;
-        case 'recipient_username_required':
-          return 'Enter the recipient’s username.';
-        case 'capability_missing':
-          return 'You don’t have permission to export this vault.';
-        default:
-          return e.detail ?? e.code;
-      }
-    }
-    return (e as Error).message;
-  }
-
-  async function submitCopy(e: Event): Promise<void> {
+    if (e.key !== 'Escape') return;
     e.preventDefault();
-    if (copySubmitting || !vaults.selectedID) return;
-    const recipient = copyUsername.trim();
-    if (!recipient) {
-      copyError = 'Enter the recipient’s username.';
-      return;
-    }
-    copySubmitting = true;
-    copyError = null;
-    copySent = null;
-    try {
-      const fork = await vaults.sendCopy(vaults.selectedID, recipient);
-      copySent = { name: fork.name, slug: fork.slug, recipient };
-      copyUsername = '';
-    } catch (e) {
-      copyError = copyErrorText(e, recipient);
-    } finally {
-      copySubmitting = false;
-    }
-  }
-
-  // ---- invite actions ----
-
-  function openCreateForm(): void {
-    createOpen = true;
-    inviteError = null;
-    lastCreatedURL = null;
-  }
-
-  function closeCreateForm(): void {
-    createOpen = false;
-    inviteError = null;
-    inviteEmailHint = '';
-    inviteMaxUses = 1;
-    inviteExpiresAt = defaultExpiresAtInputValue();
-    // Don't drop lastCreatedURL — the user may still want to copy it.
-  }
-
-  async function submitInvite(e: Event): Promise<void> {
-    e.preventDefault();
-    if (inviteSubmitting) return;
-    if (!inviteRoleID) return;
-    const expIso = new Date(inviteExpiresAt).toISOString();
-    if (Number.isNaN(new Date(inviteExpiresAt).getTime())) {
-      inviteError = 'Expiry date is invalid.';
-      return;
-    }
-    inviteSubmitting = true;
-    inviteError = null;
-    try {
-      const input: CreateInviteInput = {
-        role_id: inviteRoleID,
-        max_uses: inviteMaxUses,
-        expires_at: expIso,
-        email_hint: inviteEmailHint.trim() || undefined,
-      };
-      const created = await vaultMembers.createInvite(input);
-      lastCreatedURL = created.url;
-      closeCreateForm();
-    } catch (e) {
-      inviteError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
-    } finally {
-      inviteSubmitting = false;
-    }
-  }
-
-  async function copyURL(url: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(url);
-      copiedAt = Date.now();
-    } catch {
-      // Clipboard may be unavailable (insecure context, etc.). Fall
-      // back to a transient selection prompt? Skip for now.
-    }
-  }
-
-  async function onRevoke(invite: Invite): Promise<void> {
-    rowError = null;
-    try {
-      await vaultMembers.revokeInvite(invite.token);
-    } catch (e) {
-      rowError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
-    }
-  }
-
-  // ---- federation actions (v3 F-phases) ----
-
-  function fedErrorText(e: unknown): string {
-    if (e instanceof ApiError) {
-      if (e.code === 'capability_missing' || e.code === 'forbidden') {
-        return 'You don’t have permission for that action.';
-      }
-      if (e.code === 'conflict') {
-        return 'That federation link was already revoked.';
-      }
-      return e.detail ?? e.code;
-    }
-    return (e as Error).message;
-  }
-
-  function openFedInviteForm(): void {
-    fedInviteOpen = true;
-    fedInviteError = null;
-    lastFedInviteToken = null;
-  }
-
-  function closeFedInviteForm(): void {
-    fedInviteOpen = false;
-    fedInviteError = null;
-    fedInviteServerHint = '';
-    fedInviteExpiresAt = '';
-    fedInviteMode = 'replica';
-    fedPublish = false;
-    fedPublishScope = 'flagged';
-    fedPublishFolder = '';
-    fedPublishIndex = false;
-    fedPublishConsent = false;
-    // Don't drop lastFedInviteToken — the operator may still need to
-    // copy it; it's gone for good once the modal closes.
-  }
-
-  async function submitFedInvite(e: Event): Promise<void> {
-    e.preventDefault();
-    if (fedInviteSubmitting) return;
-    let expIso: string | undefined;
-    if (fedInviteExpiresAt) {
-      const t = new Date(fedInviteExpiresAt).getTime();
-      if (Number.isNaN(t)) {
-        fedInviteError = 'Expiry date is invalid.';
-        return;
-      }
-      expIso = new Date(fedInviteExpiresAt).toISOString();
-    }
-    const publishing = fedInviteMode === 'mirror' && fedPublish;
-    const scope = publishing ? publishScope(fedPublishScope, fedPublishFolder) : null;
-    if (publishing && scope == null) {
-      fedInviteError = 'Informe a pasta a publicar.';
-      return;
-    }
-    if (publishing && !fedPublishConsent) {
-      fedInviteError = 'Confirme que entende que as notas ficarão públicas.';
-      return;
-    }
-    fedInviteSubmitting = true;
-    fedInviteError = null;
-    try {
-      const created = await federation.createInvite({
-        server_url_hint: fedInviteServerHint.trim() || undefined,
-        expires_at: expIso,
-        ...(fedInviteMode === 'mirror' ? { mode: 'mirror' as const } : {}),
-        ...(publishing && scope ? { publish: { allowed: true, scope, index: fedPublishIndex } } : {}),
-      });
-      lastFedInviteToken = created.token;
-      closeFedInviteForm();
-    } catch (e) {
-      fedInviteError = fedErrorText(e);
-    } finally {
-      fedInviteSubmitting = false;
-    }
-  }
-
-  async function copyFedToken(token: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(token);
-      fedTokenCopiedAt = Date.now();
-    } catch {
-      // Clipboard may be unavailable (insecure context, etc.).
-    }
-  }
-
-  async function onRevokeFedInvite(inv: FederationInvite): Promise<void> {
-    fedRowError = null;
-    try {
-      await federation.revokeInvite(inv.token);
-    } catch (e) {
-      fedRowError = fedErrorText(e);
-    }
-  }
-
-  async function confirmRevokeFederation(): Promise<void> {
-    if (!pendingRevokeFederation || fedRevokeSubmitting) return;
-    fedRevokeSubmitting = true;
-    fedRowError = null;
-    try {
-      await federation.revokeFederation(pendingRevokeFederation.id);
-      pendingRevokeFederation = null;
-    } catch (e) {
-      pendingRevokeFederation = null;
-      fedRowError = fedErrorText(e);
-    } finally {
-      fedRevokeSubmitting = false;
-    }
-  }
-
-  async function submitFedMember(e: Event): Promise<void> {
-    e.preventDefault();
-    if (fedMemberSubmitting || !fedMemberRoleID) return;
-    const key = fedMemberKey.trim();
-    // Client-side pre-check so a malformed key doesn't need a
-    // round-trip; the server revalidates (400 validation) anyway.
-    const problem = validateMemberKey(key);
-    if (problem) {
-      fedMemberError = problem;
-      return;
-    }
-    fedMemberSubmitting = true;
-    fedMemberError = null;
-    try {
-      await federation.addMember(key, fedMemberRoleID);
-      fedMemberKey = '';
-    } catch (e) {
-      fedMemberError = fedErrorText(e);
-    } finally {
-      fedMemberSubmitting = false;
-    }
-  }
-
-  async function onChangeFedMemberRole(m: FederatedMember, e: Event): Promise<void> {
-    const select = e.target as HTMLSelectElement;
-    const newRoleID = select.value;
-    if (newRoleID === m.role_id) return;
-    fedRowError = null;
-    const newRole = vaultMembers.roles.find((r) => r.id === newRoleID);
-    try {
-      await federation.changeMemberRole(m.member_key, newRoleID, newRole?.name);
-    } catch (e) {
-      select.value = m.role_id; // match the rolled-back model
-      fedRowError = fedErrorText(e);
-    }
-  }
-
-  async function confirmRemoveFedMember(): Promise<void> {
-    if (!pendingRemoveFedMember) return;
-    fedRowError = null;
-    try {
-      await federation.removeMember(pendingRemoveFedMember.member_key);
-      pendingRemoveFedMember = null;
-    } catch (e) {
-      fedRowError = fedErrorText(e);
-    }
-  }
-
-  function fedInviteStateLabel(i: FederationInvite): string {
-    if (i.revoked) return 'revoked';
-    if (i.used) return 'used';
-    if (i.expires_at && new Date(i.expires_at).getTime() <= Date.now()) return 'expired';
-    return 'active';
-  }
-
-  function isFedInviteActive(i: FederationInvite): boolean {
-    return fedInviteStateLabel(i) === 'active';
-  }
-
-  // ---- formatting helpers ----
-
-  function fmtDate(s: string | null | undefined): string {
-    if (!s) return '—';
-    return s.replace('T', ' ').slice(0, 16);
-  }
-
-  function isInviteActive(i: Invite): boolean {
-    if (i.revoked_at) return false;
-    if (i.use_count >= i.max_uses) return false;
-    return new Date(i.expires_at).getTime() > Date.now();
-  }
-
-  function inviteStateLabel(i: Invite): string {
-    if (i.revoked_at) return 'revoked';
-    if (i.use_count >= i.max_uses) return 'exhausted';
-    if (new Date(i.expires_at).getTime() <= Date.now()) return 'expired';
-    return 'active';
-  }
-
-  // ---- role editor ----
-
-  function openCreateRole(): void {
-    editingRoleID = null;
-    roleEditorName = '';
-    roleEditorCaps = new Set();
-    roleEditorError = null;
-    roleEditorOpen = true;
-  }
-
-  function openEditRole(r: RemoteRole): void {
-    editingRoleID = r.id;
-    roleEditorName = r.name;
-    roleEditorCaps = new Set(r.capabilities);
-    roleEditorError = null;
-    roleEditorOpen = true;
-  }
-
-  function closeRoleEditor(): void {
-    roleEditorOpen = false;
-    roleEditorError = null;
-  }
-
-  function toggleCap(id: string): void {
-    // Re-assigning the Set is what makes Svelte 5's $state notice the
-    // change — mutating in-place doesn't re-trigger reactivity for
-    // built-in collection types.
-    const next = new Set(roleEditorCaps);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    roleEditorCaps = next;
-  }
-
-  async function submitRoleEditor(e: Event): Promise<void> {
-    e.preventDefault();
-    if (roleEditorSubmitting) return;
-    const name = roleEditorName.trim();
-    if (!name) {
-      roleEditorError = 'Role name is required.';
-      return;
-    }
-    const caps = Array.from(roleEditorCaps).sort();
-    roleEditorSubmitting = true;
-    roleEditorError = null;
-    try {
-      if (editingRoleID == null) {
-        const input: CreateRoleInput = { name, capabilities: caps };
-        await vaultMembers.createRole(input);
-      } else {
-        const input: UpdateRoleInput = { name, capabilities: caps };
-        await vaultMembers.updateRole(editingRoleID, input);
-      }
-      closeRoleEditor();
-    } catch (e) {
-      roleEditorError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
-    } finally {
-      roleEditorSubmitting = false;
-    }
-  }
-
-  async function confirmDeleteRole(): Promise<void> {
-    if (!pendingDeleteRole) return;
-    rowError = null;
-    try {
-      await vaultMembers.deleteRole(pendingDeleteRole.id);
-      pendingDeleteRole = null;
-    } catch (e) {
-      rowError = e instanceof ApiError ? (e.detail ?? e.code) : (e as Error).message;
-    }
-  }
-
-  function capsSummary(caps: string[]): string {
-    if (caps.length === 0) return 'no permissions';
-    if (caps.includes('*')) return 'every permission';
-    if (caps.length === 1) return caps[0];
-    return `${caps.length} permissions`;
+    if (!s.dismiss()) onclose();
   }
 </script>
 
@@ -752,61 +141,19 @@
     </header>
 
     <div class="tabs" role="tablist" aria-label="Vault settings sections">
-      <button
-        type="button"
-        class="tab"
-        class:active={tab === 'members'}
-        role="tab"
-        id="vs-tab-members"
-        aria-controls="vs-panel-members"
-        aria-selected={tab === 'members'}
-        tabindex={tab === 'members' ? 0 : -1}
-        onclick={() => (tab = 'members')}
-      >Members ({vaultMembers.members.length})</button>
-      <button
-        type="button"
-        class="tab"
-        class:active={tab === 'invites'}
-        role="tab"
-        id="vs-tab-invites"
-        aria-controls="vs-panel-invites"
-        aria-selected={tab === 'invites'}
-        tabindex={tab === 'invites' ? 0 : -1}
-        onclick={() => (tab = 'invites')}
-      >Invites ({vaultMembers.invites.filter(isInviteActive).length})</button>
-      <button
-        type="button"
-        class="tab"
-        class:active={tab === 'roles'}
-        role="tab"
-        id="vs-tab-roles"
-        aria-controls="vs-panel-roles"
-        aria-selected={tab === 'roles'}
-        tabindex={tab === 'roles' ? 0 : -1}
-        onclick={() => (tab = 'roles')}
-      >Roles ({vaultMembers.roles.length})</button>
-      <button
-        type="button"
-        class="tab"
-        class:active={tab === 'sharing'}
-        role="tab"
-        id="vs-tab-sharing"
-        aria-controls="vs-panel-sharing"
-        aria-selected={tab === 'sharing'}
-        tabindex={tab === 'sharing' ? 0 : -1}
-        onclick={() => (tab = 'sharing')}
-      >Sharing</button>
-      <button
-        type="button"
-        class="tab"
-        class:active={tab === 'federation'}
-        role="tab"
-        id="vs-tab-federation"
-        aria-controls="vs-panel-federation"
-        aria-selected={tab === 'federation'}
-        tabindex={tab === 'federation' ? 0 : -1}
-        onclick={() => (tab = 'federation')}
-      >Federation ({federation.federations.length})</button>
+      {#each TABS as t (t)}
+        <button
+          type="button"
+          class="tab"
+          class:active={tab === t}
+          role="tab"
+          id="vs-tab-{t}"
+          aria-controls="vs-panel-{t}"
+          aria-selected={tab === t}
+          tabindex={tab === t ? 0 : -1}
+          onclick={() => (tab = t)}
+        >{tabLabel(t)}</button>
+      {/each}
     </div>
 
     {#if vaultMembers.loading}
@@ -816,751 +163,23 @@
     {/if}
 
     {#if tab === 'members'}
-      <div class="body" role="tabpanel" id="vs-panel-members" aria-labelledby="vs-tab-members">
-        {#if rowError}<div class="error">{rowError}</div>{/if}
-        {#if vaultMembers.members.length === 0 && !vaultMembers.loading}
-          <div class="placeholder">No members yet.</div>
-        {:else}
-          <ul class="rows">
-            {#each vaultMembers.members as m (m.user_id)}
-              <li tabindex="-1" class="row" class:self={m.user_id === auth.user?.id}>
-                <div class="row-main">
-                  <div class="name">
-                    {m.display_name || m.username}
-                    {#if m.user_id === ownerID}<span class="badge owner">owner</span>{/if}
-                    {#if m.user_id === auth.user?.id}<span class="badge">you</span>{/if}
-                  </div>
-                  <div class="meta">@{m.username} · joined {fmtDate(m.joined_at)}</div>
-                </div>
-                <div class="row-actions">
-                  {#if m.user_id === ownerID}
-                    <!-- Owner row: no role-change, no remove. The server
-                         would 409 owner_protected anyway; explain instead. -->
-                    <span
-                      class="role-readonly"
-                      title="The vault owner can’t be removed or demoted. Transfer ownership first."
-                    >{m.role_name} · protected</span>
-                  {:else}
-                    {#if canManageMembers && vaultMembers.roles.length > 0}
-                      <select
-                        class="select"
-                        value={m.role_id}
-                        onchange={(e) => onChangeRole(m, e)}
-                        aria-label="Role"
-                      >
-                        {#each vaultMembers.roles as r (r.id)}
-                          <option value={r.id}>{r.name}</option>
-                        {/each}
-                      </select>
-                    {:else}
-                      <span class="role-readonly">{m.role_name}</span>
-                    {/if}
-                    {#if canManageMembers && m.user_id !== auth.user?.id}
-                      <button
-                        type="button"
-                        class="link danger"
-                        onclick={() => (pendingRemove = m)}
-                      >Remove</button>
-                    {/if}
-                  {/if}
-                </div>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-
-        {#if iAmOwner}
-          <div class="owner-zone">
-            <h3>Transfer ownership</h3>
-            <p class="hint">
-              Hand this vault to another member. They become the
-              protected owner; you keep your current role. This can’t
-              be undone without the new owner transferring back.
-            </p>
-            {#if transferCandidates.length === 0}
-              <p class="hint">No other members to transfer to — invite someone first.</p>
-            {:else}
-              <div class="form-actions">
-                <select
-                  class="select"
-                  bind:value={transferTargetID}
-                  disabled={transferSubmitting}
-                  aria-label="New owner"
-                >
-                  <option value="" disabled>Pick a member…</option>
-                  {#each transferCandidates as m (m.user_id)}
-                    <option value={m.user_id}>{m.display_name || m.username} (@{m.username})</option>
-                  {/each}
-                </select>
-                <button
-                  class="primary danger"
-                  type="button"
-                  disabled={transferSubmitting || !transferTargetID}
-                  onclick={openTransferConfirm}
-                >Transfer…</button>
-              </div>
-            {/if}
-            {#if transferError}<div class="error">{transferError}</div>{/if}
-          </div>
-        {/if}
-      </div>
+      <MembersTab {s} />
+    {:else if tab === 'invites'}
+      <InvitesTab {s} />
+    {:else if tab === 'roles'}
+      <RolesTab {s} />
+    {:else if tab === 'sharing'}
+      <SharingTab {s} />
+    {:else if tab === 'federation'}
+      <FederationTab {s} />
     {/if}
 
-    {#if tab === 'invites'}
-      <div class="body" role="tabpanel" id="vs-panel-invites" aria-labelledby="vs-tab-invites">
-        {#if !canInvite}
-          <div class="placeholder">
-            You don’t have permission to manage invites for this vault.
-          </div>
-        {:else}
-          <div class="invite-bar">
-            <button class="primary" type="button" onclick={openCreateForm}>+ New invite</button>
-            {#if lastCreatedURL}
-              <div class="created-row">
-                <input class="select" readonly value={lastCreatedURL} />
-                <button class="link" type="button" onclick={() => copyURL(lastCreatedURL!)}>
-                  {Date.now() - copiedAt < 2000 ? 'Copied!' : 'Copy'}
-                </button>
-              </div>
-            {/if}
-          </div>
-
-          {#if createOpen}
-            <form class="create-form" onsubmit={submitInvite}>
-              <div class="form-row">
-                <label>
-                  Role
-                  <select class="select" bind:value={inviteRoleID} disabled={inviteSubmitting}>
-                    {#each vaultMembers.roles as r (r.id)}
-                      <option value={r.id}>{r.name}</option>
-                    {/each}
-                  </select>
-                </label>
-                <label>
-                  Max uses
-                  <input
-                    class="input"
-                    type="number"
-                    min="1"
-                    max="1000"
-                    bind:value={inviteMaxUses}
-                    disabled={inviteSubmitting}
-                  />
-                </label>
-                <label>
-                  Expires at
-                  <input
-                    class="input"
-                    type="datetime-local"
-                    bind:value={inviteExpiresAt}
-                    disabled={inviteSubmitting}
-                  />
-                </label>
-              </div>
-              <label>
-                Email hint (optional)
-                <input
-                  class="input"
-                  type="text"
-                  placeholder="alice@example.com"
-                  bind:value={inviteEmailHint}
-                  disabled={inviteSubmitting}
-                />
-              </label>
-              {#if inviteError}<div class="error">{inviteError}</div>{/if}
-              <div class="form-actions">
-                <button class="primary" type="submit" disabled={inviteSubmitting || !inviteRoleID}>
-                  {inviteSubmitting ? '…' : 'Create invite'}
-                </button>
-                <button class="link" type="button" onclick={closeCreateForm} disabled={inviteSubmitting}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          {/if}
-
-          {#if rowError}<div class="error">{rowError}</div>{/if}
-
-          {#if vaultMembers.invites.length === 0}
-            <div class="placeholder">No invites yet.</div>
-          {:else}
-            <ul class="rows">
-              {#each vaultMembers.invites as inv (inv.token)}
-                <li tabindex="-1" class="row" class:inactive={!isInviteActive(inv)}>
-                  <div class="row-main">
-                    <div class="name">
-                      <span class="badge state-{inviteStateLabel(inv)}">{inviteStateLabel(inv)}</span>
-                      {inv.email_hint || '(no email hint)'}
-                    </div>
-                    <div class="meta">
-                      {inv.use_count}/{inv.max_uses} uses · expires {fmtDate(inv.expires_at)} · created {fmtDate(inv.created_at)}
-                    </div>
-                  </div>
-                  <div class="row-actions">
-                    {#if isInviteActive(inv)}
-                      <button class="link danger" type="button" onclick={() => onRevoke(inv)}>Revoke</button>
-                    {/if}
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      </div>
-    {/if}
-
-    {#if tab === 'roles'}
-      <div class="body" role="tabpanel" id="vs-panel-roles" aria-labelledby="vs-tab-roles">
-        {#if canManageRoles}
-          <div class="invite-bar">
-            <button class="primary" type="button" onclick={openCreateRole}>+ New role</button>
-          </div>
-        {/if}
-
-        {#if roleEditorOpen}
-          <form class="create-form" onsubmit={submitRoleEditor}>
-            <label>
-              Role name
-              <!-- svelte-ignore a11y_autofocus -->
-              <input
-                class="input"
-                type="text"
-                bind:value={roleEditorName}
-                disabled={roleEditorSubmitting}
-                autofocus
-                required
-              />
-            </label>
-            <fieldset class="caps">
-              <legend>Capabilities</legend>
-              {#each capabilityGroups as [group, caps] (group)}
-                <div class="cap-group">
-                  <div class="cap-group-title">{group}</div>
-                  {#each caps as cap (cap.id)}
-                    <label class="cap-row">
-                      <input
-                        type="checkbox"
-                        checked={roleEditorCaps.has(cap.id)}
-                        onchange={() => toggleCap(cap.id)}
-                        disabled={roleEditorSubmitting}
-                      />
-                      <span class="cap-label">{cap.label}</span>
-                      <span class="cap-id">{cap.id}</span>
-                    </label>
-                  {/each}
-                </div>
-              {/each}
-            </fieldset>
-            {#if roleEditorError}<div class="error">{roleEditorError}</div>{/if}
-            <div class="form-actions">
-              <button class="primary" type="submit" disabled={roleEditorSubmitting || !roleEditorName.trim()}>
-                {#if roleEditorSubmitting}
-                  …
-                {:else if editingRoleID == null}
-                  Create role
-                {:else}
-                  Save changes
-                {/if}
-              </button>
-              <button class="link" type="button" onclick={closeRoleEditor} disabled={roleEditorSubmitting}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        {/if}
-
-        {#if rowError}<div class="error">{rowError}</div>{/if}
-
-        {#if vaultMembers.roles.length === 0}
-          <div class="placeholder">No roles defined yet.</div>
-        {:else}
-          <ul class="rows">
-            {#each vaultMembers.roles as r (r.id)}
-              <li tabindex="-1" class="row">
-                <div class="row-main">
-                  <div class="name">
-                    {r.name}
-                    {#if r.is_seed}<span class="badge">built-in</span>{/if}
-                  </div>
-                  <div class="meta">{capsSummary(r.capabilities)}</div>
-                </div>
-                <div class="row-actions">
-                  {#if canManageRoles && !r.is_seed}
-                    <button class="link" type="button" onclick={() => openEditRole(r)}>Edit</button>
-                    <button class="link danger" type="button" onclick={() => (pendingDeleteRole = r)}>Delete</button>
-                  {/if}
-                </div>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-
-        {#if !canManageRoles}
-          <p class="hint" style="margin-top: 0.7rem; text-align: center;">
-            You don’t have permission to create or edit roles.
-          </p>
-        {/if}
-      </div>
-    {/if}
-
-    {#if tab === 'sharing'}
-      <div class="body" role="tabpanel" id="vs-panel-sharing" aria-labelledby="vs-tab-sharing">
-        {#if vaults.selected?.copied_from}
-          <p class="hint provenance">
-            This vault is a copy of “{vaults.selected.copied_from.slug}”,
-            received {fmtDate(vaults.selected.copied_from.copied_at)}.
-            It has no live link to the original.
-          </p>
-        {/if}
-
-        <h3>Send a copy</h3>
-        {#if !canExport}
-          <div class="placeholder">
-            You don’t have permission to export this vault.
-          </div>
-        {:else}
-          <p class="hint">
-            Forks the vault’s current state into a brand-new vault owned
-            by the recipient. They don’t join this vault, and edits on
-            either side diverge permanently.
-          </p>
-          <form class="create-form" onsubmit={submitCopy}>
-            <label>
-              Recipient username
-              <input
-                class="input"
-                type="text"
-                placeholder="username on this server"
-                bind:value={copyUsername}
-                disabled={copySubmitting}
-              />
-            </label>
-            {#if copyError}<div class="error">{copyError}</div>{/if}
-            <div class="form-actions">
-              <button
-                class="primary"
-                type="submit"
-                disabled={copySubmitting || !copyUsername.trim()}
-              >{copySubmitting ? '…' : 'Send copy'}</button>
-            </div>
-          </form>
-          {#if copySent}
-            <div class="success">
-              Copy sent — “{copySent.name}” ({copySent.slug}) now belongs
-              to @{copySent.recipient}.
-            </div>
-          {/if}
-        {/if}
-      </div>
-    {/if}
-
-    {#if tab === 'federation'}
-      <div class="body" role="tabpanel" id="vs-panel-federation" aria-labelledby="vs-tab-federation">
-        {#if federation.loading}
-          <div class="placeholder">Loading…</div>
-        {:else}
-          {#if federation.lastError}<div class="error">{federation.lastError}</div>{/if}
-          {#if fedRowError}<div class="error">{fedRowError}</div>{/if}
-
-          <h3>Federated servers</h3>
-          <p class="hint">
-            Servers this vault syncs with. Every listed server holds a
-            full plaintext replica of the vault’s content.
-          </p>
-          {#if federation.federations.length === 0}
-            <div class="placeholder">This vault isn’t federated with any other server.</div>
-          {:else}
-            <ul class="rows">
-              {#each federation.federations as f (f.id)}
-                {@const fv = federationRowView(f)}
-                <li tabindex="-1" class="row" class:inactive={f.status !== 'active'} data-testid="federation-row">
-                  <div class="row-main">
-                    <div class="name">
-                      <span class="badge fed-{f.role}">{fv.role}</span>
-                      <span class="badge">{fv.mode}</span>
-                      <span class="badge state-{f.status}">{fv.status}</span>
-                      {f.peer_url}
-                    </div>
-                    {#each fv.lines as line (line)}<div class="meta">{line}</div>{/each}
-                    <div class="meta">
-                      ligado em {fmtDate(f.created_at)}{#if f.revoked_at} · revogado em {fmtDate(f.revoked_at)}{/if}
-                    </div>
-                    {#if fv.warning}<div class="error" role="alert" data-testid="erasure-lagging">{fv.warning}</div>{/if}
-                  </div>
-                  <div class="row-actions">
-                    {#if canFederate && f.status === 'active'}
-                      <button
-                        class="link danger"
-                        type="button"
-                        onclick={() => (pendingRevokeFederation = f)}
-                      >Revoke…</button>
-                    {/if}
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-
-          <h3 class="fed-section">Federation invites</h3>
-          {#if !canFederate}
-            <p class="hint">
-              You don’t have permission to manage federation for this
-              vault (requires <code>vault.federate</code>).
-            </p>
-          {:else}
-            <p class="hint">
-              Inviting another server federates this vault: the other
-              operator’s server will store all of this vault’s content
-              <strong>in plaintext on their infrastructure</strong> and
-              keeps its copy even if you later revoke the link. Only
-              federate with operators you trust.
-            </p>
-            <div class="invite-bar">
-              <button class="primary" type="button" onclick={openFedInviteForm}>+ New federation invite</button>
-              {#if lastFedInviteToken}
-                <div class="created-row">
-                  <input class="select" readonly value={lastFedInviteToken} />
-                  <button class="link" type="button" onclick={() => copyFedToken(lastFedInviteToken!)}>
-                    {Date.now() - fedTokenCopiedAt < 2000 ? 'Copied!' : 'Copy'}
-                  </button>
-                </div>
-              {/if}
-            </div>
-            {#if lastFedInviteToken}
-              <p class="hint token-once">
-                This token is shown only once — hand it to the other
-                operator out-of-band. Anyone who redeems it gets a full
-                plaintext replica of this vault.
-              </p>
-            {/if}
-
-            {#if fedInviteOpen}
-              <form class="create-form" onsubmit={submitFedInvite}>
-                <label>
-                  Follower server URL (optional — pins the invite to one server)
-                  <input
-                    class="input"
-                    type="url"
-                    placeholder="https://other-server.example"
-                    bind:value={fedInviteServerHint}
-                    disabled={fedInviteSubmitting}
-                  />
-                </label>
-                <fieldset class="fed-mode">
-                  <legend>Tipo de vínculo</legend>
-                  <label class="inline"><input type="radio" name="fed-mode" value="replica" bind:group={fedInviteMode} disabled={fedInviteSubmitting} /> Réplica (os dois servidores editam)</label>
-                  <label class="inline"><input type="radio" name="fed-mode" value="mirror" bind:group={fedInviteMode} disabled={fedInviteSubmitting} data-testid="fed-mode-mirror" /> Espelho somente leitura (só esta origem envia)</label>
-                </fieldset>
-                {#if fedInviteMode === 'mirror'}
-                  <fieldset class="fed-publish" data-testid="fed-publish">
-                    <legend>Publicação</legend>
-                    {#if !canManageVault}
-                      <p class="hint">Publicar exige também a permissão <code>vault.manage</code>.</p>
-                    {:else}
-                      <label class="inline"><input type="checkbox" bind:checked={fedPublish} disabled={fedInviteSubmitting} data-testid="fed-publish-allow" /> Permitir que o espelho publique notas para leitura pública</label>
-                      {#if fedPublish}
-                        <label class="inline"><input type="radio" name="fed-scope" value="flagged" bind:group={fedPublishScope} /> Só as notas marcadas com “Publicar”</label>
-                        <label class="inline"><input type="radio" name="fed-scope" value="all" bind:group={fedPublishScope} /> Todas as notas do livro</label>
-                        <label class="inline"><input type="radio" name="fed-scope" value="folder" bind:group={fedPublishScope} /> Uma pasta:
-                          <input class="input sm" type="text" placeholder="blog/" bind:value={fedPublishFolder} disabled={fedPublishScope !== 'folder'} aria-label="Pasta a publicar" /></label>
-                        <label class="inline"><input type="checkbox" bind:checked={fedPublishIndex} data-testid="fed-publish-index" /> Permitir indexação por buscadores (Google etc.)</label>
-                        <p class="consent-text" data-testid="fed-publish-consent-text">{publishConsentText(publishScope(fedPublishScope, fedPublishFolder) ?? 'flagged', fedPublishIndex)}</p>
-                        <label class="inline consent"><input type="checkbox" bind:checked={fedPublishConsent} data-testid="fed-publish-consent" /> Entendo e autorizo a publicação</label>
-                      {/if}
-                    {/if}
-                  </fieldset>
-                {/if}
-                <label>
-                  Expires at (optional)
-                  <input
-                    class="input"
-                    type="datetime-local"
-                    bind:value={fedInviteExpiresAt}
-                    disabled={fedInviteSubmitting}
-                  />
-                </label>
-                {#if fedInviteError}<div class="error">{fedInviteError}</div>{/if}
-                <div class="form-actions">
-                  <button class="primary" type="submit" disabled={fedInviteSubmitting}>
-                    {fedInviteSubmitting ? '…' : 'Create federation invite'}
-                  </button>
-                  <button class="link" type="button" onclick={closeFedInviteForm} disabled={fedInviteSubmitting}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            {/if}
-
-            {#if federation.invites.length === 0}
-              <div class="placeholder">No federation invites yet.</div>
-            {:else}
-              <ul class="rows">
-                {#each federation.invites as inv (inv.token)}
-                  <li tabindex="-1" class="row" class:inactive={!isFedInviteActive(inv)}>
-                    <div class="row-main">
-                      <div class="name">
-                        <span class="badge state-{fedInviteStateLabel(inv)}">{fedInviteStateLabel(inv)}</span>
-                        {inv.server_url_hint || '(any server)'}
-                      </div>
-                      <div class="meta">
-                        created {fmtDate(inv.created_at)} · expires {fmtDate(inv.expires_at)}
-                      </div>
-                    </div>
-                    <div class="row-actions">
-                      {#if isFedInviteActive(inv)}
-                        <button class="link danger" type="button" onclick={() => onRevokeFedInvite(inv)}>Revoke</button>
-                      {/if}
-                    </div>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          {/if}
-
-          <h3 class="fed-section">Federated members</h3>
-          <p class="hint">
-            Users from federated servers with a role in this vault.
-            Membership is authored here — on the vault’s home server.
-          </p>
-          {#if canManageMembers}
-            <form class="create-form" onsubmit={submitFedMember}>
-              <div class="form-row two">
-                <label>
-                  Member key
-                  <input
-                    class="input"
-                    type="text"
-                    placeholder="username@https://server"
-                    bind:value={fedMemberKey}
-                    disabled={fedMemberSubmitting}
-                  />
-                </label>
-                <label>
-                  Role
-                  <select class="select" bind:value={fedMemberRoleID} disabled={fedMemberSubmitting}>
-                    {#each vaultMembers.roles as r (r.id)}
-                      <option value={r.id}>{r.name}</option>
-                    {/each}
-                  </select>
-                </label>
-              </div>
-              {#if fedMemberError}<div class="error">{fedMemberError}</div>{/if}
-              <div class="form-actions">
-                <button
-                  class="primary"
-                  type="submit"
-                  disabled={fedMemberSubmitting || !fedMemberKey.trim() || !fedMemberRoleID}
-                >{fedMemberSubmitting ? '…' : 'Add federated member'}</button>
-              </div>
-            </form>
-          {/if}
-          {#if federation.members.length === 0}
-            <div class="placeholder">No federated members.</div>
-          {:else}
-            <ul class="rows">
-              {#each federation.members as m (m.member_key)}
-                <li tabindex="-1" class="row">
-                  <div class="row-main">
-                    <div class="name">{m.member_key}</div>
-                    <div class="meta">joined {fmtDate(m.joined_at)}</div>
-                  </div>
-                  <div class="row-actions">
-                    {#if canManageMembers && vaultMembers.roles.length > 0}
-                      <select
-                        class="select"
-                        value={m.role_id}
-                        onchange={(e) => onChangeFedMemberRole(m, e)}
-                        aria-label="Role"
-                      >
-                        {#each vaultMembers.roles as r (r.id)}
-                          <option value={r.id}>{r.name}</option>
-                        {/each}
-                      </select>
-                      <button
-                        class="link danger"
-                        type="button"
-                        onclick={() => (pendingRemoveFedMember = m)}
-                      >Remove</button>
-                    {:else}
-                      <span class="role-readonly">{m.role_name}</span>
-                    {/if}
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      </div>
-    {/if}
-
-    {#if pendingDeleteRole}
-      <div
-        class="overlay nested"
-        role="presentation"
-        onclick={() => (pendingDeleteRole = null)}
-        onkeydown={(e) => { if (e.key === 'Escape') pendingDeleteRole = null; }}
-      >
-        <div
-          class="panel small"
-          role="alertdialog"
-          aria-modal="true"
-          tabindex="-1"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={onPanelKey}
-        >
-          <h2>Delete role “{pendingDeleteRole.name}”?</h2>
-          <p class="hint">
-            Members assigned to this role will need to be reassigned
-            first; the server refuses the delete otherwise. Built-in
-            roles can’t be deleted at all.
-          </p>
-          <div class="form-actions">
-            <button class="primary danger" type="button" onclick={confirmDeleteRole}>Delete</button>
-            <button class="link" type="button" onclick={() => (pendingDeleteRole = null)}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    {#if pendingTransfer}
-      <div
-        class="overlay nested"
-        role="presentation"
-        onclick={() => (pendingTransfer = null)}
-        onkeydown={(e) => { if (e.key === 'Escape') pendingTransfer = null; }}
-      >
-        <div
-          class="panel small"
-          role="alertdialog"
-          aria-modal="true"
-          tabindex="-1"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={onPanelKey}
-        >
-          <h2>Transfer ownership to {pendingTransfer.display_name || pendingTransfer.username}?</h2>
-          <p class="hint">
-            @{pendingTransfer.username} becomes the vault’s protected
-            owner — they can’t be removed or demoted, and only they can
-            transfer ownership after this. You keep your current role.
-          </p>
-          <div class="form-actions">
-            <button
-              class="primary danger"
-              type="button"
-              disabled={transferSubmitting}
-              onclick={confirmTransfer}
-            >{transferSubmitting ? '…' : 'Transfer ownership'}</button>
-            <button
-              class="link"
-              type="button"
-              disabled={transferSubmitting}
-              onclick={() => (pendingTransfer = null)}
-            >Cancel</button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    {#if pendingRevokeFederation}
-      <div
-        class="overlay nested"
-        role="presentation"
-        onclick={() => (pendingRevokeFederation = null)}
-        onkeydown={(e) => { if (e.key === 'Escape') pendingRevokeFederation = null; }}
-      >
-        <div
-          class="panel small"
-          role="alertdialog"
-          aria-modal="true"
-          tabindex="-1"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={onPanelKey}
-        >
-          <h2>Revoke federation with {pendingRevokeFederation.peer_url}?</h2>
-          <p class="hint">
-            Syncing stops, and this vault will no longer send updates to
-            that server. Be aware: <strong>the other server keeps the
-            copy of the vault it already has</strong> — it was trusted
-            with plaintext, and revoking the link can’t reach into
-            another operator’s infrastructure to delete it.
-          </p>
-          <div class="form-actions">
-            <button
-              class="primary danger"
-              type="button"
-              disabled={fedRevokeSubmitting}
-              onclick={confirmRevokeFederation}
-            >{fedRevokeSubmitting ? '…' : 'Revoke federation'}</button>
-            <button
-              class="link"
-              type="button"
-              disabled={fedRevokeSubmitting}
-              onclick={() => (pendingRevokeFederation = null)}
-            >Cancel</button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    {#if pendingRemoveFedMember}
-      <div
-        class="overlay nested"
-        role="presentation"
-        onclick={() => (pendingRemoveFedMember = null)}
-        onkeydown={(e) => { if (e.key === 'Escape') pendingRemoveFedMember = null; }}
-      >
-        <div
-          class="panel small"
-          role="alertdialog"
-          aria-modal="true"
-          tabindex="-1"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={onPanelKey}
-        >
-          <h2>Remove {pendingRemoveFedMember.member_key}?</h2>
-          <p class="hint">
-            The revocation is authored here and propagated to follower
-            servers; they’ll lose access once their server applies it.
-          </p>
-          <div class="form-actions">
-            <button class="primary danger" type="button" onclick={confirmRemoveFedMember}>Remove</button>
-            <button class="link" type="button" onclick={() => (pendingRemoveFedMember = null)}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    {#if pendingRemove}
-      <div
-        class="overlay nested"
-        role="presentation"
-        onclick={() => (pendingRemove = null)}
-        onkeydown={(e) => { if (e.key === 'Escape') pendingRemove = null; }}
-      >
-        <div
-          class="panel small"
-          role="alertdialog"
-          aria-modal="true"
-          tabindex="-1"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={onPanelKey}
-        >
-          <h2>Remove {pendingRemove.display_name || pendingRemove.username}?</h2>
-          <p class="hint">
-            They’ll lose access to this vault immediately. Their notes
-            remain (they were never the only owner of CRDT updates).
-          </p>
-          <div class="form-actions">
-            <button class="primary danger" type="button" onclick={confirmRemove}>Remove</button>
-            <button class="link" type="button" onclick={() => (pendingRemove = null)}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    {/if}
+    <SettingsConfirms {s} onkey={onPanelKey} />
   </div>
 </div>
 
 <style>
+  /* The modal's own overlay and panel. */
   .overlay {
     position: fixed;
     inset: 0;
@@ -1570,10 +189,6 @@
     justify-content: center;
     z-index: 150;
     padding: 1rem;
-  }
-  .overlay.nested {
-    z-index: 175;
-    background: rgba(0, 0, 0, 0.4);
   }
   .panel {
     background: var(--color-background);
@@ -1587,330 +202,361 @@
     flex-direction: column;
     outline: none;
   }
-  .panel.small {
-    width: min(360px, 100%);
-    padding: 1.1rem;
-    gap: 0.6rem;
-  }
 
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.85rem 1.1rem;
-    border-bottom: 1px solid var(--color-separator, var(--color-border));
-  }
-  .panel-head h2 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--color-text);
-  }
-  .title { display: flex; flex-direction: column; gap: 0.05rem; }
-  .slug {
-    font-size: 0.75rem;
-    color: var(--color-text-dim, var(--color-muted));
-  }
-  .close {
-    background: transparent;
-    border: none;
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 1.4rem;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 0.4rem;
-  }
-  .close:hover { color: var(--color-text); }
+  /* Everything inside it, including the tab components and the nested
+     confirm dialogs, scoped to this overlay. */
+  .overlay :global {
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: color-mix(in srgb, var(--color-overlay-bg) 55%, rgba(0, 0, 0, 0.45));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 150;
+      padding: 1rem;
+    }
+    .overlay.nested {
+      z-index: 175;
+      background: rgba(0, 0, 0, 0.4);
+    }
+    .panel {
+      background: var(--color-background);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-pop);
+      animation: ui-rise 140ms var(--ease);
+      width: min(640px, 100%);
+      max-height: 86vh;
+      display: flex;
+      flex-direction: column;
+      outline: none;
+    }
+    .panel.small {
+      width: min(360px, 100%);
+      padding: 1.1rem;
+      gap: 0.6rem;
+    }
 
-  .tabs {
-    display: flex;
-    gap: 0.4rem;
-    padding: 0.55rem 1.1rem 0;
-    border-bottom: 1px solid var(--color-separator, var(--color-border));
-  }
-  .tab {
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 0.45rem 0.5rem 0.55rem;
-    color: var(--color-text-dim, var(--color-muted));
-    font-family: inherit;
-    font-size: 0.88rem;
-    cursor: pointer;
-  }
-  .tab:hover { color: var(--color-text); }
-  .tab.active {
-    color: var(--color-text);
-    border-bottom-color: var(--color-primary);
-  }
-  .tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
-  .row:focus { outline: none; }
-  .row:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; background: var(--tint-active); }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.85rem 1.1rem;
+      border-bottom: 1px solid var(--color-separator, var(--color-border));
+    }
+    .panel-head h2 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--color-text);
+    }
+    .title { display: flex; flex-direction: column; gap: 0.05rem; }
+    .slug {
+      font-size: 0.75rem;
+      color: var(--color-text-dim, var(--color-muted));
+    }
+    .close {
+      background: transparent;
+      border: none;
+      color: var(--color-text-dim, var(--color-muted));
+      font-size: 1.4rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 0.4rem;
+    }
+    .close:hover { color: var(--color-text); }
 
-  .body {
-    padding: 0.85rem 1.1rem 1.1rem;
-    overflow-y: auto;
-  }
+    .tabs {
+      display: flex;
+      gap: 0.4rem;
+      padding: 0.55rem 1.1rem 0;
+      border-bottom: 1px solid var(--color-separator, var(--color-border));
+    }
+    .tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 0.45rem 0.5rem 0.55rem;
+      color: var(--color-text-dim, var(--color-muted));
+      font-family: inherit;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+    .tab:hover { color: var(--color-text); }
+    .tab.active {
+      color: var(--color-text);
+      border-bottom-color: var(--color-primary);
+    }
+    .tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+    .row:focus { outline: none; }
+    .row:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; background: var(--tint-active); }
 
-  .rows {
-    list-style: none;
-    margin: 0.4rem 0 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.6rem;
-    padding: 0.55rem 0.7rem;
-    background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius);
-  }
-  .row.self {
-    border-color: var(--color-primary);
-  }
-  .row.inactive {
-    opacity: 0.55;
-  }
-  .row-main {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    min-width: 0;
-    flex: 1;
-  }
-  .name {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--color-text);
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .meta {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.75rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .row-actions {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    flex-shrink: 0;
-  }
+    .body {
+      padding: 0.85rem 1.1rem 1.1rem;
+      overflow-y: auto;
+    }
 
-  .badge {
-    background: var(--color-selected-bg, var(--color-overlay-bg));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 999px;
-    padding: 0.05rem 0.45rem;
-    font-size: 0.7rem;
-    color: var(--color-text-dim, var(--color-muted));
-    text-transform: lowercase;
-  }
-  .badge.owner { color: var(--color-primary); border-color: currentColor; }
-  .badge.state-active { color: var(--color-info, var(--color-secondary)); border-color: currentColor; }
-  .badge.state-revoked { color: var(--color-error); border-color: currentColor; }
-  .badge.state-expired { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
-  .badge.state-exhausted { color: var(--color-text-dim, var(--color-muted)); }
-  .badge.state-used { color: var(--color-text-dim, var(--color-muted)); }
-  .badge.state-severed { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
-  .badge.fed-home { color: var(--color-primary); border-color: currentColor; }
-  .badge.fed-follower { color: var(--color-secondary); border-color: currentColor; }
+    .rows {
+      list-style: none;
+      margin: 0.4rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.6rem;
+      padding: 0.55rem 0.7rem;
+      background: var(--color-overlay-bg, var(--color-background));
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius);
+    }
+    .row.self {
+      border-color: var(--color-primary);
+    }
+    .row.inactive {
+      opacity: 0.55;
+    }
+    .row-main {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      min-width: 0;
+      flex: 1;
+    }
+    .name {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--color-text);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .meta {
+      color: var(--color-text-dim, var(--color-muted));
+      font-size: 0.75rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .row-actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-shrink: 0;
+    }
 
-  .select, .input {
-    padding: 0.32rem 0.5rem;
-    background: var(--color-background);
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 4px;
-    color: var(--color-text);
-    font-family: inherit;
-    font-size: 0.85rem;
-    outline: none;
-  }
-  .select:focus, .input:focus { border-color: var(--color-secondary); }
+    .badge {
+      background: var(--color-selected-bg, var(--color-overlay-bg));
+      border: 1px solid var(--color-border, var(--color-muted));
+      border-radius: 999px;
+      padding: 0.05rem 0.45rem;
+      font-size: 0.7rem;
+      color: var(--color-text-dim, var(--color-muted));
+      text-transform: lowercase;
+    }
+    .badge.owner { color: var(--color-primary); border-color: currentColor; }
+    .badge.state-active { color: var(--color-info, var(--color-secondary)); border-color: currentColor; }
+    .badge.state-revoked { color: var(--color-error); border-color: currentColor; }
+    .badge.state-expired { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
+    .badge.state-exhausted { color: var(--color-text-dim, var(--color-muted)); }
+    .badge.state-used { color: var(--color-text-dim, var(--color-muted)); }
+    .badge.state-severed { color: var(--color-warning, var(--color-secondary)); border-color: currentColor; }
+    .badge.fed-home { color: var(--color-primary); border-color: currentColor; }
+    .badge.fed-follower { color: var(--color-secondary); border-color: currentColor; }
 
-  .role-readonly {
-    font-size: 0.82rem;
-    color: var(--color-text-dim, var(--color-muted));
-  }
+    .select, .input {
+      padding: 0.32rem 0.5rem;
+      background: var(--color-background);
+      border: 1px solid var(--color-border, var(--color-muted));
+      border-radius: 4px;
+      color: var(--color-text);
+      font-family: inherit;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    .select:focus, .input:focus { border-color: var(--color-secondary); }
 
-  .invite-bar {
-    display: flex;
-    gap: 0.6rem;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-bottom: 0.7rem;
-  }
-  .created-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    flex: 1;
-    min-width: 240px;
-  }
-  .created-row .select { flex: 1; }
+    .role-readonly {
+      font-size: 0.82rem;
+      color: var(--color-text-dim, var(--color-muted));
+    }
 
-  .create-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    padding: 0.7rem;
-    margin-bottom: 0.8rem;
-    background: var(--color-overlay-bg, var(--color-background));
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-  }
-  .form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1.5fr;
-    gap: 0.5rem;
-  }
-  .form-row.two {
-    grid-template-columns: 2fr 1fr;
-  }
-  .fed-section {
-    margin-top: 1.1rem;
-  }
-  .token-once {
-    margin-bottom: 0.7rem;
-  }
-  .form-row label, .create-form > label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    font-size: 0.78rem;
-    color: var(--color-text-dim, var(--color-muted));
-  }
-  .form-actions {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
+    .invite-bar {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 0.7rem;
+    }
+    .created-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex: 1;
+      min-width: 240px;
+    }
+    .created-row .select { flex: 1; }
 
-  .primary {
-    padding: 0.4rem 0.85rem;
-    background: var(--color-primary);
-    border: none;
-    border-radius: 4px;
-    color: var(--color-background);
-    font-family: inherit;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .primary.danger { background: var(--color-error); }
-  .primary:disabled { opacity: 0.5; cursor: progress; }
+    .create-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding: 0.7rem;
+      margin-bottom: 0.8rem;
+      background: var(--color-overlay-bg, var(--color-background));
+      border: 1px solid var(--color-border, var(--color-muted));
+      border-radius: 6px;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.5fr;
+      gap: 0.5rem;
+    }
+    .form-row.two {
+      grid-template-columns: 2fr 1fr;
+    }
+    .fed-section {
+      margin-top: 1.1rem;
+    }
+    .token-once {
+      margin-bottom: 0.7rem;
+    }
+    .form-row label, .create-form > label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      font-size: 0.78rem;
+      color: var(--color-text-dim, var(--color-muted));
+    }
+    .form-actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
 
-  .link {
-    background: transparent;
-    border: none;
-    color: var(--color-secondary);
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    padding: 0 0.3rem;
-  }
-  .link:hover { text-decoration: underline; }
-  .link.danger { color: var(--color-error); }
-  .link:disabled { opacity: 0.5; cursor: not-allowed; }
+    .primary {
+      padding: 0.4rem 0.85rem;
+      background: var(--color-primary);
+      border: none;
+      border-radius: 4px;
+      color: var(--color-background);
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .primary.danger { background: var(--color-error); }
+    .primary:disabled { opacity: 0.5; cursor: progress; }
 
-  .hint {
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.8rem;
-    margin: 0;
-  }
+    .link {
+      background: transparent;
+      border: none;
+      color: var(--color-secondary);
+      font-family: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      padding: 0 0.3rem;
+    }
+    .link:hover { text-decoration: underline; }
+    .link.danger { color: var(--color-error); }
+    .link:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  .owner-zone {
-    margin-top: 1rem;
-    padding: 0.7rem;
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .owner-zone h3, .body h3 {
-    margin: 0;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--color-text);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .body > h3 { margin: 0.2rem 0 0.5rem; }
-  .owner-zone .error { padding: 0; text-align: left; }
+    .hint {
+      color: var(--color-text-dim, var(--color-muted));
+      font-size: 0.8rem;
+      margin: 0;
+    }
 
-  .provenance { margin-bottom: 0.9rem; }
+    .owner-zone {
+      margin-top: 1rem;
+      padding: 0.7rem;
+      border: 1px solid var(--color-border, var(--color-muted));
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .owner-zone h3, .body h3 {
+      margin: 0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--color-text);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .body > h3 { margin: 0.2rem 0 0.5rem; }
+    .owner-zone .error { padding: 0; text-align: left; }
 
-  .success {
-    margin-top: 0.2rem;
-    padding: 0.55rem 0.7rem;
-    border: 1px solid var(--color-info, var(--color-secondary));
-    border-radius: 6px;
-    color: var(--color-info, var(--color-secondary));
-    font-size: 0.85rem;
-  }
-  .placeholder, .error {
-    padding: 1.1rem;
-    text-align: center;
-    color: var(--color-text-dim, var(--color-muted));
-    font-size: 0.85rem;
-  }
-  .error { color: var(--color-error); }
+    .provenance { margin-bottom: 0.9rem; }
 
-  .caps {
-    border: 1px solid var(--color-border, var(--color-muted));
-    border-radius: 6px;
-    padding: 0.55rem 0.7rem;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 0.6rem 1rem;
+    .success {
+      margin-top: 0.2rem;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--color-info, var(--color-secondary));
+      border-radius: 6px;
+      color: var(--color-info, var(--color-secondary));
+      font-size: 0.85rem;
+    }
+    .placeholder, .error {
+      padding: 1.1rem;
+      text-align: center;
+      color: var(--color-text-dim, var(--color-muted));
+      font-size: 0.85rem;
+    }
+    .error { color: var(--color-error); }
+
+    .caps {
+      border: 1px solid var(--color-border, var(--color-muted));
+      border-radius: 6px;
+      padding: 0.55rem 0.7rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.6rem 1rem;
+    }
+    .caps legend {
+      font-size: 0.78rem;
+      color: var(--color-text-dim, var(--color-muted));
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0 0.3rem;
+    }
+    .cap-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .cap-group-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--color-text-dim, var(--color-muted));
+      margin-bottom: 0.1rem;
+    }
+    .cap-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      color: var(--color-text);
+      cursor: pointer;
+    }
+    .cap-label { white-space: nowrap; }
+    .cap-id {
+      font-size: 0.7rem;
+      color: var(--color-text-dim, var(--color-muted));
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .fed-mode, .fed-publish { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 8px 12px; display: grid; gap: 6px; margin: 0; }
+    .fed-mode legend, .fed-publish legend { font-size: var(--text-xs); color: var(--color-text-dim); padding: 0 4px; }
+    label.inline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .consent-text { margin: 4px 0 0; padding: 8px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--color-warning) 12%, transparent); font-size: var(--text-xs); line-height: 1.5; }
   }
-  .caps legend {
-    font-size: 0.78rem;
-    color: var(--color-text-dim, var(--color-muted));
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 0 0.3rem;
-  }
-  .cap-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  .cap-group-title {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-text-dim, var(--color-muted));
-    margin-bottom: 0.1rem;
-  }
-  .cap-row {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85rem;
-    color: var(--color-text);
-    cursor: pointer;
-  }
-  .cap-label { white-space: nowrap; }
-  .cap-id {
-    font-size: 0.7rem;
-    color: var(--color-text-dim, var(--color-muted));
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .fed-mode, .fed-publish { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 8px 12px; display: grid; gap: 6px; margin: 0; }
-  .fed-mode legend, .fed-publish legend { font-size: var(--text-xs); color: var(--color-text-dim); padding: 0 4px; }
-  label.inline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .consent-text { margin: 4px 0 0; padding: 8px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--color-warning) 12%, transparent); font-size: var(--text-xs); line-height: 1.5; }
 </style>
